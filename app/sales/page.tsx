@@ -444,7 +444,7 @@ export default function SalesPage() {
                             )}
 
                             <Link
-                              href="/messages"
+                              href={`/messages?orderId=${sale.id}`}
                               className="rounded-full border border-zinc-800 px-5 py-2 text-sm text-zinc-300 hover:border-zinc-600 hover:text-white"
                             >
                               Message Buyer

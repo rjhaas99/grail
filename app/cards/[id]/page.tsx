@@ -353,7 +353,7 @@ if (listingData.seller_id) {
 
                 <button
                   type="button"
-                  onClick={() => goProtected("/messages")}
+                  onClick={() => goProtected(`/messages?listingId=${listing.id}`)}
                   className="mt-3 w-full rounded-full border border-zinc-800 px-7 py-4 font-semibold text-zinc-300 hover:border-zinc-600"
                 >
                   Message Seller
