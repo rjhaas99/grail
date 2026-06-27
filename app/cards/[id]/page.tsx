@@ -1,7 +1,26 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Header from "../../components/Header";
+import { supabase } from "../../../lib/supabase";
 
 export default function CardPage() {
+  const router = useRouter();
+
+  async function goProtected(path: string) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      router.push(`/login?redirectTo=${encodeURIComponent(path)}`);
+      return;
+    }
+
+    router.push(path);
+  }
+
   return (
     <main className="min-h-screen bg-black text-white">
       <Header />
@@ -73,11 +92,18 @@ export default function CardPage() {
               </p>
 
               <div className="flex gap-2">
-                <button className="rounded-full border border-zinc-800 px-4 py-2 text-sm hover:border-zinc-600">
+                <button
+                  type="button"
+                  onClick={() => goProtected("/cards/jordan-rookie")}
+                  className="rounded-full border border-zinc-800 px-4 py-2 text-sm hover:border-zinc-600"
+                >
                   ♡ Watch
                 </button>
 
-                <button className="rounded-full border border-zinc-800 px-4 py-2 text-sm hover:border-zinc-600">
+                <button
+                  type="button"
+                  className="rounded-full border border-zinc-800 px-4 py-2 text-sm hover:border-zinc-600"
+                >
                   Share
                 </button>
               </div>
@@ -103,22 +129,28 @@ export default function CardPage() {
               </div>
 
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                <Link
-  href="/checkout"
-  className="rounded-full bg-white px-7 py-4 text-center font-semibold text-black hover:bg-zinc-200"
->
-  Buy Now
-</Link>
+                <button
+                  type="button"
+                  onClick={() => goProtected("/checkout")}
+                  className="rounded-full bg-white px-7 py-4 text-center font-semibold text-black hover:bg-zinc-200"
+                >
+                  Buy Now
+                </button>
 
-                <Link
-  href="/make-offer"
-  className="rounded-full border border-zinc-800 px-7 py-4 text-center font-semibold hover:border-zinc-600"
->
-  Make Offer
-</Link>
+                <button
+                  type="button"
+                  onClick={() => goProtected("/make-offer")}
+                  className="rounded-full border border-zinc-800 px-7 py-4 text-center font-semibold hover:border-zinc-600"
+                >
+                  Make Offer
+                </button>
               </div>
 
-              <button className="mt-3 w-full rounded-full border border-zinc-800 px-7 py-4 font-semibold text-zinc-300 hover:border-zinc-600">
+              <button
+                type="button"
+                onClick={() => goProtected("/messages")}
+                className="mt-3 w-full rounded-full border border-zinc-800 px-7 py-4 font-semibold text-zinc-300 hover:border-zinc-600"
+              >
                 Message Seller
               </button>
             </div>
@@ -170,7 +202,10 @@ export default function CardPage() {
                 </div>
               </div>
 
-              <button className="mt-5 w-full rounded-full border border-zinc-800 px-6 py-3 text-sm font-semibold hover:border-zinc-600">
+              <button
+                type="button"
+                className="mt-5 w-full rounded-full border border-zinc-800 px-6 py-3 text-sm font-semibold hover:border-zinc-600"
+              >
                 View Seller Profile
               </button>
             </div>
