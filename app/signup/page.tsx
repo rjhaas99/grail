@@ -135,17 +135,18 @@ export default function SignupPage() {
         return;
       }
 
-      const { data, error } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password,
-        options: {
-          data: {
-            full_name: fullName.trim(),
-            username: cleanUsername,
-            birthdate,
-          },
-        },
-      });
+      const { error } = await supabase.auth.signUp({
+  email: cleanEmail,
+  password,
+  options: {
+    emailRedirectTo: `${window.location.origin}/login`,
+    data: {
+      full_name: fullName.trim(),
+      username: cleanUsername,
+      birthdate,
+    },
+  },
+});
 
       if (error) throw error;
 
