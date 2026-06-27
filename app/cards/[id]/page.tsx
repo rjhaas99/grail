@@ -344,7 +344,7 @@ if (listingData.seller_id) {
 
                   <button
                     type="button"
-                    onClick={() => goProtected("/make-offer")}
+                    onClick={() => goProtected(`/make-offer?listingId=${listing.id}`)}
                     className="rounded-full border border-zinc-800 px-7 py-4 text-center font-semibold hover:border-zinc-600"
                   >
                     Make Offer
