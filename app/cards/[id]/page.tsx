@@ -336,7 +336,7 @@ if (listingData.seller_id) {
                 <div className="mt-6 grid gap-3 sm:grid-cols-2">
                   <button
                     type="button"
-                    onClick={() => goProtected("/checkout")}
+                    onClick={() => goProtected(`/checkout?listingId=${listing.id}`)}
                     className="rounded-full bg-white px-7 py-4 text-center font-semibold text-black hover:bg-zinc-200"
                   >
                     Buy Now
