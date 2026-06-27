@@ -126,7 +126,10 @@ export default function SellerDashboardPage() {
     });
   }
 
-  const activeListings = listings.filter((listing) => listing.status === "active");
+  const activeListings = listings.filter(
+    (listing) => listing.status === "active"
+  );
+
   const soldListings = listings.filter((listing) => listing.status === "sold");
 
   const grossSales = orders.reduce(
@@ -142,7 +145,9 @@ export default function SellerDashboardPage() {
   const estimatedSellerPayout = grossSales;
 
   const pendingOrders = orders.filter((order) => order.status === "pending");
-  const completedOrders = orders.filter((order) => order.status === "completed");
+  const completedOrders = orders.filter(
+    (order) => order.status === "completed"
+  );
 
   return (
     <RequireAuth>
@@ -161,7 +166,8 @@ export default function SellerDashboardPage() {
               </h1>
 
               <p className="mt-4 max-w-2xl text-zinc-400">
-                Track listings, sold cards, revenue, pending orders, and seller activity.
+                Track listings, sold cards, revenue, pending orders, and seller
+                activity.
               </p>
             </div>
 
@@ -171,6 +177,13 @@ export default function SellerDashboardPage() {
                 className="rounded-full bg-white px-6 py-3 text-sm font-semibold text-black hover:bg-zinc-200"
               >
                 List New Card
+              </Link>
+
+              <Link
+                href="/sales"
+                className="rounded-full border border-zinc-800 px-6 py-3 text-sm font-semibold text-zinc-300 hover:border-zinc-600 hover:text-white"
+              >
+                View Sales
               </Link>
 
               <Link
@@ -265,10 +278,10 @@ export default function SellerDashboardPage() {
                     <h2 className="text-2xl font-semibold">Recent Sales</h2>
 
                     <Link
-                      href="/orders"
+                      href="/sales"
                       className="text-sm text-zinc-400 hover:text-white"
                     >
-                      View all
+                      View sales
                     </Link>
                   </div>
 
@@ -388,13 +401,16 @@ export default function SellerDashboardPage() {
                 <h2 className="text-2xl font-semibold">Seller Notes</h2>
 
                 <p className="mt-3 max-w-3xl text-sm leading-7 text-zinc-500">
-                  This dashboard is now connected to real Supabase orders and listings.
-                  Payouts are estimated for now because Stripe/payment processing is not connected yet.
+                  This dashboard is connected to real Supabase orders and
+                  listings. Payouts are estimated for now because
+                  Stripe/payment processing is not connected yet.
                 </p>
 
                 <div className="mt-6 grid gap-4 md:grid-cols-3">
                   <div className="rounded-2xl bg-black p-5">
-                    <p className="text-sm text-zinc-500">Buyer Fees Collected</p>
+                    <p className="text-sm text-zinc-500">
+                      Buyer Fees Collected
+                    </p>
                     <p className="mt-2 text-2xl font-semibold">
                       {formatPrice(buyerFeesCollected)}
                     </p>
@@ -407,7 +423,9 @@ export default function SellerDashboardPage() {
 
                   <div className="rounded-2xl bg-black p-5">
                     <p className="text-sm text-zinc-500">Payment Processor</p>
-                    <p className="mt-2 text-2xl font-semibold">Not connected</p>
+                    <p className="mt-2 text-2xl font-semibold">
+                      Not connected
+                    </p>
                   </div>
                 </div>
               </div>
