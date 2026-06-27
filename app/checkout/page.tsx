@@ -108,30 +108,14 @@ export default function CheckoutPage() {
         return;
       }
 
-      const cardPrice = listing.price;
-      const buyerFee = Math.round(cardPrice * 0.03 * 100) / 100;
-      const shippingAmount = 12;
-      const totalAmount = cardPrice + buyerFee + shippingAmount;
+      const { error: purchaseError } = await supabase.rpc(
+        "create_buy_now_order",
+        {
+          p_listing_id: listing.id,
+        }
+      );
 
-      const { error: orderError } = await supabase.from("orders").insert({
-        listing_id: listing.id,
-        buyer_id: user.id,
-        seller_id: listing.seller_id,
-        card_price: cardPrice,
-        buyer_fee: buyerFee,
-        shipping_amount: shippingAmount,
-        total_amount: totalAmount,
-        status: "pending",
-      });
-
-      if (orderError) throw orderError;
-
-      const { error: listingError } = await supabase
-        .from("listings")
-        .update({ status: "sold" })
-        .eq("id", listing.id);
-
-      if (listingError) throw listingError;
+      if (purchaseError) throw purchaseError;
 
       setMessage("Purchase created successfully.");
       router.push("/orders");
