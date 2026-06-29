@@ -36,7 +36,28 @@ type CreatedListing = {
   id: string;
 };
 
+type ListingDraft = {
+  id: string;
+  title: string;
+  category: string;
+  subject: string;
+  year: string;
+  brand: string;
+  cardNumber: string;
+  cardType: CardType;
+  grader: string;
+  grade: string;
+  condition: string;
+  askingPrice: string;
+  minimumOffer: string;
+  marketValue: string;
+  imagePreview: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 const storageBucket = "card-images";
+const draftStorageKey = "grail-listing-drafts";
 
 const photoTypes: PhotoType[] = [
   { label: "Front", imageType: "front" },
@@ -137,6 +158,33 @@ function getErrorMessage(error: unknown) {
   return String(error);
 }
 
+function readDrafts() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const storedDrafts = window.localStorage.getItem(draftStorageKey);
+    return storedDrafts ? (JSON.parse(storedDrafts) as ListingDraft[]) : [];
+  } catch (error) {
+    console.error("Draft read error:", error);
+    return [];
+  }
+}
+
+function writeDrafts(drafts: ListingDraft[]) {
+  window.localStorage.setItem(draftStorageKey, JSON.stringify(drafts));
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 function ActionCircles() {
   return (
     <div className="action-circles" aria-hidden="true">
@@ -153,6 +201,9 @@ export default function ListCardPage() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [status, setStatus] = useState<PublishStatus | null>(null);
   const [publishedListingId, setPublishedListingId] = useState("");
+  const [editingDraftId, setEditingDraftId] = useState("");
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [draftImagePreview, setDraftImagePreview] = useState("");
   const [category, setCategory] = useState("Sports");
   const [cardType, setCardType] = useState<CardType>("Graded");
   const [title, setTitle] = useState("Crimson Court Rookie");
@@ -199,12 +250,48 @@ export default function ListCardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const draftId = new URLSearchParams(window.location.search).get("draft");
+
+    if (!draftId) {
+      return;
+    }
+
+    const preloadTimer = window.setTimeout(() => {
+      const draft = readDrafts().find((item) => item.id === draftId);
+
+      if (!draft) {
+        setStatus({ type: "error", text: "Draft was not found." });
+        return;
+      }
+
+      setEditingDraftId(draft.id);
+      setTitle(draft.title);
+      setCategory(draft.category);
+      setSubject(draft.subject);
+      setYear(draft.year);
+      setSetName(draft.brand);
+      setCardNumber(draft.cardNumber);
+      setCardType(draft.cardType);
+      setGrader(draft.grader);
+      setGrade(draft.grade);
+      setCondition(draft.condition);
+      setAskingPrice(draft.askingPrice);
+      setMinimumOffer(draft.minimumOffer);
+      setMarketValue(draft.marketValue);
+      setDraftImagePreview(draft.imagePreview);
+      setStatus({ type: "info", text: "Draft loaded." });
+    }, 0);
+
+    return () => window.clearTimeout(preloadTimer);
+  }, []);
+
   const gradeOptions = grader === "PSA" ? psaGrades : standardGrades;
   const subtitle =
     cardType === "Graded"
       ? `${category}: ${grader} ${grade}`
       : `${category}: ${condition}`;
-  const frontPreview = selectedPhotos.front?.previewUrl;
+  const frontPreview = selectedPhotos.front?.previewUrl || draftImagePreview;
   const badges = useMemo(() => {
     const next = [cardType === "Graded" ? "Graded" : "Raw"];
     if (Number(marketValue) >= 1200) next.push("Grail");
@@ -243,8 +330,77 @@ export default function ListCardPage() {
         },
       };
     });
+    if (imageType === "front") {
+      setDraftImagePreview("");
+    }
     setPublishedListingId("");
     setStatus({ type: "info", text: "Photo selected." });
+  }
+
+  async function buildDraftPayload() {
+    const now = new Date().toISOString();
+    const existingDraft = editingDraftId
+      ? readDrafts().find((draft) => draft.id === editingDraftId)
+      : undefined;
+    const imagePreview = selectedPhotos.front?.file
+      ? await fileToDataUrl(selectedPhotos.front.file)
+      : draftImagePreview;
+    const draftTitle =
+      buildTitle() ||
+      [year, setName, subject, cardType === "Graded" ? `${grader} ${grade}` : condition]
+        .filter(Boolean)
+        .join(" ") ||
+      "Untitled Draft";
+
+    return {
+      id: existingDraft?.id || `draft-${Date.now()}`,
+      title: draftTitle,
+      category,
+      subject,
+      year,
+      brand: setName,
+      cardNumber,
+      cardType,
+      grader,
+      grade,
+      condition,
+      askingPrice,
+      minimumOffer,
+      marketValue,
+      imagePreview,
+      createdAt: existingDraft?.createdAt || now,
+      updatedAt: now,
+    } satisfies ListingDraft;
+  }
+
+  async function saveDraft() {
+    try {
+      const draft = await buildDraftPayload();
+      const otherDrafts = readDrafts().filter((item) => item.id !== draft.id);
+      writeDrafts([draft, ...otherDrafts]);
+      setEditingDraftId(draft.id);
+      setDraftImagePreview(draft.imagePreview);
+      setPublishedListingId("");
+      setStatus({ type: "success", text: "Draft saved." });
+    } catch (error) {
+      console.error("Draft save error:", error);
+      setStatus({ type: "error", text: "Draft could not be saved." });
+    }
+  }
+
+  function previewListing() {
+    const validationError = validateForm();
+
+    if (validationError) {
+      setStatus({
+        type: "error",
+        text: "Add the required listing details before previewing.",
+      });
+      return;
+    }
+
+    setStatus(null);
+    setIsPreviewOpen(true);
   }
 
   function validateForm() {
@@ -493,6 +649,8 @@ export default function ListCardPage() {
     setMinimumOffer("");
     setMarketValue("");
     setSelectedPhotos({});
+    setDraftImagePreview("");
+    setEditingDraftId("");
     setPublishedListingId("");
     setStatus({ type: "info", text: "Ready to list another card." });
   }
@@ -802,15 +960,13 @@ export default function ListCardPage() {
             <section className="panel action-panel">
               <button
                 type="button"
-                onClick={() => setStatus({ type: "info", text: "Draft saved." })}
+                onClick={saveDraft}
               >
                 Save Draft
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  setStatus({ type: "info", text: "Preview updated." })
-                }
+                onClick={previewListing}
               >
                 Preview Listing
               </button>
@@ -830,13 +986,92 @@ export default function ListCardPage() {
           </aside>
         </section>
       </div>
+
+      {isPreviewOpen ? (
+        <div className="preview-modal-backdrop" role="presentation">
+          <section
+            className="panel preview-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Listing preview"
+          >
+            <div className="preview-modal-header">
+              <div>
+                <span>Preview Listing</span>
+                <h2>{previewTitle}</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close preview"
+                onClick={() => setIsPreviewOpen(false)}
+              >
+                x
+              </button>
+            </div>
+
+            <div className="preview-modal-body">
+              <div className="art-shell">
+                {frontPreview ? (
+                  <Image
+                    className="front-preview"
+                    src={frontPreview}
+                    alt="Front card preview"
+                    width={180}
+                    height={230}
+                    unoptimized
+                  />
+                ) : (
+                  <div className={`mock-card ${cardType === "Raw" ? "raw-card" : ""}`}>
+                    {cardType === "Graded" ? (
+                      <div className="mock-label">
+                        <span>
+                          {grader} {grade}
+                        </span>
+                        <span>{category}</span>
+                      </div>
+                    ) : null}
+                    <div className="mock-art">
+                      <span />
+                      <strong />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="preview-modal-copy">
+                <div className="badge-row">
+                  {badges.map((badge) => (
+                    <span key={badge}>{badge}</span>
+                  ))}
+                </div>
+                <h3>{previewTitle}</h3>
+                <p>{subtitle}</p>
+                <div className="preview-detail-grid">
+                  <span>Asking Price <strong>{formatCurrency(askingPrice)}</strong></span>
+                  <span>Minimum Offer <strong>{minimumOffer ? formatCurrency(minimumOffer) : "Not set"}</strong></span>
+                  <span>Card Type <strong>{cardType}</strong></span>
+                  <span>
+                    {cardType === "Graded" ? "Grade" : "Condition"}{" "}
+                    <strong>{cardType === "Graded" ? `${grader} ${grade}` : condition}</strong>
+                  </span>
+                  <span>Seller <strong>{session?.user.email || "GRAIL Seller"}</strong></span>
+                </div>
+                <ActionCircles />
+                <button type="button" className="view-card" disabled>
+                  View Card Preview
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
 
 const pageStyles = `
   .list-page { min-height: 100vh; background: radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%), linear-gradient(180deg, #000 0%, #030304 58%, #000 100%); color: #fafafa; font-family: Arial, Helvetica, sans-serif; }
-  .page-shell { width: 1240px; margin: 0 auto; padding: 8px 0 38px; }
+  .page-shell { width: min(1240px, calc(100vw - 32px)); margin: 0 auto; padding: 8px 0 38px; }
   .panel { border: 1px solid #1d1d22; border-radius: 12px; background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)), rgba(5,5,6,0.92); box-shadow: 0 18px 44px rgba(0,0,0,0.28); }
   .page-heading { margin-top: 18px; }
   .page-heading span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -851,6 +1086,18 @@ const pageStyles = `
   .status-message.error { border-color: rgba(248,113,113,0.28); background: rgba(248,113,113,0.08); color: #fca5a5; }
   .publish-success { margin-top: 16px; padding: 14px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .publish-success div { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .preview-modal-backdrop { position: fixed; inset: 0; z-index: 1200; background: rgba(0,0,0,0.72); display: flex; align-items: center; justify-content: center; padding: 22px; backdrop-filter: blur(12px); }
+  .preview-modal { width: min(760px, 100%); padding: 18px; box-sizing: border-box; }
+  .preview-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+  .preview-modal-header span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+  .preview-modal-header h2 { margin: 6px 0 0; color: #fff; font-size: 24px; line-height: 29px; font-weight: 900; }
+  .preview-modal-header button { width: 34px; height: 34px; border-radius: 999px; padding: 0; }
+  .preview-modal-body { margin-top: 16px; display: grid; grid-template-columns: 230px 1fr; gap: 18px; align-items: start; }
+  .preview-modal-copy h3 { margin: 13px 0 0; color: #fff; font-size: 24px; line-height: 29px; font-weight: 900; }
+  .preview-modal-copy p { color: #a1a1aa; font-size: 13px; line-height: 18px; font-weight: 800; }
+  .preview-detail-grid { margin-top: 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .preview-detail-grid span { border: 1px solid #202026; border-radius: 10px; background: rgba(8,8,10,0.76); color: #85858f; padding: 10px; font-size: 11px; line-height: 15px; font-weight: 800; }
+  .preview-detail-grid strong { display: block; margin-top: 5px; color: #fff; font-size: 13px; line-height: 17px; font-weight: 900; }
   .list-layout { margin-top: 18px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
   .main-column, .preview-column { display: grid; gap: 14px; }
   .form-section, .preview-card, .action-panel { padding: 16px; }
@@ -891,5 +1138,5 @@ const pageStyles = `
   .message-icon::after { content: ""; position: absolute; width: 8px; height: 8px; border-left: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); bottom: 12px; }
   .view-card { margin-top: 14px; width: 100%; }
   .action-panel { display: grid; gap: 10px; }
-  @media (max-width: 1100px) { .page-shell { width: calc(100vw - 32px); } .list-layout, .field-grid, .field-grid.three, .upload-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success { align-items: flex-start; flex-direction: column; } }
+  @media (max-width: 1100px) { .page-shell { width: min(1240px, calc(100vw - 32px)); } .list-layout, .field-grid, .field-grid.three, .upload-grid, .preview-modal-body, .preview-detail-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success { align-items: flex-start; flex-direction: column; } }
 `;
