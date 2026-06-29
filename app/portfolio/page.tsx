@@ -65,7 +65,21 @@ type ListingDraft = {
   updatedAt: string;
 };
 
+type ListingStatusValue = "active" | "inactive";
+
+type PendingStatusAction = {
+  listing: SupabasePortfolioListing;
+  nextStatus: ListingStatusValue;
+};
+
+type NoteDraft = {
+  listingId: string;
+  title: string;
+  value: string;
+};
+
 const draftStorageKey = "grail-listing-drafts";
+const noteStorageKey = "grail-portfolio-notes";
 const realListingAccents = ["#334155", "#0f766e", "#1e3a8a", "#7c3aed", "#475569", "#8f1d2c"];
 
 const portfolioListingSelect = `
@@ -131,6 +145,24 @@ function readDrafts() {
     console.error("Portfolio draft read error:", error);
     return [];
   }
+}
+
+function readNotes() {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const storedNotes = window.localStorage.getItem(noteStorageKey);
+    return storedNotes ? (JSON.parse(storedNotes) as Record<string, string>) : {};
+  } catch (error) {
+    console.error("Portfolio note read error:", error);
+    return {};
+  }
+}
+
+function writeNotes(notes: Record<string, string>) {
+  window.localStorage.setItem(noteStorageKey, JSON.stringify(notes));
 }
 
 function formatCurrency(value: number) {
@@ -330,7 +362,12 @@ export default function PortfolioPage() {
   const [authLoaded, setAuthLoaded] = useState(false);
   const [realListings, setRealListings] = useState<SupabasePortfolioListing[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(false);
+  const [isUpdatingListing, setIsUpdatingListing] = useState(false);
   const [realDataError, setRealDataError] = useState("");
+  const [pendingStatusAction, setPendingStatusAction] =
+    useState<PendingStatusAction | null>(null);
+  const [listingNotes, setListingNotes] = useState<Record<string, string>>(() => readNotes());
+  const [noteDraft, setNoteDraft] = useState<NoteDraft | null>(null);
 
   const ownedCards = mockPortfolioCards.filter((card) => card.status === "Owned");
   const listedCards = mockPortfolioCards.filter((card) => card.status === "Listed");
@@ -476,6 +513,75 @@ export default function PortfolioPage() {
     setStatus("Draft deleted.");
   }
 
+  async function updateListingStatus(
+    listing: SupabasePortfolioListing,
+    nextStatus: ListingStatusValue,
+  ) {
+    if (!session?.user.id) {
+      setStatus("Sign in to manage your listings.");
+      return;
+    }
+
+    setIsUpdatingListing(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("listings")
+        .update({ status: nextStatus })
+        .eq("id", listing.id)
+        .eq("seller_id", session.user.id)
+        .select("id, status")
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data) {
+        setStatus("Listing not found or you do not have permission to update it.");
+        return;
+      }
+
+      setRealListings((currentListings) =>
+        currentListings.map((currentListing) =>
+          currentListing.id === listing.id
+            ? { ...currentListing, status: nextStatus }
+            : currentListing,
+        ),
+      );
+      setStatus(nextStatus === "active" ? "Listing relisted." : "Listing unlisted.");
+      setPendingStatusAction(null);
+    } catch (error) {
+      console.error("Portfolio listing status update error:", error);
+      setStatus("Listing status could not be updated. Please try again.");
+    } finally {
+      setIsUpdatingListing(false);
+    }
+  }
+
+  function openNoteModal(listingId: string, title: string) {
+    setNoteDraft({
+      listingId,
+      title,
+      value: listingNotes[listingId] || "",
+    });
+  }
+
+  function saveNote() {
+    if (!noteDraft) {
+      return;
+    }
+
+    const nextNotes = {
+      ...listingNotes,
+      [noteDraft.listingId]: noteDraft.value.trim(),
+    };
+    setListingNotes(nextNotes);
+    writeNotes(nextNotes);
+    setNoteDraft(null);
+    setStatus("Note saved.");
+  }
+
   function getDraftSubtitle(draft: ListingDraft) {
     return draft.cardType === "Graded"
       ? `${draft.category}: ${draft.grader} ${draft.grade}`
@@ -542,6 +648,8 @@ export default function PortfolioPage() {
     const value = getListingValue(listing);
     const costBasis = getListingCostBasis(listing);
     const gainLoss = costBasis && value ? value - costBasis : null;
+    const isActive = isActiveListing(listing);
+    const savedNote = listingNotes[listing.id];
 
     return (
       <article key={listing.id} className="collection-card">
@@ -562,13 +670,29 @@ export default function PortfolioPage() {
           </span>
           <span>Quantity <strong>{listing.quantity || 1}</strong></span>
         </div>
+        {savedNote ? <p className="saved-note">Note: {savedNote}</p> : null}
         <div className="card-actions">
           <Link href={`/cards/${listing.id}`}>View Details</Link>
-          <button type="button" onClick={() => setStatus("List for sale flow coming soon.")}>
-            List For Sale
-          </button>
+          {isActive ? (
+            <button
+              type="button"
+              onClick={() =>
+                setPendingStatusAction({ listing, nextStatus: "inactive" })
+              }
+            >
+              Unlist
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={isUpdatingListing}
+              onClick={() => updateListingStatus(listing, "active")}
+            >
+              Relist
+            </button>
+          )}
           <Link href={`/list?edit=${listing.id}`}>Edit Listing</Link>
-          <button type="button" onClick={() => setStatus("Note added mock-only.")}>
+          <button type="button" onClick={() => openNoteModal(listing.id, title)}>
             Add Note
           </button>
         </div>
@@ -577,6 +701,8 @@ export default function PortfolioPage() {
   }
 
   function renderRealListedRow(listing: SupabasePortfolioListing, index: number) {
+    const title = getListingTitle(listing);
+
     return (
       <article key={listing.id} className="list-row">
         <ListingArt
@@ -584,7 +710,7 @@ export default function PortfolioPage() {
           accent={realListingAccents[index % realListingAccents.length]}
         />
         <div>
-          <h3>{getListingTitle(listing)}</h3>
+          <h3>{title}</h3>
           <p>{getListingSubtitle(listing)}</p>
         </div>
         <strong>{formatOptionalCurrency(listing.price)}</strong>
@@ -593,7 +719,18 @@ export default function PortfolioPage() {
         <span>Active</span>
         <div className="row-actions">
           <Link href={`/list?edit=${listing.id}`}>Edit Listing</Link>
-          <button type="button" onClick={() => setStatus("Unlist mock-only.")}>Unlist</button>
+          <button
+            type="button"
+            disabled={isUpdatingListing}
+            onClick={() =>
+              setPendingStatusAction({ listing, nextStatus: "inactive" })
+            }
+          >
+            Unlist
+          </button>
+          <button type="button" onClick={() => openNoteModal(listing.id, title)}>
+            Add Note
+          </button>
           <Link href={`/cards/${listing.id}`}>View Listing</Link>
         </div>
       </article>
@@ -871,6 +1008,101 @@ export default function PortfolioPage() {
           </section>
         </div>
       ) : null}
+
+      {pendingStatusAction ? (
+        <div className="draft-modal-backdrop" role="presentation">
+          <section
+            className="panel draft-modal confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm unlist"
+          >
+            <div className="draft-modal-header">
+              <div>
+                <span>Listing Status</span>
+                <h2>Unlist this card?</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close unlist confirmation"
+                onClick={() => setPendingStatusAction(null)}
+              >
+                x
+              </button>
+            </div>
+            <p className="confirm-copy">
+              It will be removed from Browse but kept in your collection.
+            </p>
+            <div className="card-actions modal-actions">
+              <button
+                type="button"
+                onClick={() => setPendingStatusAction(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isUpdatingListing}
+                onClick={() =>
+                  updateListingStatus(
+                    pendingStatusAction.listing,
+                    pendingStatusAction.nextStatus,
+                  )
+                }
+              >
+                {isUpdatingListing ? "Unlisting..." : "Unlist Card"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {noteDraft ? (
+        <div className="draft-modal-backdrop" role="presentation">
+          <section
+            className="panel draft-modal confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add listing note"
+          >
+            <div className="draft-modal-header">
+              <div>
+                <span>Collection Note</span>
+                <h2>{noteDraft.title}</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close note editor"
+                onClick={() => setNoteDraft(null)}
+              >
+                x
+              </button>
+            </div>
+            <label className="note-field">
+              <span>Private note</span>
+              <textarea
+                value={noteDraft.value}
+                onChange={(event) =>
+                  setNoteDraft((currentDraft) =>
+                    currentDraft
+                      ? { ...currentDraft, value: event.target.value }
+                      : currentDraft,
+                  )
+                }
+                placeholder="Add a private note about this card..."
+              />
+            </label>
+            <div className="card-actions modal-actions">
+              <button type="button" onClick={() => setNoteDraft(null)}>
+                Cancel
+              </button>
+              <button type="button" onClick={saveNote}>
+                Save Note
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -917,6 +1149,7 @@ const pageStyles = `
   .value-grid strong { color: #fff; }
   .positive strong { color: #86efac; }
   .negative strong { color: #fb7185; }
+  .saved-note { border: 1px solid rgba(201,205,211,0.16); border-radius: 9px; background: rgba(201,205,211,0.055); padding: 9px; color: #d4d4d8 !important; }
   .card-actions, .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .list-panel { padding: 10px; display: grid; gap: 10px; }
   .list-row { border: 1px solid #202026; border-radius: 10px; background: rgba(8,8,10,0.76); padding: 12px; display: grid; grid-template-columns: 86px minmax(160px, 1fr) auto auto auto auto auto; gap: 12px; align-items: center; }
@@ -944,6 +1177,12 @@ const pageStyles = `
   .draft-modal-body { margin-top: 16px; display: grid; grid-template-columns: 230px 1fr; gap: 18px; align-items: start; }
   .draft-modal-body h3 { margin: 13px 0 0; color: #fff; font-size: 24px; line-height: 29px; font-weight: 900; }
   .modal-actions { margin-top: 14px; }
+  .confirm-modal { width: min(480px, 100%); }
+  .confirm-copy { margin: 14px 0 0; color: #a1a1aa; font-size: 13px; line-height: 19px; font-weight: 800; }
+  .note-field { margin-top: 16px; display: grid; gap: 8px; }
+  .note-field span { color: #C9CDD3; font-size: 12px; font-weight: 900; }
+  .note-field textarea { min-height: 120px; border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; padding: 12px; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px; font-weight: 800; outline: none; }
+  .note-field textarea:focus { border-color: rgba(231,222,208,0.55); box-shadow: 0 0 0 3px rgba(231,222,208,0.08); }
   @media (max-width: 1100px) { .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .portfolio-layout, .card-grid, .list-row, .draft-modal-body { grid-template-columns: 1fr; } .toolbar { display: grid; } }
   @media (max-width: 640px) { .stats-grid { grid-template-columns: 1fr; } .page-heading h1 { font-size: 34px; line-height: 38px; } }
 `;

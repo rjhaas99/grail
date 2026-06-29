@@ -27,6 +27,29 @@ type SelectedPhoto = {
   previewUrl: string;
 };
 
+type ExistingImageRow = {
+  image_url: string | null;
+  image_type: ImageType | null;
+};
+
+type ExistingListingRow = {
+  id: string;
+  seller_id: string | null;
+  title: string | null;
+  sport: string | null;
+  player: string | null;
+  year: string | null;
+  brand: string | null;
+  card_number: string | null;
+  card_type: string | null;
+  grader: string | null;
+  grade: string | null;
+  condition: string | null;
+  price: number | null;
+  status: string | null;
+  listing_images: ExistingImageRow[] | null;
+};
+
 type PublishStatus = {
   type: StatusType;
   text: string;
@@ -202,8 +225,13 @@ export default function ListCardPage() {
   const [status, setStatus] = useState<PublishStatus | null>(null);
   const [publishedListingId, setPublishedListingId] = useState("");
   const [editingDraftId, setEditingDraftId] = useState("");
+  const [editListingId, setEditListingId] = useState("");
+  const [isLoadingEditListing, setIsLoadingEditListing] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [draftImagePreview, setDraftImagePreview] = useState("");
+  const [existingImageUrls, setExistingImageUrls] = useState<
+    Partial<Record<ImageType, string>>
+  >({});
   const [category, setCategory] = useState("Sports");
   const [cardType, setCardType] = useState<CardType>("Graded");
   const [title, setTitle] = useState("Crimson Court Rookie");
@@ -253,7 +281,7 @@ export default function ListCardPage() {
   useEffect(() => {
     const draftId = new URLSearchParams(window.location.search).get("draft");
 
-    if (!draftId) {
+    if (!draftId || new URLSearchParams(window.location.search).get("edit")) {
       return;
     }
 
@@ -286,12 +314,142 @@ export default function ListCardPage() {
     return () => window.clearTimeout(preloadTimer);
   }, []);
 
+  useEffect(() => {
+    const listingId = new URLSearchParams(window.location.search).get("edit");
+
+    if (!listingId) {
+      return;
+    }
+
+    const editId = listingId;
+    let isMounted = true;
+
+    async function loadEditListing() {
+      await Promise.resolve();
+
+      if (!isMounted) {
+        return;
+      }
+
+      setEditListingId(editId);
+      setEditingDraftId("");
+
+      if (isCheckingAuth) {
+        return;
+      }
+
+      if (!session?.user.id) {
+        setStatus({
+          type: "error",
+          text: "Sign in to edit your listings.",
+        });
+        return;
+      }
+
+      setIsLoadingEditListing(true);
+
+      try {
+        const { data, error } = await supabase
+          .from("listings")
+          .select(
+            `
+              id,
+              seller_id,
+              title,
+              sport,
+              player,
+              year,
+              brand,
+              card_number,
+              card_type,
+              grader,
+              grade,
+              condition,
+              price,
+              status,
+              listing_images (
+                image_url,
+                image_type
+              )
+            `,
+          )
+          .eq("id", editId)
+          .eq("seller_id", session.user.id)
+          .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        if (!data) {
+          setStatus({
+            type: "error",
+            text: "Listing not found or you do not have permission to edit it.",
+          });
+          return;
+        }
+
+        const listing = data as ExistingListingRow;
+        const nextCardType: CardType =
+          listing.card_type?.toLowerCase() === "raw" ? "Raw" : "Graded";
+        const nextImageUrls = (listing.listing_images || []).reduce<
+          Partial<Record<ImageType, string>>
+        >((imageMap, image) => {
+          if (image.image_type && image.image_url) {
+            imageMap[image.image_type] = image.image_url;
+          }
+          return imageMap;
+        }, {});
+
+        setCategory(listing.sport || "Sports");
+        setCardType(nextCardType);
+        setTitle(listing.title || "");
+        setYear(listing.year || "");
+        setSetName(listing.brand || "");
+        setCardNumber(listing.card_number || "");
+        setSubject(listing.player || "");
+        setGrader(listing.grader || "PSA");
+        setGrade(listing.grade || "10");
+        setCondition(listing.condition || "Near Mint");
+        setAskingPrice(listing.price ? String(listing.price) : "");
+        setMinimumOffer("");
+        setMarketValue("");
+        setSelectedPhotos({});
+        setDraftImagePreview("");
+        setExistingImageUrls(nextImageUrls);
+        setPublishedListingId("");
+        setStatus({ type: "info", text: "Listing loaded for editing." });
+      } catch (error) {
+        console.error("Edit listing load error:", error);
+        setStatus({
+          type: "error",
+          text: "Listing not found or you do not have permission to edit it.",
+        });
+      } finally {
+        if (isMounted) {
+          setIsLoadingEditListing(false);
+        }
+      }
+    }
+
+    loadEditListing();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isCheckingAuth, session?.user.id]);
+
   const gradeOptions = grader === "PSA" ? psaGrades : standardGrades;
+  const isEditMode = Boolean(editListingId);
   const subtitle =
     cardType === "Graded"
       ? `${category}: ${grader} ${grade}`
       : `${category}: ${condition}`;
-  const frontPreview = selectedPhotos.front?.previewUrl || draftImagePreview;
+  const frontPreview =
+    selectedPhotos.front?.previewUrl ||
+    draftImagePreview ||
+    existingImageUrls.front ||
+    "";
   const badges = useMemo(() => {
     const next = [cardType === "Graded" ? "Graded" : "Raw"];
     if (Number(marketValue) >= 1200) next.push("Grail");
@@ -442,6 +600,22 @@ export default function ListCardPage() {
     return "";
   }
 
+  function buildListingFields() {
+    return {
+      title: buildTitle(),
+      sport: clean(category),
+      player: clean(subject),
+      year: clean(year),
+      brand: clean(setName),
+      card_number: clean(cardNumber),
+      card_type: cardType,
+      grader: cardType === "Graded" ? clean(grader) : null,
+      grade: cardType === "Graded" ? clean(grade) : null,
+      condition: cardType === "Raw" ? clean(condition) : null,
+      price: Number(askingPrice),
+    };
+  }
+
   async function uploadListingImages(listingId: string) {
     const imageRows: {
       listing_id: string;
@@ -544,6 +718,81 @@ export default function ListCardPage() {
     };
   }
 
+  async function saveListingChanges() {
+    setStatus(null);
+    setPublishedListingId("");
+
+    const {
+      data: { session: currentSession },
+    } = await supabase.auth.getSession();
+
+    if (!currentSession) {
+      setSession(null);
+      setStatus({ type: "error", text: "Sign in to edit your listings." });
+      return;
+    }
+
+    if (!editListingId) {
+      setStatus({ type: "error", text: "No listing is loaded for editing." });
+      return;
+    }
+
+    const validationError = validateForm();
+    if (validationError) {
+      setStatus({ type: "error", text: validationError });
+      return;
+    }
+
+    setIsPublishing(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("listings")
+        .update(buildListingFields())
+        .eq("id", editListingId)
+        .eq("seller_id", currentSession.user.id)
+        .select("id")
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data) {
+        setStatus({
+          type: "error",
+          text: "Listing not found or you do not have permission to edit it.",
+        });
+        return;
+      }
+
+      const imageResult = await uploadListingImages(editListingId);
+      setPublishedListingId(editListingId);
+
+      if (
+        imageResult.failedUploads.length > 0 ||
+        imageResult.hasImageInsertError ||
+        imageResult.hasPublicUrlError
+      ) {
+        setStatus({
+          type: "success",
+          text: "Listing updated, but one or more new images failed to upload.",
+        });
+        return;
+      }
+
+      setStatus({ type: "success", text: "Listing updated." });
+    } catch (error) {
+      console.error("Update listing error:", error);
+      setStatus({
+        type: "error",
+        text: "Listing could not be updated. Please try again.",
+      });
+    } finally {
+      setIsPublishing(false);
+    }
+  }
+
   async function publishListing() {
     setStatus(null);
     setPublishedListingId("");
@@ -567,24 +816,11 @@ export default function ListCardPage() {
     setIsPublishing(true);
 
     try {
-      const priceNumber = Number(askingPrice);
-      const listingTitle = buildTitle();
-
       const { data, error } = await supabase
         .from("listings")
         .insert({
           seller_id: currentSession.user.id,
-          title: listingTitle,
-          sport: clean(category),
-          player: clean(subject),
-          year: clean(year),
-          brand: clean(setName),
-          card_number: clean(cardNumber),
-          card_type: cardType,
-          grader: cardType === "Graded" ? clean(grader) : null,
-          grade: cardType === "Graded" ? clean(grade) : null,
-          condition: cardType === "Raw" ? clean(condition) : null,
-          price: priceNumber,
+          ...buildListingFields(),
           status: "active",
         })
         .select("id")
@@ -650,6 +886,7 @@ export default function ListCardPage() {
     setMarketValue("");
     setSelectedPhotos({});
     setDraftImagePreview("");
+    setExistingImageUrls({});
     setEditingDraftId("");
     setPublishedListingId("");
     setStatus({ type: "info", text: "Ready to list another card." });
@@ -663,10 +900,11 @@ export default function ListCardPage() {
 
         <section className="page-heading">
           <span>Seller Tools</span>
-          <h1>List a Card</h1>
+          <h1>{isEditMode ? "Edit Listing" : "List a Card"}</h1>
           <p>
-            Create a premium GRAIL listing for sports cards, TCG cards, slabs,
-            and raw cards.
+            {isEditMode
+              ? "Update your GRAIL listing details, price, and listing photos."
+              : "Create a premium GRAIL listing for sports cards, TCG cards, slabs, and raw cards."}
           </p>
         </section>
 
@@ -683,16 +921,21 @@ export default function ListCardPage() {
         {status ? (
           <p className={`status-message ${status.type}`}>{status.text}</p>
         ) : null}
+        {isLoadingEditListing ? (
+          <p className="status-message info">Loading listing for editing...</p>
+        ) : null}
 
         {publishedListingId ? (
           <section className="publish-success panel">
-            <strong>Listing published.</strong>
+            <strong>{isEditMode ? "Listing updated." : "Listing published."}</strong>
             <div>
               <Link href={`/cards/${publishedListingId}`}>View Listing</Link>
               <Link href="/browse">Browse Listings</Link>
-              <button type="button" onClick={resetForm}>
-                List Another Card
-              </button>
+              {!isEditMode ? (
+                <button type="button" onClick={resetForm}>
+                  List Another Card
+                </button>
+              ) : null}
             </div>
           </section>
         ) : null}
@@ -708,6 +951,7 @@ export default function ListCardPage() {
               <div className="upload-grid">
                 {photoTypes.map((type) => {
                   const photo = selectedPhotos[type.imageType];
+                  const existingImageUrl = existingImageUrls[type.imageType];
 
                   return (
                     <label key={type.imageType} className="upload-box">
@@ -721,10 +965,10 @@ export default function ListCardPage() {
                           )
                         }
                       />
-                      {photo ? (
+                      {photo || existingImageUrl ? (
                         <Image
                           className="upload-preview"
-                          src={photo.previewUrl}
+                          src={photo?.previewUrl || existingImageUrl || ""}
                           alt={`${type.label} preview`}
                           width={180}
                           height={120}
@@ -732,7 +976,7 @@ export default function ListCardPage() {
                         />
                       ) : null}
                       <strong>{type.label}</strong>
-                      <span>{photo ? photo.file.name : "Upload"}</span>
+                      <span>{photo ? photo.file.name : existingImageUrl ? "Current image" : "Upload"}</span>
                     </label>
                   );
                 })}
@@ -958,12 +1202,14 @@ export default function ListCardPage() {
             </section>
 
             <section className="panel action-panel">
-              <button
-                type="button"
-                onClick={saveDraft}
-              >
-                Save Draft
-              </button>
+              {!isEditMode ? (
+                <button
+                  type="button"
+                  onClick={saveDraft}
+                >
+                  Save Draft
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={previewListing}
@@ -973,10 +1219,16 @@ export default function ListCardPage() {
               <button
                 type="button"
                 className="primary"
-                disabled={!session || isCheckingAuth || isPublishing}
-                onClick={publishListing}
+                disabled={!session || isCheckingAuth || isPublishing || isLoadingEditListing}
+                onClick={isEditMode ? saveListingChanges : publishListing}
               >
-                {isPublishing ? "Publishing..." : "Publish Listing"}
+                {isPublishing
+                  ? isEditMode
+                    ? "Saving..."
+                    : "Publishing..."
+                  : isEditMode
+                    ? "Save Changes"
+                    : "Publish Listing"}
               </button>
               {!session && !isCheckingAuth ? (
                 <Link href="/login">Sign In to Publish</Link>
