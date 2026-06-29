@@ -1,14 +1,68 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import Image from "next/image";
+import { useEffect, useState } from "react";
+import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
 import {
+  type MockListing,
   getListingTag,
   mockFeaturedSellers as featuredSellers,
-  mockListings as listings,
+  mockListings,
   mockMarketData,
 } from "../lib/mockData";
+
+type BrowseListing = MockListing & {
+  imageUrl?: string | null;
+  source: "supabase" | "mock";
+};
+
+type ListingImageRow = {
+  image_url: string | null;
+  image_type: string | null;
+};
+
+type SupabaseListingRow = {
+  id: string;
+  seller_id: string | null;
+  title: string | null;
+  sport: string | null;
+  player: string | null;
+  year: string | null;
+  brand: string | null;
+  card_number: string | null;
+  card_type: string | null;
+  grader: string | null;
+  grade: string | null;
+  condition: string | null;
+  price: number | null;
+  status: string | null;
+  created_at: string | null;
+  listing_images: ListingImageRow[] | null;
+};
+
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  username: string | null;
+};
+
+const fallbackListings: BrowseListing[] = mockListings.map((listing) => ({
+  ...listing,
+  source: "mock",
+}));
+
+const realListingAccents = [
+  "#8f1d2c",
+  "#334155",
+  "#0f766e",
+  "#1e3a8a",
+  "#7c3aed",
+  "#475569",
+  "#047857",
+  "#1d4ed8",
+];
 
 const categoryFilters = [
   "Sports Cards",
@@ -90,16 +144,163 @@ const sellerLevels = [
   "Level 1 Seller",
 ];
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatListedDate(value: string | null) {
+  if (!value) {
+    return "Recently";
+  }
+
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function getImageUrl(listing: SupabaseListingRow) {
+  return (
+    listing.listing_images?.find((image) => image.image_type === "front")
+      ?.image_url ||
+    listing.listing_images?.[0]?.image_url ||
+    null
+  );
+}
+
+function getSellerSlug(profile: ProfileRow | undefined, sellerId: string | null) {
+  const username = profile?.username?.replace(/^@/, "").trim();
+
+  if (username) {
+    return encodeURIComponent(username);
+  }
+
+  return sellerId || "vault-runner";
+}
+
+function getCategory(listing: SupabaseListingRow) {
+  const source = `${listing.sport || ""} ${listing.card_type || ""}`.toLowerCase();
+
+  return source.includes("tcg") ? "TCG" : "Sports";
+}
+
+function getConditionDisplay(listing: SupabaseListingRow) {
+  if (listing.grader && listing.grade) {
+    return `${listing.grader} ${listing.grade}`;
+  }
+
+  const condition = listing.condition?.trim();
+
+  if (condition) {
+    return condition.toLowerCase().includes("raw")
+      ? condition
+      : `Raw ${condition}`;
+  }
+
+  return listing.card_type?.toLowerCase() === "graded" ? "Graded" : "Raw";
+}
+
+function mapSupabaseListing(
+  listing: SupabaseListingRow,
+  index: number,
+  totalCount: number,
+  profilesById: Map<string, ProfileRow>,
+): BrowseListing {
+  const profile = listing.seller_id
+    ? profilesById.get(listing.seller_id)
+    : undefined;
+  const category = getCategory(listing);
+  const condition = getConditionDisplay(listing);
+  const title =
+    listing.title ||
+    [listing.year, listing.brand, listing.player].filter(Boolean).join(" ") ||
+    "Untitled Card";
+  const price = Number(listing.price || 0);
+  const sellerName = profile?.full_name || profile?.username || "GRAIL Seller";
+  const sellerSlug = getSellerSlug(profile, listing.seller_id);
+  const isGraded = Boolean(listing.grader && listing.grade) ||
+    listing.card_type?.toLowerCase() === "graded";
+  const isRaw = !isGraded;
+  const accent = realListingAccents[index % realListingAccents.length];
+  const route = `/cards/${listing.id}`;
+
+  return {
+    id: listing.id,
+    route,
+    href: route,
+    title,
+    category,
+    conditionDisplay: condition,
+    condition,
+    subtitle: `${category}: ${condition}`,
+    meta: `${category}: ${condition}`,
+    sellerSlug,
+    sellerName,
+    seller: sellerName,
+    sellerLevel: "GRAIL Seller",
+    sellerRoute: `/collections/${sellerSlug}`,
+    sellerHref: `/collections/${sellerSlug}`,
+    price,
+    priceDisplay: price ? formatCurrency(price) : "Price not listed",
+    askingPrice: price,
+    marketValue: 0,
+    minimumOffer: price ? Math.round(price * 0.85) : 0,
+    minOffer: price ? Math.round(price * 0.85) : 0,
+    watchCount: 0,
+    views: 0,
+    viewCount: 0,
+    listedOrder: totalCount - index,
+    listedDate: formatListedDate(listing.created_at),
+    tags: [isGraded ? "Graded" : "Raw"],
+    tag: isGraded ? "Graded" : "Raw",
+    isGraded,
+    isRaw,
+    isHot: false,
+    isGrail: false,
+    accent,
+    artworkTone: "live listing",
+    imageUrl: getImageUrl(listing),
+    source: "supabase",
+    cardDetailRoute: route,
+    sellerCollectionRoute: `/collections/${sellerSlug}`,
+    details: {
+      year: listing.year || "Unknown",
+      set: listing.brand || "Unknown",
+      cardNumber: listing.card_number || "Unknown",
+      subject: listing.player || "Unknown",
+      grader: listing.grader || "Raw",
+      grade: listing.grade || listing.condition || "Raw",
+      certNumber: "Not available",
+      notes: "Live Supabase listing.",
+    },
+    priceHistory: {
+      thirtyDay: "N/A",
+      ninetyDay: "N/A",
+      lastSale: 0,
+      averageSale: 0,
+      chartPoints: [],
+    },
+    overview: "Live Supabase listing.",
+  };
+}
+
 function CardArtwork({
   accent,
   category,
   condition,
   title,
+  imageUrl,
 }: {
   accent: string;
   category: string;
   condition: string;
   title: string;
+  imageUrl?: string | null;
 }) {
   const isRaw =
     condition.toLowerCase().includes("raw") ||
@@ -108,6 +309,16 @@ function CardArtwork({
 
   return (
     <div className="art-shell">
+      {imageUrl ? (
+        <Image
+          className="uploaded-card-image"
+          src={imageUrl}
+          alt={title}
+          width={160}
+          height={210}
+          unoptimized
+        />
+      ) : (
       <div className={`mock-card ${isRaw ? "raw-card" : "slab-card"}`}>
         {!isRaw ? (
           <div className="mock-label">
@@ -135,6 +346,7 @@ function CardArtwork({
           <span />
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -285,11 +497,132 @@ function MarketIndexChart() {
 }
 
 export default function BrowsePage() {
+  const [listings, setListings] = useState<BrowseListing[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fallbackNote, setFallbackNote] = useState("");
   const [openGraders, setOpenGraders] = useState<string[]>(["PSA"]);
   const [isSellerLevelsOpen, setIsSellerLevelsOpen] = useState(false);
   const [sortMode, setSortMode] = useState<"newest" | "hot">("newest");
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "compact">("grid");
+  const [offerListing, setOfferListing] = useState<BrowseListing | null>(null);
+  const [offerAmount, setOfferAmount] = useState("");
+  const [offerMessage, setOfferMessage] = useState("");
+  const [offerError, setOfferError] = useState("");
+  const [sentOfferAmount, setSentOfferAmount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadListings() {
+      setIsLoading(true);
+      setFallbackNote("");
+
+      try {
+        const { data, error } = await supabase
+          .from("listings")
+          .select(
+            `
+              id,
+              seller_id,
+              title,
+              sport,
+              player,
+              year,
+              brand,
+              card_number,
+              card_type,
+              grader,
+              grade,
+              condition,
+              price,
+              status,
+              created_at,
+              listing_images (
+                image_url,
+                image_type
+              )
+            `,
+          )
+          .eq("status", "active")
+          .order("created_at", { ascending: false });
+
+        if (error) {
+          throw error;
+        }
+
+        const rows = (data || []) as SupabaseListingRow[];
+
+        if (rows.length === 0) {
+          if (!isMounted) {
+            return;
+          }
+
+          setListings(fallbackListings);
+          setFallbackNote("No live listings yet. Showing demo listings.");
+          return;
+        }
+
+        const sellerIds = Array.from(
+          new Set(
+            rows
+              .map((listing) => listing.seller_id)
+              .filter((sellerId): sellerId is string => Boolean(sellerId)),
+          ),
+        );
+        const profilesById = new Map<string, ProfileRow>();
+
+        if (sellerIds.length > 0) {
+          const { data: profileData, error: profileError } = await supabase
+            .from("profiles")
+            .select("id, full_name, username")
+            .in("id", sellerIds);
+
+          if (profileError) {
+            console.error("Browse profile fetch error:", profileError);
+          } else {
+            ((profileData || []) as ProfileRow[]).forEach((profile) => {
+              profilesById.set(profile.id, profile);
+            });
+          }
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        const liveListings = rows.map((listing, index) =>
+          mapSupabaseListing(listing, index, rows.length, profilesById),
+        );
+        const liveIds = new Set(liveListings.map((listing) => listing.id));
+        const demoListings = fallbackListings.filter(
+          (listing) => !liveIds.has(listing.id),
+        );
+
+        setListings([...liveListings, ...demoListings]);
+        setFallbackNote("Showing live + demo listings.");
+      } catch (error) {
+        console.error("Browse listings error:", error);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setListings(fallbackListings);
+        setFallbackNote("Showing demo listings.");
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadListings();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const visibleListings = listings
@@ -328,13 +661,15 @@ export default function BrowsePage() {
       return second.listedOrder - first.listedOrder;
     });
 
-  const resultLabel = normalizedQuery
-    ? `${visibleListings.length} ${
-        visibleListings.length === 1 ? "result" : "results"
-      }`
-    : sortMode === "hot"
-      ? `${visibleListings.length} hot cards`
-    : "248 listings";
+  const resultLabel = isLoading
+    ? "Loading listings..."
+    : normalizedQuery
+      ? `${visibleListings.length} ${
+          visibleListings.length === 1 ? "result" : "results"
+        }`
+      : sortMode === "hot"
+        ? `${visibleListings.length} hot cards`
+        : `${listings.length} listings`;
 
   function toggleGrader(grader: string) {
     setOpenGraders((current) =>
@@ -342,6 +677,39 @@ export default function BrowsePage() {
         ? current.filter((item) => item !== grader)
         : [...current, grader],
     );
+  }
+
+  function openOfferModal(listing: BrowseListing) {
+    setOfferListing(listing);
+    setOfferAmount("");
+    setOfferMessage("");
+    setOfferError("");
+    setSentOfferAmount(null);
+  }
+
+  function closeOfferModal() {
+    setOfferListing(null);
+    setOfferAmount("");
+    setOfferMessage("");
+    setOfferError("");
+    setSentOfferAmount(null);
+  }
+
+  function submitOffer() {
+    if (!offerListing) {
+      return;
+    }
+
+    const amount = Number(offerAmount);
+
+    if (!amount || amount < offerListing.minOffer) {
+      setOfferError("Offer is below the seller's minimum.");
+      setSentOfferAmount(null);
+      return;
+    }
+
+    setOfferError("");
+    setSentOfferAmount(amount);
   }
 
   return (
@@ -516,6 +884,167 @@ export default function BrowsePage() {
               linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.004)),
               rgba(5, 5, 6, 0.92);
             box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+          }
+
+          .offer-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(0,0,0,0.72);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 22px;
+            backdrop-filter: blur(12px);
+          }
+
+          .offer-modal {
+            width: min(520px, 100%);
+            padding: 18px;
+            border-radius: 14px;
+            box-sizing: border-box;
+          }
+
+          .offer-modal-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 18px;
+          }
+
+          .offer-modal-header span,
+          .offer-summary-item span,
+          .offer-field span {
+            color: #C9CDD3;
+            font-size: 11px;
+            line-height: 14px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+          }
+
+          .offer-modal-header h2 {
+            margin: 6px 0 0;
+            color: #fff;
+            font-size: 22px;
+            line-height: 27px;
+            font-weight: 900;
+          }
+
+          .offer-modal-header button {
+            width: 34px;
+            height: 34px;
+            border: 1px solid rgba(231,222,208,0.24);
+            border-radius: 999px;
+            background: rgba(8,8,10,0.82);
+            color: #E7DED0;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 900;
+          }
+
+          .offer-summary-grid {
+            margin-top: 16px;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+          }
+
+          .offer-summary-item {
+            min-height: 68px;
+            border: 1px solid #202026;
+            border-radius: 10px;
+            background: rgba(8,8,10,0.76);
+            padding: 10px;
+            box-sizing: border-box;
+          }
+
+          .offer-summary-item strong {
+            display: block;
+            margin-top: 8px;
+            color: #fff;
+            font-size: 13px;
+            line-height: 17px;
+            font-weight: 900;
+          }
+
+          .offer-field {
+            margin-top: 14px;
+            display: grid;
+            gap: 7px;
+          }
+
+          .offer-field input,
+          .offer-field textarea {
+            width: 100%;
+            border: 1px solid #24242a;
+            border-radius: 10px;
+            background: #08080a;
+            color: #fff;
+            padding: 12px;
+            box-sizing: border-box;
+            font: inherit;
+            font-size: 13px;
+            font-weight: 800;
+            outline: none;
+          }
+
+          .offer-field textarea {
+            min-height: 92px;
+            resize: vertical;
+          }
+
+          .offer-helper,
+          .offer-error,
+          .offer-confirmation p {
+            margin: 10px 0 0;
+            color: #a1a1aa;
+            font-size: 12px;
+            line-height: 17px;
+            font-weight: 800;
+          }
+
+          .offer-error {
+            color: #fb7185;
+          }
+
+          .offer-confirmation {
+            margin-top: 14px;
+            border: 1px solid rgba(52,211,153,0.24);
+            border-radius: 10px;
+            background: rgba(52,211,153,0.07);
+            padding: 12px;
+          }
+
+          .offer-confirmation strong {
+            color: #86efac;
+            font-size: 13px;
+            line-height: 17px;
+            font-weight: 900;
+          }
+
+          .offer-modal-actions {
+            margin-top: 16px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+          }
+
+          .offer-modal-actions button {
+            min-height: 40px;
+            border: 1px solid rgba(231,222,208,0.28);
+            border-radius: 10px;
+            background: rgba(231,222,208,0.055);
+            color: #fff;
+            font: inherit;
+            font-size: 12px;
+            font-weight: 900;
+            cursor: pointer;
+          }
+
+          .offer-modal-actions .submit-offer {
+            background: #E7DED0;
+            color: #111;
           }
 
           .filters {
@@ -737,6 +1266,14 @@ export default function BrowsePage() {
           .listing-grid.compact-view .art-shell {
             width: 92px;
             height: 132px;
+          }
+
+          .uploaded-card-image {
+            max-width: calc(100% - 18px);
+            max-height: calc(100% - 18px);
+            border-radius: 8px;
+            object-fit: contain;
+            box-shadow: 0 18px 34px rgba(0,0,0,0.62);
           }
 
           .mock-card {
@@ -1083,6 +1620,7 @@ export default function BrowsePage() {
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            text-decoration: none;
             padding: 0;
             font-weight: 900;
             cursor: pointer;
@@ -1235,6 +1773,18 @@ export default function BrowsePage() {
             color: #a1a1aa;
             font-size: 13px;
             line-height: 18px;
+            font-weight: 800;
+          }
+
+          .fallback-note {
+            margin: 0 0 10px;
+            border: 1px solid rgba(201,205,211,0.16);
+            border-radius: 9px;
+            background: rgba(8,8,10,0.72);
+            color: #C9CDD3;
+            padding: 9px 10px;
+            font-size: 11px;
+            line-height: 15px;
             font-weight: 800;
           }
 
@@ -1557,7 +2107,13 @@ export default function BrowsePage() {
           </aside>
 
           <section aria-label="Card listings">
-            {visibleListings.length > 0 ? (
+            {fallbackNote ? <p className="fallback-note">{fallbackNote}</p> : null}
+
+            {isLoading ? (
+              <div className="panel empty-state">
+                <h2>Loading listings...</h2>
+              </div>
+            ) : visibleListings.length > 0 ? (
               <div className={`listing-grid ${viewMode}-view`}>
                 {visibleListings.map((listing) => {
                   const tag = getListingTag(listing);
@@ -1579,6 +2135,7 @@ export default function BrowsePage() {
                           accent={listing.accent}
                           category={listing.category}
                           condition={listing.condition}
+                          imageUrl={listing.imageUrl}
                           title={listing.title}
                         />
                       </Link>
@@ -1604,8 +2161,8 @@ export default function BrowsePage() {
                         </strong>
                         <div className="listing-actions">
                           <div className="action-circles">
-                            <button
-                              type="button"
+                            <Link
+                              href={`/checkout/${listing.id}`}
                               className="action-button"
                               aria-label={`Buy ${listing.title}`}
                               title="Buy"
@@ -1614,9 +2171,9 @@ export default function BrowsePage() {
                                 className="action-icon cart-icon"
                                 aria-hidden="true"
                               />
-                            </button>
-                            <button
-                              type="button"
+                            </Link>
+                            <Link
+                              href="/messages"
                               className="action-button"
                               aria-label={`Message ${listing.seller}`}
                               title="Message"
@@ -1625,12 +2182,13 @@ export default function BrowsePage() {
                                 className="action-icon message-icon"
                                 aria-hidden="true"
                               />
-                            </button>
+                            </Link>
                             <button
                               type="button"
                               className="action-button"
                               aria-label={`Make offer on ${listing.title}`}
                               title="Make Offer"
+                              onClick={() => openOfferModal(listing)}
                             >
                               <span className="action-icon" aria-hidden="true">
                                 $
@@ -1719,6 +2277,96 @@ export default function BrowsePage() {
           </aside>
         </section>
       </div>
+
+      {offerListing ? (
+        <div className="offer-modal-backdrop" role="presentation">
+          <section
+            className="offer-modal panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Make offer"
+          >
+            <div className="offer-modal-header">
+              <div>
+                <span>Make Offer</span>
+                <h2>{offerListing.title}</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close offer modal"
+                onClick={closeOfferModal}
+              >
+                x
+              </button>
+            </div>
+
+            <div className="offer-summary-grid">
+              <div className="offer-summary-item">
+                <span>Asking Price</span>
+                <strong>{offerListing.priceDisplay}</strong>
+              </div>
+              <div className="offer-summary-item">
+                <span>Market Value</span>
+                <strong>
+                  {offerListing.marketValue > 0
+                    ? formatCurrency(offerListing.marketValue)
+                    : "Market data pending"}
+                </strong>
+              </div>
+              <div className="offer-summary-item">
+                <span>Minimum Offer</span>
+                <strong>{formatCurrency(offerListing.minOffer)}</strong>
+              </div>
+            </div>
+
+            <label className="offer-field">
+              <span>Your offer</span>
+              <input
+                type="number"
+                min="0"
+                value={offerAmount}
+                onChange={(event) => setOfferAmount(event.target.value)}
+                placeholder="Enter offer amount"
+              />
+            </label>
+
+            <label className="offer-field">
+              <span>Add a message to seller</span>
+              <textarea
+                value={offerMessage}
+                onChange={(event) => setOfferMessage(event.target.value)}
+                placeholder="Optional message"
+              />
+            </label>
+
+            <p className="offer-helper">
+              Offers below the seller&apos;s minimum may not be accepted.
+            </p>
+
+            {offerError ? <p className="offer-error">{offerError}</p> : null}
+
+            {sentOfferAmount ? (
+              <div className="offer-confirmation">
+                <strong>Offer sent to seller.</strong>
+                <p>Offer amount: {formatCurrency(sentOfferAmount)}</p>
+                <p>Status: Pending.</p>
+                <p>Seller has 24 hours to respond.</p>
+              </div>
+            ) : null}
+
+            {!sentOfferAmount ? (
+              <div className="offer-modal-actions">
+                <button type="button" className="submit-offer" onClick={submitOffer}>
+                  Submit Offer
+                </button>
+                <button type="button" onClick={closeOfferModal}>
+                  Cancel
+                </button>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

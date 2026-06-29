@@ -2,9 +2,44 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
 import { getMockListingById } from "../../lib/mockData";
+
+type SupabaseCheckoutListing = {
+  id: string;
+  seller_id: string | null;
+  title: string | null;
+  sport: string | null;
+  player: string | null;
+  year: string | null;
+  brand: string | null;
+  card_number: string | null;
+  card_type: string | null;
+  grader: string | null;
+  grade: string | null;
+  condition: string | null;
+  price: number | null;
+};
+
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  username: string | null;
+};
+
+type CheckoutCard = {
+  id: string;
+  title: string;
+  category: string;
+  condition: string;
+  seller: string;
+  sellerHref: string;
+  price: number;
+  marketValue: number;
+  accent: string;
+};
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -12,6 +47,46 @@ function formatCurrency(value: number) {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function buildListingTitle(listing: SupabaseCheckoutListing) {
+  return (
+    listing.title ||
+    [listing.year, listing.brand, listing.player, listing.card_number]
+      .filter(Boolean)
+      .join(" ") ||
+    `Listing ${listing.id}`
+  );
+}
+
+function getCategory(listing: SupabaseCheckoutListing) {
+  const source = `${listing.sport || ""} ${listing.card_type || ""}`.toLowerCase();
+
+  return source.includes("tcg") ? "TCG" : "Sports";
+}
+
+function getCondition(listing: SupabaseCheckoutListing) {
+  if (listing.grader && listing.grade) {
+    return `${listing.grader} ${listing.grade}`;
+  }
+
+  if (listing.condition) {
+    return listing.condition.toLowerCase().includes("raw")
+      ? listing.condition
+      : `Raw ${listing.condition}`;
+  }
+
+  return listing.card_type?.toLowerCase() === "graded" ? "Graded" : "Raw";
+}
+
+function getSellerHref(profile: ProfileRow | null, sellerId: string | null) {
+  const username = profile?.username?.replace(/^@/, "").trim();
+
+  if (username) {
+    return `/collections/${encodeURIComponent(username)}`;
+  }
+
+  return `/collections/${sellerId || "vault-runner"}`;
 }
 
 function CardArtwork({ accent }: { accent: string }) {
@@ -42,24 +117,103 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 export default function CheckoutPage() {
   const params = useParams();
   const id = String(params.id || "");
-  const card = getMockListingById(id);
+  const mockCard = getMockListingById(id);
+  const [realCard, setRealCard] = useState<CheckoutCard | null>(null);
+  const fallbackCard: CheckoutCard = {
+    id,
+    title: `Listing ${id || "live"}`,
+    category: "Live Listing",
+    condition: "Supabase listing",
+    seller: "GRAIL Seller",
+    sellerHref: "/collections/vault-runner",
+    price: 0,
+    marketValue: 0,
+    accent: "#334155",
+  };
+  const card = mockCard ?? realCard ?? fallbackCard;
+  const isLiveFallback = !mockCard;
   const [isPlaced, setIsPlaced] = useState(false);
 
-  if (!card) {
-    return (
-      <main className="checkout-page">
-        <style>{pageStyles}</style>
-        <div className="checkout-shell">
-          <Header />
-          <section className="not-found panel">
-            <p>Checkout unavailable</p>
-            <h1>This mock card could not be found.</h1>
-            <Link href="/browse">Return to Browse</Link>
-          </section>
-        </div>
-      </main>
-    );
-  }
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadCheckoutListing() {
+      if (mockCard || !id) {
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from("listings")
+          .select(
+            `
+              id,
+              seller_id,
+              title,
+              sport,
+              player,
+              year,
+              brand,
+              card_number,
+              card_type,
+              grader,
+              grade,
+              condition,
+              price
+            `,
+          )
+          .eq("id", id)
+          .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        if (!data) {
+          return;
+        }
+
+        const listing = data as SupabaseCheckoutListing;
+        let profile: ProfileRow | null = null;
+
+        if (listing.seller_id) {
+          const { data: profileData, error: profileError } = await supabase
+            .from("profiles")
+            .select("id, full_name, username")
+            .eq("id", listing.seller_id)
+            .maybeSingle();
+
+          if (profileError) {
+            console.error("Checkout profile fetch error:", profileError);
+          } else {
+            profile = profileData as ProfileRow | null;
+          }
+        }
+
+        if (isMounted) {
+          setRealCard({
+            id: listing.id,
+            title: buildListingTitle(listing),
+            category: getCategory(listing),
+            condition: getCondition(listing),
+            seller: profile?.full_name || profile?.username || "GRAIL Seller",
+            sellerHref: getSellerHref(profile, listing.seller_id),
+            price: Number(listing.price || 0),
+            marketValue: 0,
+            accent: "#334155",
+          });
+        }
+      } catch (error) {
+        console.error("Checkout listing fetch error:", error);
+      }
+    }
+
+    loadCheckoutListing();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [id, mockCard]);
 
   const platformFee = Math.round(card.price * 0.035);
   const shipping = 14;
@@ -75,7 +229,7 @@ export default function CheckoutPage() {
         <section className="page-heading">
           <div>
             <span>Checkout</span>
-            <h1>Checkout</h1>
+            <h1>Checkout for &quot;{card.title}&quot;</h1>
             <p>Review your card purchase before placing your order.</p>
           </div>
           <Link href={`/cards/${card.id}`}>Back to Card</Link>
@@ -97,6 +251,12 @@ export default function CheckoutPage() {
                   <SummaryRow label="Asking Price" value={formatCurrency(card.price)} />
                   <SummaryRow label="Market Value" value={formatCurrency(card.marketValue)} />
                 </div>
+                {isLiveFallback ? (
+                  <p className="live-fallback-note">
+                    Live listing checkout mock. Full checkout data will be
+                    connected later.
+                  </p>
+                ) : null}
                 <Link className="text-link" href={`/cards/${card.id}`}>
                   View Card
                 </Link>

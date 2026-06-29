@@ -1,16 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
 import {
   type MockListing,
   getMockListingById,
   getMockSellerBySlug,
 } from "../../lib/mockData";
-
-type MockCard = MockListing;
 
 const photoViews = [
   "Front",
@@ -21,6 +21,54 @@ const photoViews = [
   "Edges",
 ] as const;
 
+type PhotoView = (typeof photoViews)[number];
+type MockCard = MockListing & {
+  imageUrls?: Partial<Record<PhotoView, string>>;
+};
+
+type ListingImageRow = {
+  image_url: string | null;
+  image_type: string | null;
+};
+
+type SupabaseListingRow = {
+  id: string;
+  seller_id: string | null;
+  title: string | null;
+  sport: string | null;
+  player: string | null;
+  year: string | null;
+  brand: string | null;
+  card_number: string | null;
+  card_type: string | null;
+  grader: string | null;
+  grade: string | null;
+  condition: string | null;
+  price: number | null;
+  status: string | null;
+  created_at: string | null;
+  listing_images: ListingImageRow[] | null;
+};
+
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  username: string | null;
+};
+
+type DetailSeller = {
+  name: string;
+  level: string;
+  completedSales: number;
+  responseTime: string;
+  shipSpeed: string;
+  rating: string;
+  rewardsBadge: string;
+  route: string;
+};
+
+const realListingAccent = "#334155";
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -29,7 +77,175 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function formatListedDate(value: string | null) {
+  if (!value) {
+    return "Recently";
+  }
+
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function getCategory(listing: SupabaseListingRow) {
+  const source = `${listing.sport || ""} ${listing.card_type || ""}`.toLowerCase();
+
+  return source.includes("tcg") ? "TCG" : "Sports";
+}
+
+function getConditionDisplay(listing: SupabaseListingRow) {
+  if (listing.grader && listing.grade) {
+    return `${listing.grader} ${listing.grade}`;
+  }
+
+  const condition = listing.condition?.trim();
+
+  if (condition) {
+    return condition.toLowerCase().includes("raw")
+      ? condition
+      : `Raw ${condition}`;
+  }
+
+  return listing.card_type?.toLowerCase() === "graded" ? "Graded" : "Raw";
+}
+
+function getSellerSlug(profile: ProfileRow | null, sellerId: string | null) {
+  const username = profile?.username?.replace(/^@/, "").trim();
+
+  if (username) {
+    return encodeURIComponent(username);
+  }
+
+  return sellerId || "vault-runner";
+}
+
+function getPhotoView(imageType: string | null): PhotoView {
+  const normalized = (imageType || "").toLowerCase().replace(/_/g, "-");
+
+  if (normalized.includes("back")) return "Back";
+  if (normalized.includes("top")) return "Top Corners";
+  if (normalized.includes("bottom")) return "Bottom Corners";
+  if (normalized.includes("surface")) return "Surface";
+  if (normalized.includes("edge")) return "Edges";
+
+  return "Front";
+}
+
+function getImageUrls(images: ListingImageRow[] | null) {
+  const imageUrls: Partial<Record<PhotoView, string>> = {};
+
+  (images || []).forEach((image) => {
+    if (!image.image_url) {
+      return;
+    }
+
+    const view = getPhotoView(image.image_type);
+    imageUrls[view] = image.image_url;
+  });
+
+  if (!imageUrls.Front && images?.[0]?.image_url) {
+    imageUrls.Front = images[0].image_url;
+  }
+
+  return imageUrls;
+}
+
+function mapSupabaseCard(
+  listing: SupabaseListingRow,
+  profile: ProfileRow | null,
+): { card: MockCard; seller: DetailSeller } {
+  const category = getCategory(listing);
+  const condition = getConditionDisplay(listing);
+  const price = Number(listing.price || 0);
+  const sellerSlug = getSellerSlug(profile, listing.seller_id);
+  const sellerName = profile?.full_name || profile?.username || "GRAIL Seller";
+  const isGraded = Boolean(listing.grader && listing.grade) ||
+    listing.card_type?.toLowerCase() === "graded";
+  const tag = isGraded ? "Graded" : "Raw";
+  const route = `/cards/${listing.id}`;
+  const title =
+    listing.title ||
+    [listing.year, listing.brand, listing.player].filter(Boolean).join(" ") ||
+    "Untitled Card";
+
+  return {
+    seller: {
+      name: sellerName,
+      level: "GRAIL Seller",
+      completedSales: 0,
+      responseTime: "Same day",
+      shipSpeed: "2 business days",
+      rating: "New seller",
+      rewardsBadge: "Seller",
+      route: `/collections/${sellerSlug}`,
+    },
+    card: {
+      id: listing.id,
+      route,
+      href: route,
+      title,
+      category,
+      conditionDisplay: condition,
+      condition,
+      subtitle: `${category}: ${condition}`,
+      meta: `${category}: ${condition}`,
+      sellerSlug,
+      sellerName,
+      seller: sellerName,
+      sellerLevel: "GRAIL Seller",
+      sellerRoute: `/collections/${sellerSlug}`,
+      sellerHref: `/collections/${sellerSlug}`,
+      price,
+      priceDisplay: price ? formatCurrency(price) : "Price not listed",
+      askingPrice: price,
+      marketValue: 0,
+      minimumOffer: price ? Math.round(price * 0.85) : 0,
+      minOffer: price ? Math.round(price * 0.85) : 0,
+      watchCount: 0,
+      views: 0,
+      viewCount: 0,
+      listedOrder: 0,
+      listedDate: formatListedDate(listing.created_at),
+      tags: [tag],
+      tag,
+      isGraded,
+      isRaw: !isGraded,
+      isHot: false,
+      isGrail: false,
+      accent: realListingAccent,
+      artworkTone: "live listing",
+      imageUrls: getImageUrls(listing.listing_images),
+      cardDetailRoute: route,
+      sellerCollectionRoute: `/collections/${sellerSlug}`,
+      details: {
+        year: listing.year || "Unknown",
+        set: listing.brand || "Unknown",
+        cardNumber: listing.card_number || "Unknown",
+        subject: listing.player || "Unknown",
+        grader: listing.grader || "Raw",
+        grade: listing.grade || listing.condition || "Raw",
+        certNumber: "Not available",
+        notes: "Live Supabase listing.",
+      },
+      priceHistory: {
+        thirtyDay: "N/A",
+        ninetyDay: "N/A",
+        lastSale: 0,
+        averageSale: 0,
+        chartPoints: [],
+      },
+      overview: "Live Supabase listing from GRAIL Browse.",
+    },
+  };
+}
+
 function getMarketDifference(card: MockCard) {
+  if (card.marketValue <= 0) {
+    return "Market data pending";
+  }
+
   const difference = card.askingPrice - card.marketValue;
   const percent = Math.round((Math.abs(difference) / card.marketValue) * 100);
 
@@ -55,11 +271,24 @@ function CardArtwork({
   const isBottomCorners = view === "Bottom Corners";
   const isSurface = view === "Surface";
   const isEdges = view === "Edges";
+  const imageUrl =
+    card.imageUrls?.[view] ||
+    (view !== "Front" ? card.imageUrls?.Front : undefined);
   const displayRank =
     view === "Front" || view === "Back" ? card.tag : "Inspect";
 
   return (
     <div className="card-stage">
+      {imageUrl ? (
+        <Image
+          className="real-card-image"
+          src={imageUrl}
+          alt={`${card.title} ${view}`}
+          width={320}
+          height={460}
+          unoptimized
+        />
+      ) : (
       <div className={`large-card ${isRaw ? "raw-card" : "slab-card"}`}>
         {!isRaw ? (
           <div className="slab-label">
@@ -105,6 +334,7 @@ function CardArtwork({
           <span />
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -146,15 +376,115 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 export default function CardDetailPage() {
   const params = useParams();
   const cardId = String(params.id || "");
-  const card = getMockListingById(cardId);
+  const mockCard = getMockListingById(cardId) as MockCard | undefined;
+  const [realCard, setRealCard] = useState<MockCard | null>(null);
+  const [realSeller, setRealSeller] = useState<DetailSeller | null>(null);
+  const [isLoadingRealCard, setIsLoadingRealCard] = useState(!mockCard);
   const [selectedPhoto, setSelectedPhoto] =
-    useState<(typeof photoViews)[number]>("Front");
+    useState<PhotoView>("Front");
   const [isWatching, setIsWatching] = useState(false);
   const [isOfferOpen, setIsOfferOpen] = useState(false);
   const [offerAmount, setOfferAmount] = useState("");
   const [offerMessage, setOfferMessage] = useState("");
   const [offerError, setOfferError] = useState("");
   const [sentOfferAmount, setSentOfferAmount] = useState<number | null>(null);
+  const card = mockCard ?? realCard;
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadRealCard() {
+      if (mockCard || !cardId) {
+        setIsLoadingRealCard(false);
+        return;
+      }
+
+      setIsLoadingRealCard(true);
+
+      try {
+        const { data, error } = await supabase
+          .from("listings")
+          .select(
+            `
+              id,
+              seller_id,
+              title,
+              sport,
+              player,
+              year,
+              brand,
+              card_number,
+              card_type,
+              grader,
+              grade,
+              condition,
+              price,
+              status,
+              created_at,
+              listing_images (
+                image_url,
+                image_type
+              )
+            `,
+          )
+          .eq("id", cardId)
+          .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        if (!data) {
+          if (isMounted) {
+            setRealCard(null);
+            setRealSeller(null);
+          }
+          return;
+        }
+
+        const listing = data as SupabaseListingRow;
+        let profile: ProfileRow | null = null;
+
+        if (listing.seller_id) {
+          const { data: profileData, error: profileError } = await supabase
+            .from("profiles")
+            .select("id, full_name, username")
+            .eq("id", listing.seller_id)
+            .maybeSingle();
+
+          if (profileError) {
+            console.error("Card detail profile fetch error:", profileError);
+          } else {
+            profile = profileData as ProfileRow | null;
+          }
+        }
+
+        const mapped = mapSupabaseCard(listing, profile);
+
+        if (isMounted) {
+          setRealCard(mapped.card);
+          setRealSeller(mapped.seller);
+        }
+      } catch (error) {
+        console.error("Card detail listing fetch error:", error);
+
+        if (isMounted) {
+          setRealCard(null);
+          setRealSeller(null);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingRealCard(false);
+        }
+      }
+    }
+
+    loadRealCard();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [cardId, mockCard]);
 
   function goToPhoto(direction: "previous" | "next") {
     setSelectedPhoto((current) => {
@@ -185,6 +515,21 @@ export default function CardDetailPage() {
     setSentOfferAmount(amount);
   }
 
+  if (isLoadingRealCard) {
+    return (
+      <main className="detail-page">
+        <style>{pageStyles}</style>
+        <div className="detail-shell">
+          <Header />
+          <section className="not-found panel">
+            <p>Loading card...</p>
+            <h1>Loading listing details.</h1>
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   if (!card) {
     return (
       <main className="detail-page">
@@ -201,7 +546,19 @@ export default function CardDetailPage() {
     );
   }
 
-  const seller = getMockSellerBySlug(card.sellerSlug);
+  const mockSeller = mockCard ? getMockSellerBySlug(card.sellerSlug) : null;
+  const seller = mockSeller
+    ? {
+        name: mockSeller.name,
+        level: mockSeller.level,
+        completedSales: mockSeller.completedSales,
+        responseTime: mockSeller.responseTime,
+        shipSpeed: mockSeller.shipSpeed,
+        rating: mockSeller.rating,
+        rewardsBadge: mockSeller.rewardsBadge,
+        route: mockSeller.route,
+      }
+    : realSeller;
   const marketDifference = getMarketDifference(card);
 
   return (
@@ -471,14 +828,16 @@ export default function CardDetailPage() {
               </div>
             ) : null}
 
-            <div className="offer-modal-actions">
-              <button type="button" className="buy-button" onClick={submitOffer}>
-                Submit Offer
-              </button>
-              <button type="button" onClick={() => setIsOfferOpen(false)}>
-                Cancel
-              </button>
-            </div>
+            {!sentOfferAmount ? (
+              <div className="offer-modal-actions">
+                <button type="button" className="buy-button" onClick={submitOffer}>
+                  Submit Offer
+                </button>
+                <button type="button" onClick={() => setIsOfferOpen(false)}>
+                  Cancel
+                </button>
+              </div>
+            ) : null}
           </section>
         </div>
       ) : null}
@@ -656,6 +1015,16 @@ const pageStyles = `
       radial-gradient(circle at 50% 40%, rgba(255,255,255,0.08), transparent 44%),
       rgba(255,255,255,0.015);
     box-shadow: inset 0 0 46px rgba(255,255,255,0.035);
+  }
+
+  .real-card-image {
+    max-width: calc(100% - 34px);
+    max-height: calc(100% - 34px);
+    width: auto;
+    height: auto;
+    border-radius: 14px;
+    object-fit: contain;
+    box-shadow: 0 28px 70px rgba(0,0,0,0.66);
   }
 
   .large-card {
