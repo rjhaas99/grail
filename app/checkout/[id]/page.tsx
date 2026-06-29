@@ -4,109 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import Header from "../../components/Header";
-
-type CheckoutCard = {
-  id: string;
-  title: string;
-  category: "Sports" | "TCG";
-  condition: string;
-  seller: string;
-  sellerHref: string;
-  price: number;
-  marketValue: number;
-  accent: string;
-};
-
-const cards: CheckoutCard[] = [
-  {
-    id: "browse-1",
-    title: "Crimson Court Rookie",
-    category: "Sports",
-    condition: "PSA 10",
-    seller: "VaultRunner",
-    sellerHref: "/collections/vault-runner",
-    price: 1240,
-    marketValue: 1320,
-    accent: "#8f1d2c",
-  },
-  {
-    id: "browse-2",
-    title: "Silver Horizon Striker",
-    category: "Sports",
-    condition: "PSA 9",
-    seller: "CardForge",
-    sellerHref: "/collections/card-forge",
-    price: 680,
-    marketValue: 710,
-    accent: "#334155",
-  },
-  {
-    id: "browse-3",
-    title: "Midnight Arc Holo",
-    category: "TCG",
-    condition: "Mint",
-    seller: "SlabStreet",
-    sellerHref: "/collections/slab-street",
-    price: 395,
-    marketValue: 380,
-    accent: "#0f766e",
-  },
-  {
-    id: "browse-4",
-    title: "Obsidian Field Captain",
-    category: "Sports",
-    condition: "SGC 8",
-    seller: "PackPilot",
-    sellerHref: "/collections/pack-pilot",
-    price: 520,
-    marketValue: 560,
-    accent: "#1e3a8a",
-  },
-  {
-    id: "browse-5",
-    title: "Aurora Strike Prism",
-    category: "TCG",
-    condition: "Raw Near Mint",
-    seller: "RookieRoom",
-    sellerHref: "/collections/rookie-room",
-    price: 185,
-    marketValue: 210,
-    accent: "#7c3aed",
-  },
-  {
-    id: "browse-6",
-    title: "Platinum Rookie Crest",
-    category: "Sports",
-    condition: "PSA 8",
-    seller: "HoloHouse",
-    sellerHref: "/collections/holo-house",
-    price: 910,
-    marketValue: 940,
-    accent: "#475569",
-  },
-  {
-    id: "browse-7",
-    title: "Emerald Archive Guardian",
-    category: "TCG",
-    condition: "BGS 9.5",
-    seller: "GradeLane",
-    sellerHref: "/collections/grade-lane",
-    price: 760,
-    marketValue: 820,
-    accent: "#047857",
-  },
-  {
-    id: "browse-8",
-    title: "Sapphire Prospect Vault",
-    category: "Sports",
-    condition: "Raw Mint",
-    seller: "CollectorCorner",
-    sellerHref: "/collections/collector-corner",
-    price: 145,
-    marketValue: 155,
-    accent: "#1d4ed8",
-  },
-];
+import { getMockListingById } from "../../lib/mockData";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -144,7 +42,7 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 export default function CheckoutPage() {
   const params = useParams();
   const id = String(params.id || "");
-  const card = cards.find((item) => item.id === id);
+  const card = getMockListingById(id);
   const [isPlaced, setIsPlaced] = useState(false);
 
   if (!card) {

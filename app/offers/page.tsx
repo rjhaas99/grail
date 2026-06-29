@@ -3,102 +3,17 @@
 import Link from "next/link";
 import { useState } from "react";
 import Header from "../components/Header";
+import {
+  type MockOffer,
+  type OfferStatus,
+  mockReceivedOffers,
+  mockSentOffers,
+} from "../lib/mockData";
 
-type OfferStatus = "Pending" | "Countered" | "Accepted" | "Declined" | "Withdrawn";
-
-type SentOffer = {
-  id: string;
-  cardTitle: string;
-  cardHref: string;
-  seller: string;
-  amount: number;
-  askingPrice: number;
-  status: OfferStatus;
-  timeLeft: string;
-};
-
-type ReceivedOffer = {
-  id: string;
-  buyer: string;
-  cardTitle: string;
-  cardHref: string;
-  amount: number;
-  askingPrice: number;
-  status: OfferStatus;
-};
-
-const initialSentOffers: SentOffer[] = [
-  {
-    id: "sent-1",
-    cardTitle: "Crimson Court Rookie",
-    cardHref: "/cards/browse-1",
-    seller: "VaultRunner",
-    amount: 1160,
-    askingPrice: 1240,
-    status: "Pending",
-    timeLeft: "18h left",
-  },
-  {
-    id: "sent-2",
-    cardTitle: "Emerald Archive Guardian",
-    cardHref: "/cards/browse-7",
-    seller: "GradeLane",
-    amount: 710,
-    askingPrice: 760,
-    status: "Countered",
-    timeLeft: "9h left",
-  },
-  {
-    id: "sent-3",
-    cardTitle: "Midnight Arc Holo",
-    cardHref: "/cards/browse-3",
-    seller: "SlabStreet",
-    amount: 380,
-    askingPrice: 395,
-    status: "Accepted",
-    timeLeft: "Complete",
-  },
-  {
-    id: "sent-4",
-    cardTitle: "Aurora Strike Prism",
-    cardHref: "/cards/browse-5",
-    seller: "RookieRoom",
-    amount: 150,
-    askingPrice: 185,
-    status: "Declined",
-    timeLeft: "Expired",
-  },
-];
-
-const initialReceivedOffers: ReceivedOffer[] = [
-  {
-    id: "received-1",
-    buyer: "MasonVault",
-    cardTitle: "Obsidian Field Captain",
-    cardHref: "/cards/browse-4",
-    amount: 485,
-    askingPrice: 520,
-    status: "Pending",
-  },
-  {
-    id: "received-2",
-    buyer: "IndexBuyer",
-    cardTitle: "Platinum Rookie Crest",
-    cardHref: "/cards/browse-6",
-    amount: 860,
-    askingPrice: 910,
-    status: "Pending",
-  },
-  {
-    id: "received-3",
-    buyer: "HoloStack",
-    cardTitle: "Sapphire Prospect Vault",
-    cardHref: "/cards/browse-8",
-    amount: 130,
-    askingPrice: 145,
-    status: "Countered",
-  },
-];
+type SentOffer = MockOffer;
+type ReceivedOffer = MockOffer;
+const initialSentOffers: SentOffer[] = mockSentOffers;
+const initialReceivedOffers: ReceivedOffer[] = mockReceivedOffers;
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {

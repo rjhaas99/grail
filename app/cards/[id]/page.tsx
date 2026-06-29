@@ -4,387 +4,13 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import Header from "../../components/Header";
+import {
+  type MockListing,
+  getMockListingById,
+  getMockSellerBySlug,
+} from "../../lib/mockData";
 
-type MockCard = {
-  id: string;
-  title: string;
-  category: "Sports" | "TCG";
-  condition: string;
-  tag: "Graded" | "Raw" | "Hot" | "Grail";
-  askingPrice: number;
-  marketValue: number;
-  watchCount: number;
-  viewCount: number;
-  listedDate: string;
-  minOffer: number;
-  seller: {
-    name: string;
-    href: string;
-    level: string;
-    sales: number;
-    responseTime: string;
-    shipSpeed: string;
-    rating: string;
-    badge: string;
-  };
-  details: {
-    year: string;
-    set: string;
-    cardNumber: string;
-    subject: string;
-    grader: string;
-    grade: string;
-    certNumber: string;
-    notes: string;
-  };
-  priceHistory: {
-    thirtyDay: string;
-    ninetyDay: string;
-    lastSale: number;
-    averageSale: number;
-  };
-  overview: string;
-  accent: string;
-};
-
-const cards: MockCard[] = [
-  {
-    id: "browse-1",
-    title: "Crimson Court Rookie",
-    category: "Sports",
-    condition: "PSA 10",
-    tag: "Grail",
-    askingPrice: 1240,
-    marketValue: 1320,
-    watchCount: 184,
-    viewCount: 1240,
-    listedDate: "Jun 24, 2026",
-    minOffer: 1120,
-    seller: {
-      name: "VaultRunner",
-      href: "/collections/vault-runner",
-      level: "Level 4 Seller",
-      sales: 142,
-      responseTime: "Under 1 hour",
-      shipSpeed: "1 business day",
-      rating: "4.9 / 5 from 86 reviews",
-      badge: "Top Closer",
-    },
-    details: {
-      year: "2026",
-      set: "Crimson Court Archive",
-      cardNumber: "CC-01",
-      subject: "Rookie Guard",
-      grader: "PSA",
-      grade: "10",
-      certNumber: "Mock-184204",
-      notes: "Clean slab, sharp fictional card art, no visible surface notes.",
-    },
-    priceHistory: {
-      thirtyDay: "+4.8%",
-      ninetyDay: "+12.3%",
-      lastSale: 1180,
-      averageSale: 1275,
-    },
-    overview:
-      "A premium fictional sports-card grail with strong mock market value, elevated watch activity, and a clean graded presentation.",
-    accent: "#8f1d2c",
-  },
-  {
-    id: "browse-2",
-    title: "Silver Horizon Striker",
-    category: "Sports",
-    condition: "PSA 9",
-    tag: "Graded",
-    askingPrice: 680,
-    marketValue: 710,
-    watchCount: 96,
-    viewCount: 680,
-    listedDate: "Jun 28, 2026",
-    minOffer: 610,
-    seller: {
-      name: "CardForge",
-      href: "/collections/card-forge",
-      level: "Level 3 Seller",
-      sales: 98,
-      responseTime: "2 hours",
-      shipSpeed: "1-2 business days",
-      rating: "4.8 / 5 from 54 reviews",
-      badge: "Fast Shipper",
-    },
-    details: {
-      year: "2025",
-      set: "Silver Horizon Series",
-      cardNumber: "SH-17",
-      subject: "Field Striker",
-      grader: "PSA",
-      grade: "9",
-      certNumber: "Mock-680911",
-      notes: "Well-centered slab with light fictional edge notation.",
-    },
-    priceHistory: {
-      thirtyDay: "+2.1%",
-      ninetyDay: "+6.4%",
-      lastSale: 665,
-      averageSale: 704,
-    },
-    overview:
-      "A clean graded sports listing with steady mock demand and a seller known for fast fulfillment.",
-    accent: "#334155",
-  },
-  {
-    id: "browse-3",
-    title: "Midnight Arc Holo",
-    category: "TCG",
-    condition: "Mint",
-    tag: "Raw",
-    askingPrice: 395,
-    marketValue: 380,
-    watchCount: 72,
-    viewCount: 420,
-    listedDate: "Jun 22, 2026",
-    minOffer: 350,
-    seller: {
-      name: "SlabStreet",
-      href: "/collections/slab-street",
-      level: "Level 3 Seller",
-      sales: 76,
-      responseTime: "Under 3 hours",
-      shipSpeed: "2 business days",
-      rating: "4.7 / 5 from 39 reviews",
-      badge: "Trusted",
-    },
-    details: {
-      year: "2026",
-      set: "Midnight Arc",
-      cardNumber: "MA-H12",
-      subject: "Arc Guardian",
-      grader: "Raw",
-      grade: "Mint",
-      certNumber: "Not graded",
-      notes: "Raw fictional holo card with clean corners and bright surface.",
-    },
-    priceHistory: {
-      thirtyDay: "+1.6%",
-      ninetyDay: "+5.9%",
-      lastSale: 372,
-      averageSale: 388,
-    },
-    overview:
-      "A raw TCG mock listing with a dark holo-style presentation and strong collector appeal.",
-    accent: "#0f766e",
-  },
-  {
-    id: "browse-4",
-    title: "Obsidian Field Captain",
-    category: "Sports",
-    condition: "SGC 8",
-    tag: "Hot",
-    askingPrice: 520,
-    marketValue: 560,
-    watchCount: 166,
-    viewCount: 980,
-    listedDate: "Jun 27, 2026",
-    minOffer: 470,
-    seller: {
-      name: "PackPilot",
-      href: "/collections/pack-pilot",
-      level: "Level 2 Seller",
-      sales: 41,
-      responseTime: "Same day",
-      shipSpeed: "2 business days",
-      rating: "4.6 / 5 from 21 reviews",
-      badge: "Rising Seller",
-    },
-    details: {
-      year: "2024",
-      set: "Obsidian Field",
-      cardNumber: "OF-09",
-      subject: "Field Captain",
-      grader: "SGC",
-      grade: "8",
-      certNumber: "Mock-520884",
-      notes: "Strong eye appeal with mock corner wear reflected in grade.",
-    },
-    priceHistory: {
-      thirtyDay: "+6.2%",
-      ninetyDay: "+14.8%",
-      lastSale: 505,
-      averageSale: 548,
-    },
-    overview:
-      "A high-watch sports listing with above-average mock traffic and a below-market asking price.",
-    accent: "#1e3a8a",
-  },
-  {
-    id: "browse-5",
-    title: "Aurora Strike Prism",
-    category: "TCG",
-    condition: "Raw Near Mint",
-    tag: "Raw",
-    askingPrice: 185,
-    marketValue: 210,
-    watchCount: 148,
-    viewCount: 790,
-    listedDate: "Jun 26, 2026",
-    minOffer: 165,
-    seller: {
-      name: "RookieRoom",
-      href: "/collections/rookie-room",
-      level: "Level 2 Seller",
-      sales: 63,
-      responseTime: "Under 4 hours",
-      shipSpeed: "1-2 business days",
-      rating: "4.8 / 5 from 33 reviews",
-      badge: "Fast Shipper",
-    },
-    details: {
-      year: "2025",
-      set: "Aurora Strike",
-      cardNumber: "AS-P7",
-      subject: "Prism Warden",
-      grader: "Raw",
-      grade: "Near Mint",
-      certNumber: "Not graded",
-      notes: "Raw fictional prism card with minor handling notes.",
-    },
-    priceHistory: {
-      thirtyDay: "+3.4%",
-      ninetyDay: "+8.9%",
-      lastSale: 176,
-      averageSale: 202,
-    },
-    overview:
-      "A raw TCG prism-style card priced below mock market with solid watch activity.",
-    accent: "#7c3aed",
-  },
-  {
-    id: "browse-6",
-    title: "Platinum Rookie Crest",
-    category: "Sports",
-    condition: "PSA 8",
-    tag: "Graded",
-    askingPrice: 910,
-    marketValue: 940,
-    watchCount: 88,
-    viewCount: 610,
-    listedDate: "Jun 23, 2026",
-    minOffer: 825,
-    seller: {
-      name: "HoloHouse",
-      href: "/collections/holo-house",
-      level: "Level 3 Seller",
-      sales: 87,
-      responseTime: "Under 2 hours",
-      shipSpeed: "1 business day",
-      rating: "4.9 / 5 from 47 reviews",
-      badge: "Trusted",
-    },
-    details: {
-      year: "2024",
-      set: "Platinum Rookie Crest",
-      cardNumber: "PRC-22",
-      subject: "Rookie Crest",
-      grader: "PSA",
-      grade: "8",
-      certNumber: "Mock-910318",
-      notes: "Attractive graded fictional card with light centering note.",
-    },
-    priceHistory: {
-      thirtyDay: "+2.9%",
-      ninetyDay: "+7.6%",
-      lastSale: 895,
-      averageSale: 932,
-    },
-    overview:
-      "A graded sports-card mock listing with stable price history and trusted seller history.",
-    accent: "#475569",
-  },
-  {
-    id: "browse-7",
-    title: "Emerald Archive Guardian",
-    category: "TCG",
-    condition: "BGS 9.5",
-    tag: "Hot",
-    askingPrice: 760,
-    marketValue: 820,
-    watchCount: 205,
-    viewCount: 1510,
-    listedDate: "Jun 25, 2026",
-    minOffer: 695,
-    seller: {
-      name: "GradeLane",
-      href: "/collections/grade-lane",
-      level: "Level 4 Seller",
-      sales: 119,
-      responseTime: "Under 1 hour",
-      shipSpeed: "1 business day",
-      rating: "5.0 / 5 from 72 reviews",
-      badge: "Top Closer",
-    },
-    details: {
-      year: "2026",
-      set: "Emerald Archive",
-      cardNumber: "EA-G4",
-      subject: "Archive Guardian",
-      grader: "BGS",
-      grade: "9.5",
-      certNumber: "Mock-760551",
-      notes: "Premium fictional graded TCG card with strong mock demand.",
-    },
-    priceHistory: {
-      thirtyDay: "+7.8%",
-      ninetyDay: "+16.1%",
-      lastSale: 735,
-      averageSale: 805,
-    },
-    overview:
-      "A hot graded TCG listing with the highest mock watch count in this Browse set.",
-    accent: "#047857",
-  },
-  {
-    id: "browse-8",
-    title: "Sapphire Prospect Vault",
-    category: "Sports",
-    condition: "Raw Mint",
-    tag: "Raw",
-    askingPrice: 145,
-    marketValue: 155,
-    watchCount: 43,
-    viewCount: 280,
-    listedDate: "Jun 21, 2026",
-    minOffer: 125,
-    seller: {
-      name: "CollectorCorner",
-      href: "/collections/collector-corner",
-      level: "Level 1 Seller",
-      sales: 24,
-      responseTime: "Same day",
-      shipSpeed: "2-3 business days",
-      rating: "4.5 / 5 from 12 reviews",
-      badge: "Rising Seller",
-    },
-    details: {
-      year: "2025",
-      set: "Sapphire Prospect Vault",
-      cardNumber: "SPV-31",
-      subject: "Prospect Vault",
-      grader: "Raw",
-      grade: "Mint",
-      certNumber: "Not graded",
-      notes: "Raw fictional sports card with clean surface and corners.",
-    },
-    priceHistory: {
-      thirtyDay: "+1.2%",
-      ninetyDay: "+3.7%",
-      lastSale: 138,
-      averageSale: 151,
-    },
-    overview:
-      "A lower-price raw sports mock listing suited for collectors browsing entry-level cards.",
-    accent: "#1d4ed8",
-  },
-];
+type MockCard = MockListing;
 
 const photoViews = [
   "Front",
@@ -520,7 +146,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 export default function CardDetailPage() {
   const params = useParams();
   const cardId = String(params.id || "");
-  const card = cards.find((item) => item.id === cardId);
+  const card = getMockListingById(cardId);
   const [selectedPhoto, setSelectedPhoto] =
     useState<(typeof photoViews)[number]>("Front");
   const [isWatching, setIsWatching] = useState(false);
@@ -575,6 +201,7 @@ export default function CardDetailPage() {
     );
   }
 
+  const seller = getMockSellerBySlug(card.sellerSlug);
   const marketDifference = getMarketDifference(card);
 
   return (
@@ -699,22 +326,22 @@ export default function CardDetailPage() {
 
             <section className="seller-panel panel">
               <div className="seller-header">
-                <span className="seller-avatar">{card.seller.name.slice(0, 1)}</span>
+                <span className="seller-avatar">{(seller?.name ?? card.sellerName).slice(0, 1)}</span>
                 <div>
-                  <h2>{card.seller.name}</h2>
-                  <p>{card.seller.level}</p>
+                  <h2>{(seller?.name ?? card.sellerName)}</h2>
+                  <p>{(seller?.level ?? card.sellerLevel)}</p>
                 </div>
               </div>
 
               <div className="seller-stats">
-                <DetailRow label="Completed Sales" value={`${card.seller.sales}`} />
-                <DetailRow label="Response Time" value={card.seller.responseTime} />
-                <DetailRow label="Ship Speed" value={card.seller.shipSpeed} />
-                <DetailRow label="Rating" value={card.seller.rating} />
+                <DetailRow label="Completed Sales" value={`${(seller?.completedSales ?? 0)}`} />
+                <DetailRow label="Response Time" value={(seller?.responseTime ?? "Same day")} />
+                <DetailRow label="Ship Speed" value={(seller?.shipSpeed ?? "2 business days")} />
+                <DetailRow label="Rating" value={(seller?.rating ?? "New seller")} />
               </div>
 
-              <span className="seller-badge">{card.seller.badge}</span>
-              <Link className="seller-link" href={card.seller.href}>
+              <span className="seller-badge">{(seller?.rewardsBadge ?? "Seller")}</span>
+              <Link className="seller-link" href={(seller?.route ?? card.sellerRoute)}>
                 View Seller Collection
               </Link>
             </section>

@@ -3,85 +3,20 @@
 import Link from "next/link";
 import { useState } from "react";
 import Header from "../components/Header";
+import { mockSellerDashboardData } from "../lib/mockData";
 
 type OfferStatus = "Pending" | "Accepted" | "Countered" | "Declined";
 type OrderStatus = "Processing" | "Shipped";
 
-const listings = [
-  {
-    card: "Crimson Court Rookie",
-    href: "/cards/browse-1",
-    price: "$1,240",
-    market: "$1,320",
-    watches: 184,
-    views: 1240,
-    status: "Active",
-  },
-  {
-    card: "Emerald Archive Guardian",
-    href: "/cards/browse-7",
-    price: "$760",
-    market: "$820",
-    watches: 205,
-    views: 1510,
-    status: "Active",
-  },
-  {
-    card: "Platinum Rookie Crest",
-    href: "/cards/browse-6",
-    price: "$910",
-    market: "$940",
-    watches: 88,
-    views: 610,
-    status: "Active",
-  },
-];
-
-const initialOffers = [
-  {
-    id: "offer-1",
-    buyer: "MasonVault",
-    card: "Obsidian Field Captain",
-    offer: "$485",
-    asking: "$520",
-    status: "Pending" as OfferStatus,
-  },
-  {
-    id: "offer-2",
-    buyer: "IndexBuyer",
-    card: "Platinum Rookie Crest",
-    offer: "$860",
-    asking: "$910",
-    status: "Pending" as OfferStatus,
-  },
-  {
-    id: "offer-3",
-    buyer: "HoloStack",
-    card: "Sapphire Prospect Vault",
-    offer: "$130",
-    asking: "$145",
-    status: "Countered" as OfferStatus,
-  },
-];
-
-const initialOrders = [
-  {
-    id: "GRAIL-1048",
-    card: "Crimson Court Rookie",
-    buyer: "VaultBuyer",
-    total: "$1,355",
-    status: "Processing" as OrderStatus,
-    shipBy: "Jun 30",
-  },
-  {
-    id: "GRAIL-1039",
-    card: "Midnight Arc Holo",
-    buyer: "CardIndex",
-    total: "$438",
-    status: "Processing" as OrderStatus,
-    shipBy: "Jul 1",
-  },
-];
+const listings = mockSellerDashboardData.activeListings;
+const initialOffers = mockSellerDashboardData.incomingOffers.map((offer) => ({
+  ...offer,
+  status: offer.status as OfferStatus,
+}));
+const initialOrders = mockSellerDashboardData.recentOrders.map((order) => ({
+  ...order,
+  status: order.status as OrderStatus,
+}));
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
@@ -126,12 +61,12 @@ export default function SellerDashboardPage() {
         </section>
 
         <section className="stats-grid">
-          <StatCard label="Active Listings" value="24" />
-          <StatCard label="Pending Offers" value="8" />
-          <StatCard label="Orders This Month" value="17" />
-          <StatCard label="Total Earnings" value="$28,450" />
-          <StatCard label="Seller Level" value="Level 4" />
-          <StatCard label="Response Rate" value="98%" />
+          <StatCard label="Active Listings" value={mockSellerDashboardData.stats.activeListings} />
+          <StatCard label="Pending Offers" value={mockSellerDashboardData.stats.pendingOffers} />
+          <StatCard label="Orders This Month" value={mockSellerDashboardData.stats.ordersThisMonth} />
+          <StatCard label="Total Earnings" value={mockSellerDashboardData.stats.totalEarnings} />
+          <StatCard label="Seller Level" value={mockSellerDashboardData.stats.sellerLevel} />
+          <StatCard label="Response Rate" value={mockSellerDashboardData.stats.responseRate} />
         </section>
 
         <section className="dashboard-layout">
@@ -229,20 +164,20 @@ export default function SellerDashboardPage() {
           <aside className="sidebar">
             <section className="panel sidebar-panel">
               <h2>Seller Rewards</h2>
-              <p>Current level: Level 4 Seller</p>
+              <p>Current level: {mockSellerDashboardData.rewards.currentLevel}</p>
               <div className="progress-block">
                 <div>
                   <span>Progress to Level 5</span>
-                  <strong>76%</strong>
+                  <strong>{mockSellerDashboardData.rewards.progressToNext}%</strong>
                 </div>
                 <div className="progress-track">
-                  <span />
+                  <span style={{ width: `${mockSellerDashboardData.rewards.progressToNext}%` }} />
                 </div>
               </div>
-              <StatCard label="Completed Sales" value="142" />
-              <StatCard label="Fast Shipping Streak" value="38 orders" />
-              <StatCard label="Response Score" value="98%" />
-              <StatCard label="Buyer Rating" value="4.9" />
+              <StatCard label="Completed Sales" value={String(mockSellerDashboardData.rewards.completedSales)} />
+              <StatCard label="Fast Shipping Streak" value={mockSellerDashboardData.rewards.fastShippingStreak} />
+              <StatCard label="Response Score" value={mockSellerDashboardData.rewards.responseScore} />
+              <StatCard label="Buyer Rating" value={mockSellerDashboardData.rewards.buyerRating} />
               <p>Higher seller rewards can boost visibility on Browse.</p>
             </section>
 

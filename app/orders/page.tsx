@@ -2,33 +2,9 @@
 
 import Link from "next/link";
 import Header from "../components/Header";
+import { mockOrders } from "../lib/mockData";
 
-const orders = [
-  {
-    id: "GRAIL-1048",
-    cardTitle: "Crimson Court Rookie",
-    href: "/cards/browse-1",
-    status: "Processing",
-    seller: "VaultRunner",
-    total: "$1,355",
-  },
-  {
-    id: "GRAIL-1039",
-    cardTitle: "Midnight Arc Holo",
-    href: "/cards/browse-3",
-    status: "Shipped",
-    seller: "SlabStreet",
-    total: "$438",
-  },
-  {
-    id: "GRAIL-1027",
-    cardTitle: "Sapphire Prospect Vault",
-    href: "/cards/browse-8",
-    status: "Delivered",
-    seller: "CollectorCorner",
-    total: "$166",
-  },
-];
+const orders = mockOrders;
 
 export default function OrdersPage() {
   return (
@@ -57,7 +33,7 @@ export default function OrdersPage() {
               <strong className={`status status-${order.status.toLowerCase()}`}>
                 {order.status}
               </strong>
-              <strong>{order.total}</strong>
+              <strong>{order.totalDisplay}</strong>
               <Link href={order.href}>View Card</Link>
             </article>
           ))}

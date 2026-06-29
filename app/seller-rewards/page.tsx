@@ -1,23 +1,7 @@
 import Header from "../components/Header";
+import { mockSellerDashboardData, sellerRewardLevels } from "../lib/mockData";
 
-const levels = Array.from({ length: 10 }, (_, index) => {
-  const level = index + 1;
-
-  return {
-    level,
-    title: `Level ${level} Seller`,
-    requirements:
-      level === 1
-        ? "Create accurate listings and complete your first sale."
-        : `${level * 18} completed sales, strong reviews, and fast response habits.`,
-    rewards:
-      level < 4
-        ? "Trust badge foundation and basic seller insights."
-        : level < 8
-          ? "Better Browse placement, Featured Seller eligibility, and more seller insights."
-          : "Highest trust badge, stronger visibility boost, early access to seller tools.",
-  };
-});
+const levels = sellerRewardLevels;
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
@@ -47,17 +31,31 @@ export default function SellerRewardsPage() {
         <section className="hero-card panel">
           <div>
             <span>Current Level</span>
-            <h2>Level 4 Seller</h2>
+            <h2>{mockSellerDashboardData.rewards.currentLevel}</h2>
             <p>Progress to Level 5</p>
             <div className="progress-track">
-              <span />
+              <span
+                style={{ width: `${mockSellerDashboardData.rewards.progressToNext}%` }}
+              />
             </div>
           </div>
           <div className="hero-metrics">
-            <Metric label="Completed Sales" value="142" />
-            <Metric label="Fast Shipping Streak" value="38 orders" />
-            <Metric label="Response Score" value="98%" />
-            <Metric label="Buyer Rating" value="4.9" />
+            <Metric
+              label="Completed Sales"
+              value={String(mockSellerDashboardData.rewards.completedSales)}
+            />
+            <Metric
+              label="Fast Shipping Streak"
+              value={mockSellerDashboardData.rewards.fastShippingStreak}
+            />
+            <Metric
+              label="Response Score"
+              value={mockSellerDashboardData.rewards.responseScore}
+            />
+            <Metric
+              label="Buyer Rating"
+              value={mockSellerDashboardData.rewards.buyerRating}
+            />
             <Metric label="Cancellation Rate" value="0.6%" />
           </div>
         </section>

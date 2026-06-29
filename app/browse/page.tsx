@@ -3,6 +3,12 @@
 import Link from "next/link";
 import { useState } from "react";
 import Header from "../components/Header";
+import {
+  getListingTag,
+  mockFeaturedSellers as featuredSellers,
+  mockListings as listings,
+  mockMarketData,
+} from "../lib/mockData";
 
 const categoryFilters = [
   "Sports Cards",
@@ -82,182 +88,6 @@ const sellerLevels = [
   "Level 3 Seller",
   "Level 2 Seller",
   "Level 1 Seller",
-];
-
-const listings = [
-  {
-    href: "/cards/browse-1",
-    title: "Crimson Court Rookie",
-    category: "Sports",
-    condition: "PSA 10",
-    meta: "Sports: PSA 10",
-    price: "$1,240",
-    seller: "VaultRunner",
-    sellerHref: "/collections/vault-runner",
-    accent: "#8f1d2c",
-    listedOrder: 4,
-    marketValue: 1320,
-    watchCount: 184,
-    views: 1240,
-    isGrail: true,
-  },
-  {
-    href: "/cards/browse-2",
-    title: "Silver Horizon Striker",
-    category: "Sports",
-    condition: "PSA 9",
-    meta: "Sports: PSA 9",
-    price: "$680",
-    seller: "CardForge",
-    sellerHref: "/collections/card-forge",
-    accent: "#334155",
-    listedOrder: 8,
-    marketValue: 710,
-    watchCount: 96,
-    views: 680,
-    isGrail: false,
-  },
-  {
-    href: "/cards/browse-3",
-    title: "Midnight Arc Holo",
-    category: "TCG",
-    condition: "Mint",
-    meta: "TCG: Mint",
-    price: "$395",
-    seller: "SlabStreet",
-    sellerHref: "/collections/slab-street",
-    accent: "#0f766e",
-    listedOrder: 2,
-    marketValue: 380,
-    watchCount: 72,
-    views: 420,
-    isGrail: false,
-  },
-  {
-    href: "/cards/browse-4",
-    title: "Obsidian Field Captain",
-    category: "Sports",
-    condition: "SGC 8",
-    meta: "Sports: SGC 8",
-    price: "$520",
-    seller: "PackPilot",
-    sellerHref: "/collections/pack-pilot",
-    accent: "#1e3a8a",
-    listedOrder: 7,
-    marketValue: 560,
-    watchCount: 166,
-    views: 980,
-    isGrail: false,
-  },
-  {
-    href: "/cards/browse-5",
-    title: "Aurora Strike Prism",
-    category: "TCG",
-    condition: "Raw Near Mint",
-    meta: "TCG: Raw Near Mint",
-    price: "$185",
-    seller: "RookieRoom",
-    sellerHref: "/collections/rookie-room",
-    accent: "#7c3aed",
-    listedOrder: 6,
-    marketValue: 210,
-    watchCount: 148,
-    views: 790,
-    isGrail: false,
-  },
-  {
-    href: "/cards/browse-6",
-    title: "Platinum Rookie Crest",
-    category: "Sports",
-    condition: "PSA 8",
-    meta: "Sports: PSA 8",
-    price: "$910",
-    seller: "HoloHouse",
-    sellerHref: "/collections/holo-house",
-    accent: "#475569",
-    listedOrder: 3,
-    marketValue: 940,
-    watchCount: 88,
-    views: 610,
-    isGrail: false,
-  },
-  {
-    href: "/cards/browse-7",
-    title: "Emerald Archive Guardian",
-    category: "TCG",
-    condition: "BGS 9.5",
-    meta: "TCG: BGS 9.5",
-    price: "$760",
-    seller: "GradeLane",
-    sellerHref: "/collections/grade-lane",
-    accent: "#047857",
-    listedOrder: 5,
-    marketValue: 820,
-    watchCount: 205,
-    views: 1510,
-    isGrail: false,
-  },
-  {
-    href: "/cards/browse-8",
-    title: "Sapphire Prospect Vault",
-    category: "Sports",
-    condition: "Raw Mint",
-    meta: "Sports: Raw Mint",
-    price: "$145",
-    seller: "CollectorCorner",
-    sellerHref: "/collections/collector-corner",
-    accent: "#1d4ed8",
-    listedOrder: 1,
-    marketValue: 155,
-    watchCount: 43,
-    views: 280,
-    isGrail: false,
-  },
-];
-
-function getListingTag(listing: (typeof listings)[number]) {
-  if (listing.isGrail) {
-    return "Grail";
-  }
-
-  if (listing.watchCount >= 150 || listing.views >= 900) {
-    return "Hot";
-  }
-
-  const condition = listing.condition.toLowerCase();
-
-  return condition.includes("raw") ||
-    condition.includes("near mint") ||
-    condition === "mint"
-    ? "Raw"
-    : "Graded";
-}
-
-const featuredSellers = [
-  {
-    name: "VaultRunner",
-    level: "Level 4 Seller",
-    sales: "142 sales",
-    badge: "Top Closer",
-  },
-  {
-    name: "CardForge",
-    level: "Level 3 Seller",
-    sales: "98 sales",
-    badge: "Fast Shipper",
-  },
-  {
-    name: "SlabStreet",
-    level: "Level 3 Seller",
-    sales: "76 sales",
-    badge: "Trusted",
-  },
-  {
-    name: "PackPilot",
-    level: "Level 2 Seller",
-    sales: "41 sales",
-    badge: "Rising Seller",
-  },
 ];
 
 function CardArtwork({
@@ -1769,7 +1599,9 @@ export default function BrowsePage() {
                       </p>
 
                       <div className="listing-footer">
-                        <strong className="listing-price">{listing.price}</strong>
+                        <strong className="listing-price">
+                          {listing.priceDisplay}
+                        </strong>
                         <div className="listing-actions">
                           <div className="action-circles">
                             <button
@@ -1830,30 +1662,31 @@ export default function BrowsePage() {
               <div className="snapshot-grid">
                 <div className="metric">
                   <span>Total Listings</span>
-                  <strong>248</strong>
+                  <strong>{mockMarketData.snapshot.totalListings}</strong>
                 </div>
                 <div className="metric">
                   <span>Avg Sale Price</span>
-                  <strong>$412</strong>
+                  <strong>${mockMarketData.snapshot.avgSalePrice}</strong>
                 </div>
                 <div className="metric">
                   <span>New Today</span>
-                  <strong>31</strong>
+                  <strong>{mockMarketData.snapshot.newToday}</strong>
                 </div>
                 <div className="metric">
                   <span>Trending Category</span>
-                  <strong>Graded Rookies</strong>
+                  <strong>{mockMarketData.snapshot.trendingCategory}</strong>
                 </div>
               </div>
 
               <div className="market-index">
                 <div className="market-index-header">
                   <span>GRAIL Market Index</span>
-                  <strong>1,248.6</strong>
+                  <strong>{mockMarketData.grailMarketIndex.value}</strong>
                 </div>
                 <MarketIndexChart />
                 <p className="market-index-caption">
-                  Sports + TCG Market <span>+2.4% today</span>
+                  {mockMarketData.grailMarketIndex.label}{" "}
+                  <span>{mockMarketData.grailMarketIndex.dailyChange}</span>
                 </p>
               </div>
             </section>
