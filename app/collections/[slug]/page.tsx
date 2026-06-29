@@ -1,18 +1,54 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
 import {
   type ListingTag,
   type MockListing,
+  type MockSeller,
   buildMockSellerListings,
   mockSellers,
 } from "../../lib/mockData";
 
 type FilterMode = "All" | ListingTag;
-type Listing = MockListing;
+type Listing = MockListing & {
+  imageUrl?: string | null;
+  source?: "mock" | "supabase";
+};
+
+type ListingImageRow = {
+  image_url: string | null;
+  image_type: string | null;
+};
+
+type SupabaseListingRow = {
+  id: string;
+  seller_id: string | null;
+  title: string | null;
+  sport: string | null;
+  player: string | null;
+  year: string | null;
+  brand: string | null;
+  card_number: string | null;
+  card_type: string | null;
+  grader: string | null;
+  grade: string | null;
+  condition: string | null;
+  price: number | null;
+  status: string | null;
+  created_at: string | null;
+  listing_images: ListingImageRow[] | null;
+};
+
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  username: string | null;
+};
 
 const sellers = mockSellers;
 const buildSellerListings = buildMockSellerListings;
@@ -27,6 +63,190 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function formatListedDate(value: string | null) {
+  if (!value) {
+    return "Recently";
+  }
+
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
+function getProfileSlug(profile: ProfileRow) {
+  const username = profile.username?.replace(/^@/, "").trim();
+
+  if (username) {
+    return encodeURIComponent(username);
+  }
+
+  return profile.id;
+}
+
+function getInitials(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "GS";
+}
+
+function getImageUrl(listing: SupabaseListingRow) {
+  return (
+    listing.listing_images?.find((image) => image.image_type === "front")
+      ?.image_url ||
+    listing.listing_images?.[0]?.image_url ||
+    null
+  );
+}
+
+function getCategory(listing: SupabaseListingRow) {
+  const source = `${listing.sport || ""} ${listing.card_type || ""}`.toLowerCase();
+
+  return source.includes("tcg") ? "TCG" : "Sports";
+}
+
+function getConditionDisplay(listing: SupabaseListingRow) {
+  if (listing.grader && listing.grade) {
+    return `${listing.grader} ${listing.grade}`;
+  }
+
+  const condition = listing.condition?.trim();
+
+  if (condition) {
+    return condition.toLowerCase().includes("raw")
+      ? condition
+      : `Raw ${condition}`;
+  }
+
+  return listing.card_type?.toLowerCase() === "graded" ? "Graded" : "Raw";
+}
+
+function buildRealSeller(profile: ProfileRow, listings: SupabaseListingRow[]): MockSeller {
+  const sellerSlug = getProfileSlug(profile);
+  const sellerName = profile.full_name || profile.username || "GRAIL Seller";
+  const totalValue = listings.reduce(
+    (sum, listing) => sum + Number(listing.price || 0),
+    0,
+  );
+  const averagePrice =
+    listings.length > 0 ? Math.round(totalValue / listings.length) : 0;
+
+  return {
+    slug: sellerSlug,
+    name: sellerName,
+    initials: getInitials(sellerName),
+    level: "GRAIL Seller",
+    rewardsBadge: "Seller",
+    completedSales: 0,
+    activeListings: listings.length,
+    responseTime: "Same day",
+    shipSpeed: "2 business days",
+    rating: "New seller",
+    reviews: 0,
+    joinedDate: "GRAIL Seller",
+    location: "United States",
+    bio: "Live GRAIL seller collection.",
+    collectionValue: totalValue,
+    avgListingPrice: averagePrice,
+    fastShippingStreak: "Not available",
+    responseScore: "New",
+    cancellationRate: "N/A",
+    sellerTags: ["Seller"],
+    levelProgress: 0,
+    buyerRating: "New",
+    priceOffset: 0,
+    route: `/collections/${sellerSlug}`,
+  };
+}
+
+function mapSupabaseListing(
+  listing: SupabaseListingRow,
+  seller: MockSeller,
+  index: number,
+  totalCount: number,
+): Listing {
+  const category = getCategory(listing);
+  const condition = getConditionDisplay(listing);
+  const price = Number(listing.price || 0);
+  const isGraded = Boolean(listing.grader && listing.grade) ||
+    listing.card_type?.toLowerCase() === "graded";
+  const tag = isGraded ? "Graded" : "Raw";
+  const title =
+    listing.title ||
+    [listing.year, listing.brand, listing.player].filter(Boolean).join(" ") ||
+    "Untitled Card";
+  const route = `/cards/${listing.id}`;
+
+  return {
+    id: listing.id,
+    route,
+    href: route,
+    title,
+    category,
+    conditionDisplay: condition,
+    condition,
+    subtitle: `${category}: ${condition}`,
+    meta: `${category}: ${condition}`,
+    sellerSlug: seller.slug,
+    sellerName: seller.name,
+    seller: seller.name,
+    sellerLevel: seller.level,
+    sellerRoute: seller.route,
+    sellerHref: seller.route,
+    price,
+    priceDisplay: price ? formatCurrency(price) : "Price not listed",
+    askingPrice: price,
+    marketValue: 0,
+    minimumOffer: price ? Math.round(price * 0.85) : 0,
+    minOffer: price ? Math.round(price * 0.85) : 0,
+    watchCount: 0,
+    views: 0,
+    viewCount: 0,
+    listedOrder: totalCount - index,
+    listedDate: formatListedDate(listing.created_at),
+    tags: [tag],
+    tag,
+    isGraded,
+    isRaw: !isGraded,
+    isHot: false,
+    isGrail: false,
+    accent: "#334155",
+    artworkTone: "live listing",
+    imageUrl: getImageUrl(listing),
+    source: "supabase",
+    cardDetailRoute: route,
+    sellerCollectionRoute: seller.route,
+    details: {
+      year: listing.year || "Unknown",
+      set: listing.brand || "Unknown",
+      cardNumber: listing.card_number || "Unknown",
+      subject: listing.player || "Unknown",
+      grader: listing.grader || "Raw",
+      grade: listing.grade || listing.condition || "Raw",
+      certNumber: "Not available",
+      notes: "Live Supabase listing.",
+    },
+    priceHistory: {
+      thirtyDay: "N/A",
+      ninetyDay: "N/A",
+      lastSale: 0,
+      averageSale: 0,
+      chartPoints: [],
+    },
+    overview: "Live Supabase listing.",
+  };
+}
+
 function CardArtwork({
   listing,
 }: {
@@ -37,6 +257,16 @@ function CardArtwork({
 
   return (
     <div className="art-shell">
+      {listing.imageUrl ? (
+        <Image
+          className="uploaded-card-image"
+          src={listing.imageUrl}
+          alt={listing.title}
+          width={156}
+          height={210}
+          unoptimized
+        />
+      ) : (
       <div className={`mock-card ${isRaw ? "raw-card" : "slab-card"}`}>
         {!isRaw ? (
           <div className="mock-label">
@@ -64,6 +294,7 @@ function CardArtwork({
           <span />
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -105,11 +336,133 @@ function Metric({ label, value }: { label: string; value: string }) {
 export default function SellerCollectionPage() {
   const params = useParams();
   const slug = String(params.slug || "");
-  const seller = sellers.find((item) => item.slug === slug);
+  const decodedSlug = decodeURIComponent(slug);
+  const mockSeller = sellers.find((item) => item.slug === slug);
+  const [realSeller, setRealSeller] = useState<MockSeller | null>(null);
+  const [realListings, setRealListings] = useState<Listing[]>([]);
+  const [isLoadingRealSeller, setIsLoadingRealSeller] = useState(!mockSeller);
   const [filterMode, setFilterMode] = useState<FilterMode>("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [isFollowing, setIsFollowing] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const seller = mockSeller ?? realSeller;
+  const allListings = useMemo(() => {
+    if (mockSeller) {
+      return buildSellerListings(mockSeller);
+    }
+
+    return realListings;
+  }, [mockSeller, realListings]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadRealSeller() {
+      if (mockSeller || !decodedSlug) {
+        setIsLoadingRealSeller(false);
+        return;
+      }
+
+      setIsLoadingRealSeller(true);
+
+      try {
+        const { data: usernameProfile, error: usernameError } = await supabase
+          .from("profiles")
+          .select("id, full_name, username")
+          .eq("username", decodedSlug)
+          .maybeSingle();
+
+        if (usernameError) {
+          console.error("Collection username profile fetch error:", usernameError);
+        }
+
+        let profile = usernameProfile as ProfileRow | null;
+
+        if (!profile && isUuid(decodedSlug)) {
+          const { data: idProfile, error: idError } = await supabase
+            .from("profiles")
+            .select("id, full_name, username")
+            .eq("id", decodedSlug)
+            .maybeSingle();
+
+          if (idError) {
+            console.error("Collection id profile fetch error:", idError);
+          } else {
+            profile = idProfile as ProfileRow | null;
+          }
+        }
+
+        if (!profile) {
+          if (isMounted) {
+            setRealSeller(null);
+            setRealListings([]);
+          }
+          return;
+        }
+
+        const { data: listingData, error: listingError } = await supabase
+          .from("listings")
+          .select(
+            `
+              id,
+              seller_id,
+              title,
+              sport,
+              player,
+              year,
+              brand,
+              card_number,
+              card_type,
+              grader,
+              grade,
+              condition,
+              price,
+              status,
+              created_at,
+              listing_images (
+                image_url,
+                image_type
+              )
+            `,
+          )
+          .eq("seller_id", profile.id)
+          .eq("status", "active")
+          .order("created_at", { ascending: false });
+
+        if (listingError) {
+          throw listingError;
+        }
+
+        const rows = (listingData || []) as SupabaseListingRow[];
+        const mappedSeller = buildRealSeller(profile, rows);
+        const mappedListings = rows.map((listing, index) =>
+          mapSupabaseListing(listing, mappedSeller, index, rows.length),
+        );
+
+        if (isMounted) {
+          setRealSeller(mappedSeller);
+          setRealListings(mappedListings);
+        }
+      } catch (error) {
+        console.error("Collection seller fetch error:", error);
+
+        if (isMounted) {
+          setRealSeller(null);
+          setRealListings([]);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingRealSeller(false);
+        }
+      }
+    }
+
+    loadRealSeller();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [decodedSlug, mockSeller]);
 
   const listings = useMemo(() => {
     if (!seller) {
@@ -118,7 +471,7 @@ export default function SellerCollectionPage() {
 
     const query = searchQuery.trim().toLowerCase();
 
-    return buildSellerListings(seller).filter((listing) => {
+    return allListings.filter((listing) => {
       if (filterMode !== "All" && listing.tag !== filterMode) {
         return false;
       }
@@ -137,7 +490,22 @@ export default function SellerCollectionPage() {
         .toLowerCase()
         .includes(query);
     });
-  }, [filterMode, searchQuery, seller]);
+  }, [allListings, filterMode, searchQuery, seller]);
+
+  if (isLoadingRealSeller) {
+    return (
+      <main className="collection-page">
+        <style>{pageStyles}</style>
+        <div className="collection-shell">
+          <Header />
+          <section className="not-found panel">
+            <p>Loading seller...</p>
+            <h1>Loading seller collection.</h1>
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   if (!seller) {
     return (
@@ -155,13 +523,21 @@ export default function SellerCollectionPage() {
     );
   }
 
-  const allListings = buildSellerListings(seller);
-  const totalValue = allListings.reduce((sum, listing) => sum + listing.marketValue, 0);
-  const totalPrice = allListings.reduce((sum, listing) => sum + listing.price, 0);
-  const averagePrice = Math.round(totalPrice / allListings.length);
-  const highestValueCard = allListings.reduce((highest, listing) =>
-    listing.marketValue > highest.marketValue ? listing : highest,
+  const totalValue = allListings.reduce(
+    (sum, listing) => sum + (listing.marketValue || listing.price),
+    0,
   );
+  const totalPrice = allListings.reduce((sum, listing) => sum + listing.price, 0);
+  const averagePrice =
+    allListings.length > 0 ? Math.round(totalPrice / allListings.length) : 0;
+  const highestValueCard = allListings.length > 0
+    ? allListings.reduce((highest, listing) =>
+        (listing.marketValue || listing.price) >
+        (highest.marketValue || highest.price)
+          ? listing
+          : highest,
+      )
+    : null;
   const grailCount = allListings.filter((listing) => listing.tag === "Grail").length;
   const hotCount = allListings.filter((listing) => listing.tag === "Hot").length;
 
@@ -325,8 +701,16 @@ export default function SellerCollectionPage() {
               </section>
             ) : (
               <section className="empty-state panel">
-                <h2>No cards found.</h2>
-                <p>Try a different search or filter.</p>
+                <h2>
+                  {allListings.length === 0
+                    ? "No active listings yet."
+                    : "No cards found."}
+                </h2>
+                <p>
+                  {allListings.length === 0
+                    ? "This seller collection is live, but there are no active listings right now."
+                    : "Try a different search or filter."}
+                </p>
               </section>
             )}
           </div>
@@ -357,10 +741,13 @@ export default function SellerCollectionPage() {
               <h2>Collection Market Snapshot</h2>
               <div className="snapshot-grid">
                 <Metric label="Total Market Value" value={formatCurrency(totalValue)} />
-                <Metric label="Highest Value Card" value={highestValueCard.title} />
+                <Metric
+                  label="Highest Value Card"
+                  value={highestValueCard?.title ?? "No active listings"}
+                />
                 <Metric label="Grail Cards" value={String(grailCount)} />
                 <Metric label="Hot Cards" value={String(hotCount)} />
-                <Metric label="Avg Card Value" value={formatCurrency(Math.round(totalValue / allListings.length))} />
+                <Metric label="Avg Card Value" value={formatCurrency(averagePrice)} />
               </div>
               <MarketChart />
             </section>
@@ -758,6 +1145,16 @@ const pageStyles = `
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+
+  .uploaded-card-image {
+    max-width: 122px;
+    max-height: 164px;
+    width: auto;
+    height: auto;
+    border-radius: 9px;
+    object-fit: contain;
+    box-shadow: 0 18px 34px rgba(0,0,0,0.62);
   }
 
   .mock-card {
