@@ -126,7 +126,9 @@ export type MockConversation = {
   snippet: string;
   lastSnippet: string;
   timestamp: string;
+  sortRank: number;
   unread?: boolean;
+  isActive: boolean;
   accent: string;
   messages: {
     id: string;
@@ -138,6 +140,27 @@ export type MockConversation = {
     amount: number;
     status: "Pending" | "Accepted" | "Countered" | "Declined";
   };
+};
+
+export type PortfolioCard = {
+  id: string;
+  listingId: string;
+  title: string;
+  subtitle: string;
+  category: CardCategory;
+  estimatedValue: number;
+  costBasis: number;
+  gainLoss: number;
+  tags: ListingTag[];
+  status: "Owned" | "Listed" | "Watched" | "Sold";
+  price?: number;
+  salePrice?: number;
+  soldDate?: string;
+  buyer?: string;
+  watches?: number;
+  views?: number;
+  accent: string;
+  route: string;
 };
 
 export type MockOrder = {
@@ -906,7 +929,9 @@ export const mockConversations: MockConversation[] = [
     snippet: "I can ship this tomorrow with tracking.",
     lastSnippet: "I can ship this tomorrow with tracking.",
     timestamp: "2m",
+    sortRank: 4,
     unread: true,
+    isActive: true,
     accent: "#8f1d2c",
     messages: [
       {
@@ -947,6 +972,8 @@ export const mockConversations: MockConversation[] = [
     snippet: "The card is ready to ship.",
     lastSnippet: "The card is ready to ship.",
     timestamp: "18m",
+    sortRank: 3,
+    isActive: true,
     accent: "#334155",
     messages: [
       {
@@ -972,7 +999,9 @@ export const mockConversations: MockConversation[] = [
     snippet: "Offer is pending review.",
     lastSnippet: "Offer is pending review.",
     timestamp: "1h",
+    sortRank: 2,
     unread: true,
+    isActive: false,
     accent: "#1e3a8a",
     messages: [
       {
@@ -1001,6 +1030,8 @@ export const mockConversations: MockConversation[] = [
     snippet: "Do you combine shipping on multiple cards?",
     lastSnippet: "Do you combine shipping on multiple cards?",
     timestamp: "3h",
+    sortRank: 1,
+    isActive: false,
     accent: "#7c3aed",
     messages: [
       {
@@ -1117,10 +1148,23 @@ export const mockSellerDashboardData = {
 
 export const sellerRewardLevels = Array.from({ length: 10 }, (_, index) => {
   const level = index + 1;
+  const badges = [
+    "Starter",
+    "Rising Seller",
+    "Trusted Seller",
+    "Fast Shipper",
+    "Top Seller",
+    "Grail Dealer",
+    "Market Maker",
+    "Elite Seller",
+    "Vault Seller",
+    "GRAIL Legend",
+  ];
 
   return {
     level,
     title: `Level ${level} Seller`,
+    badge: badges[index],
     requirements:
       level === 1
         ? "Create accurate listings and complete your first sales."
@@ -1133,6 +1177,146 @@ export const sellerRewardLevels = Array.from({ length: 10 }, (_, index) => {
           : "Highest visibility boosts, stronger trust badge, and early access to seller tools.",
   };
 });
+
+export const mockWatchedCardIds = ["browse-1", "browse-4", "browse-5", "browse-7"];
+
+export const mockWatchedCards = mockListings
+  .filter((listing) => mockWatchedCardIds.includes(listing.id))
+  .map((listing, index) => ({
+    ...listing,
+    priceChange:
+      index === 0 ? "+4.8%" : index === 1 ? "+6.2%" : index === 2 ? "-1.4%" : "+7.8%",
+    belowMarket: listing.price < listing.marketValue,
+  }));
+
+export const mockPortfolioCards: PortfolioCard[] = [
+  {
+    id: "owned-1",
+    listingId: "browse-1",
+    title: "Crimson Court Rookie",
+    subtitle: "Sports: PSA 10",
+    category: "Sports",
+    estimatedValue: 1320,
+    costBasis: 980,
+    gainLoss: 340,
+    tags: ["Graded", "Grail"],
+    status: "Owned",
+    accent: "#8f1d2c",
+    route: "/cards/browse-1",
+  },
+  {
+    id: "owned-2",
+    listingId: "browse-3",
+    title: "Midnight Arc Holo",
+    subtitle: "TCG: Mint",
+    category: "TCG",
+    estimatedValue: 380,
+    costBasis: 310,
+    gainLoss: 70,
+    tags: ["Raw"],
+    status: "Owned",
+    accent: "#0f766e",
+    route: "/cards/browse-3",
+  },
+  {
+    id: "owned-3",
+    listingId: "browse-6",
+    title: "Platinum Rookie Crest",
+    subtitle: "Sports: PSA 8",
+    category: "Sports",
+    estimatedValue: 940,
+    costBasis: 1025,
+    gainLoss: -85,
+    tags: ["Graded"],
+    status: "Owned",
+    accent: "#475569",
+    route: "/cards/browse-6",
+  },
+  {
+    id: "listed-1",
+    listingId: "browse-7",
+    title: "Emerald Archive Guardian",
+    subtitle: "TCG: BGS 9.5",
+    category: "TCG",
+    estimatedValue: 820,
+    costBasis: 620,
+    gainLoss: 200,
+    tags: ["Graded", "Hot"],
+    status: "Listed",
+    price: 760,
+    watches: 205,
+    views: 1510,
+    accent: "#047857",
+    route: "/cards/browse-7",
+  },
+  {
+    id: "sold-1",
+    listingId: "browse-8",
+    title: "Sapphire Prospect Vault",
+    subtitle: "Sports: Raw Mint",
+    category: "Sports",
+    estimatedValue: 155,
+    costBasis: 95,
+    gainLoss: 71,
+    tags: ["Raw"],
+    status: "Sold",
+    salePrice: 166,
+    soldDate: "Jun 18, 2026",
+    buyer: "RookieIndex",
+    accent: "#1d4ed8",
+    route: "/cards/browse-8",
+  },
+];
+
+export const mockMarketIndexData = {
+  hero: {
+    value: mockMarketData.grailMarketIndex.value,
+    dailyChange: mockMarketData.grailMarketIndex.dailyChange,
+    sevenDayChange: "+5.7%",
+    thirtyDayChange: "+12.4%",
+    totalListings: mockMarketData.snapshot.totalListings,
+    avgSalePrice: mockMarketData.snapshot.avgSalePrice,
+  },
+  chartPoints: mockMarketData.grailMarketIndex.chartPoints,
+  categoryIndexes: [
+    { name: "Sports Cards Index", value: "1,186.4", change: "+3.1%" },
+    { name: "TCG Cards Index", value: "1,302.8", change: "+1.9%" },
+    { name: "Grail Cards Index", value: "1,548.2", change: "+4.6%" },
+    { name: "Raw Cards Index", value: "982.1", change: "-0.8%" },
+    { name: "Graded Cards Index", value: "1,412.6", change: "+2.7%" },
+  ],
+  trendingCategories: [
+    {
+      category: "Graded Rookies",
+      index: "1,442.7",
+      sevenDay: "+8.2%",
+      thirtyDay: "+19.4%",
+      volume: "842 sales",
+      topMover: "Crimson Court Rookie",
+    },
+    {
+      category: "TCG Holo",
+      index: "1,286.3",
+      sevenDay: "+4.9%",
+      thirtyDay: "+11.2%",
+      volume: "516 sales",
+      topMover: "Emerald Archive Guardian",
+    },
+    {
+      category: "Raw Near Mint",
+      index: "996.5",
+      sevenDay: "-1.1%",
+      thirtyDay: "+3.8%",
+      volume: "334 sales",
+      topMover: "Aurora Strike Prism",
+    },
+  ],
+  topMovers: {
+    gainers: ["Emerald Archive Guardian", "Obsidian Field Captain", "Crimson Court Rookie"],
+    losers: ["Sapphire Prospect Vault", "Aurora Strike Prism", "Midnight Arc Holo"],
+    watched: ["Emerald Archive Guardian", "Crimson Court Rookie", "Obsidian Field Captain"],
+  },
+};
 
 export function getMockListingById(id: string) {
   return mockListings.find((listing) => listing.id === id);

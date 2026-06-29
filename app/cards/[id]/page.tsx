@@ -222,9 +222,11 @@ export default function CardDetailPage() {
                   type="button"
                   className={`watch-button ${isWatching ? "active" : ""}`}
                   aria-pressed={isWatching}
+                  aria-label={isWatching ? "Remove from watched cards" : "Watch card"}
+                  title="Watch card"
                   onClick={() => setIsWatching((current) => !current)}
                 >
-                  {isWatching ? "Watching" : "Watch"}
+                  {isWatching ? "♥" : "♡"}
                 </button>
 
                 <button
@@ -575,16 +577,17 @@ const pageStyles = `
     top: 14px;
     right: 14px;
     z-index: 5;
-    height: 36px;
+    width: 40px;
+    height: 40px;
     border: 1px solid rgba(231,222,208,0.28);
     border-radius: 999px;
     background:
       radial-gradient(circle at 50% 0%, rgba(255,255,255,0.14), transparent 50%),
       rgba(8,8,10,0.82);
     color: #E7DED0;
-    padding: 0 14px;
-    font-size: 12px;
-    line-height: 14px;
+    padding: 0;
+    font-size: 22px;
+    line-height: 1;
     font-weight: 900;
     cursor: pointer;
     backdrop-filter: blur(12px);

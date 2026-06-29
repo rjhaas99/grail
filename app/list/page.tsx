@@ -1,469 +1,282 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 import Header from "../components/Header";
-import RequireAuth from "../components/RequireAuth";
-import { supabase } from "../../lib/supabase";
+
+const photoTypes = [
+  "Front",
+  "Back",
+  "Top Corners",
+  "Bottom Corners",
+  "Surface",
+  "Edges",
+];
+const categories = ["Sports", "TCG"];
+const rawConditions = ["Mint", "Near Mint", "Excellent", "Very Good", "Good", "Poor"];
+const graders = ["PSA", "BGS", "CGC", "SGC", "Other"];
+const psaGrades = ["10", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1", "Authentic"];
+const standardGrades = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1", "Authentic"];
+
+function formatCurrency(value: string) {
+  const number = Number(value);
+  if (!number) return "$0";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(number);
+}
+
+function ActionCircles() {
+  return (
+    <div className="action-circles" aria-hidden="true">
+      <span>🛒</span>
+      <span>✉</span>
+      <span>$</span>
+    </div>
+  );
+}
 
 export default function ListCardPage() {
-  const router = useRouter();
-
-  const [cardType, setCardType] = useState("graded");
-  const [sport, setSport] = useState("");
-  const [player, setPlayer] = useState("");
-  const [year, setYear] = useState("");
-  const [brand, setBrand] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [grader, setGrader] = useState("");
-  const [grade, setGrade] = useState("");
-  const [certNumber, setCertNumber] = useState("");
-  const [condition, setCondition] = useState("");
-  const [quantity, setQuantity] = useState("1");
-  const [price, setPrice] = useState("");
-
-  const [frontImageFile, setFrontImageFile] = useState<File | null>(null);
-  const [backImageFile, setBackImageFile] = useState<File | null>(null);
-  const [frontImagePreview, setFrontImagePreview] = useState<string | null>(null);
-  const [backImagePreview, setBackImagePreview] = useState<string | null>(null);
-
-  const [message, setMessage] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const titlePreview =
-    cardType === "graded"
-      ? `${year} ${brand} ${player} ${grader} ${grade}`.trim()
-      : `${year} ${brand} ${player} ${condition}`.trim();
-
-  function cleanFileName(fileName: string) {
-    return fileName
-      .toLowerCase()
-      .replace(/[^a-z0-9.-]/g, "-")
-      .replace(/-+/g, "-");
-  }
-
-  async function uploadCardImage({
-    file,
-    userId,
-    listingId,
-    imageType,
-  }: {
-    file: File;
-    userId: string;
-    listingId: string;
-    imageType: "front" | "back";
-  }) {
-    const path = `${userId}/${listingId}/${imageType}-${Date.now()}-${cleanFileName(
-      file.name
-    )}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("card-images")
-      .upload(path, file, {
-        cacheControl: "3600",
-        upsert: false,
-      });
-
-    if (uploadError) throw uploadError;
-
-    const { data } = supabase.storage
-      .from("card-images")
-      .getPublicUrl(path);
-
-    return data.publicUrl;
-  }
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setMessage("");
-
-    if (!frontImageFile) {
-      setMessage("Please upload a front image.");
-      return;
-    }
-
-    if (!sport || !player || !year || !brand || !price) {
-      setMessage("Please fill out sport, player, year, brand, and price.");
-      return;
-    }
-
-    if (cardType === "graded" && (!grader || !grade)) {
-      setMessage("Please select a grader and grade.");
-      return;
-    }
-
-    if (cardType === "raw" && !condition) {
-      setMessage("Please select the raw card condition.");
-      return;
-    }
-
-    const numericPrice = Number(price);
-    const numericQuantity = Number(quantity);
-
-    if (!numericPrice || numericPrice <= 0) {
-      setMessage("Please enter a valid asking price.");
-      return;
-    }
-
-    if (!numericQuantity || numericQuantity <= 0) {
-      setMessage("Please enter a valid quantity.");
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-      setMessage("Creating listing...");
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        router.push(`/login?redirectTo=${encodeURIComponent("/list")}`);
-        return;
-      }
-
-      const finalTitle =
-        titlePreview ||
-        `${year} ${brand} ${player}`.trim() ||
-        "Untitled Card";
-
-      const { data: listing, error: listingError } = await supabase
-        .from("listings")
-        .insert({
-          seller_id: user.id,
-          title: finalTitle,
-          sport,
-          player,
-          year,
-          brand,
-          card_number: cardNumber || null,
-          card_type: cardType,
-          grader: cardType === "graded" ? grader : null,
-          grade: cardType === "graded" ? grade : null,
-          cert_number: cardType === "graded" ? certNumber || null : null,
-          condition: cardType === "raw" ? condition : null,
-          quantity: numericQuantity,
-          price: numericPrice,
-          status: "active",
-        })
-        .select("id")
-        .single();
-
-      if (listingError) throw listingError;
-
-      const imageRows = [];
-
-      const frontImageUrl = await uploadCardImage({
-        file: frontImageFile,
-        userId: user.id,
-        listingId: listing.id,
-        imageType: "front",
-      });
-
-      imageRows.push({
-        listing_id: listing.id,
-        image_url: frontImageUrl,
-        image_type: "front",
-      });
-
-      if (backImageFile) {
-        const backImageUrl = await uploadCardImage({
-          file: backImageFile,
-          userId: user.id,
-          listingId: listing.id,
-          imageType: "back",
-        });
-
-        imageRows.push({
-          listing_id: listing.id,
-          image_url: backImageUrl,
-          image_type: "back",
-        });
-      }
-
-      const { error: imageError } = await supabase
-        .from("listing_images")
-        .insert(imageRows);
-
-      if (imageError) throw imageError;
-
-      setMessage("Listing created successfully.");
-
-      router.push("/portfolio");
-      router.refresh();
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Listing could not be created. Please try again."
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <RequireAuth>
-      <main className="min-h-screen bg-black text-white">
-        <Header />
-
-        <section className="mx-auto max-w-5xl px-6 py-16">
-          <p className="mb-4 text-xs font-medium uppercase tracking-[0.45em] text-zinc-500">
-            Sell a Card
-          </p>
-
-          <h1 className="text-5xl font-semibold tracking-tight">
-            List your card.
-          </h1>
-
-          <p className="mt-4 text-zinc-400">
-            Upload real photos, add card details, set your price, and create a real listing.
-          </p>
-
-          <form
-            onSubmit={handleSubmit}
-            className="mt-10 grid gap-6 lg:grid-cols-2"
-          >
-            <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6">
-              <h2 className="text-2xl font-semibold">Card Photos</h2>
-
-              <div className="mt-6 grid gap-4">
-                <label className="flex h-64 cursor-pointer items-center justify-center overflow-hidden rounded-3xl border border-dashed border-zinc-700 bg-black text-center hover:border-zinc-500">
-                  {frontImagePreview ? (
-                    <img
-                      src={frontImagePreview}
-                      alt="Front of card"
-                      className="mx-auto max-h-[500px] w-auto object-contain"
-                    />
-                  ) : (
-                    <div>
-                      <p className="font-semibold">Upload Front Image</p>
-                      <p className="mt-2 text-sm text-zinc-500">JPG, PNG, or HEIC</p>
-                    </div>
-                  )}
-
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-
-                      if (file) {
-                        setFrontImageFile(file);
-                        setFrontImagePreview(URL.createObjectURL(file));
-                      }
-                    }}
-                  />
-                </label>
-
-                <label className="flex h-64 cursor-pointer items-center justify-center overflow-hidden rounded-3xl border border-dashed border-zinc-700 bg-black text-center hover:border-zinc-500">
-                  {backImagePreview ? (
-                    <img
-                      src={backImagePreview}
-                      alt="Back of card"
-                      className="mx-auto max-h-[500px] w-auto object-contain"
-                    />
-                  ) : (
-                    <div>
-                      <p className="font-semibold">Upload Back Image</p>
-                      <p className="mt-2 text-sm text-zinc-500">
-                        Optional but recommended
-                      </p>
-                    </div>
-                  )}
-
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-
-                      if (file) {
-                        setBackImageFile(file);
-                        setBackImagePreview(URL.createObjectURL(file));
-                      }
-                    }}
-                  />
-                </label>
-              </div>
-
-              <div className="mt-6 rounded-3xl border border-zinc-800 bg-black p-5">
-                <p className="text-sm text-zinc-500">Listing Preview</p>
-
-                <h3 className="mt-2 text-xl font-semibold">
-                  {titlePreview || "Your card title will appear here"}
-                </h3>
-
-                <p className="mt-2 text-sm text-zinc-500">
-                  {price ? `$${price}` : "Asking price"}
-                </p>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6">
-              <h2 className="text-2xl font-semibold">Card Details</h2>
-
-              <div className="mt-6 space-y-5">
-                <select
-                  value={cardType}
-                  onChange={(event) => setCardType(event.target.value)}
-                  className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                >
-                  <option value="graded">Graded Card</option>
-                  <option value="raw">Raw Card</option>
-                </select>
-
-                <select
-                  value={sport}
-                  onChange={(event) => setSport(event.target.value)}
-                  className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                >
-                  <option value="">Select sport/category</option>
-                  <option>Basketball</option>
-                  <option>Football</option>
-                  <option>Baseball</option>
-                  <option>Hockey</option>
-                  <option>Soccer</option>
-                  <option>Pokémon</option>
-                  <option>TCG</option>
-                  <option>Other</option>
-                </select>
-
-                <input
-                  value={player}
-                  onChange={(event) => setPlayer(event.target.value)}
-                  className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                  placeholder="Player name"
-                />
-
-                <input
-                  value={year}
-                  onChange={(event) => setYear(event.target.value)}
-                  className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                  placeholder="Year"
-                />
-
-                <input
-                  value={brand}
-                  onChange={(event) => setBrand(event.target.value)}
-                  className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                  placeholder="Brand / set"
-                />
-
-                <input
-                  value={cardNumber}
-                  onChange={(event) => setCardNumber(event.target.value)}
-                  className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                  placeholder="Card number"
-                />
-
-                {cardType === "raw" && (
-                  <select
-                    value={condition}
-                    onChange={(event) => setCondition(event.target.value)}
-                    className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                  >
-                    <option value="">Raw condition</option>
-                    <option>Mint</option>
-                    <option>Near Mint</option>
-                    <option>Excellent</option>
-                    <option>Very Good</option>
-                    <option>Poor</option>
-                  </select>
-                )}
-
-                {cardType === "graded" && (
-                  <>
-                    <select
-                      value={grader}
-                      onChange={(event) => setGrader(event.target.value)}
-                      className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                    >
-                      <option value="">Select grader</option>
-                      <option>PSA</option>
-                      <option>BGS</option>
-                      <option>SGC</option>
-                      <option>CGC</option>
-                      <option>TAG</option>
-                      <option>Other</option>
-                    </select>
-
-                    <select
-                      value={grade}
-                      onChange={(event) => setGrade(event.target.value)}
-                      className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                    >
-                      <option value="">Select grade</option>
-                      <option>10</option>
-                      <option>9.5</option>
-                      <option>9</option>
-                      <option>8.5</option>
-                      <option>8</option>
-                      <option>7.5</option>
-                      <option>7</option>
-                      <option>6</option>
-                      <option>5</option>
-                      <option>4</option>
-                      <option>3</option>
-                      <option>2</option>
-                      <option>1</option>
-                    </select>
-
-                    <input
-                      value={certNumber}
-                      onChange={(event) => setCertNumber(event.target.value)}
-                      className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                      placeholder="Certification number (optional)"
-                    />
-
-                    <button
-                      type="button"
-                      className="w-full rounded-full border border-zinc-800 px-8 py-4 font-semibold text-white hover:border-zinc-600"
-                    >
-                      Verify Certification
-                    </button>
-                  </>
-                )}
-
-                <input
-                  value={quantity}
-                  onChange={(event) => setQuantity(event.target.value)}
-                  className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                  placeholder="Quantity"
-                />
-
-                <input
-                  value={price}
-                  onChange={(event) => setPrice(event.target.value)}
-                  className="w-full rounded-2xl border border-zinc-800 bg-black p-4 outline-none"
-                  placeholder="Asking price"
-                />
-
-                <p className="pt-2 text-sm text-zinc-500">
-                  Seller Fee: 10% of final sale price. Buyer Fee: 3% added at checkout.
-                </p>
-
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full rounded-full bg-white px-8 py-4 font-semibold text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {submitting ? "Creating Listing..." : "Submit Listing"}
-                </button>
-
-                {message && (
-                  <p className="text-center text-sm text-zinc-400">
-                    {message}
-                  </p>
-                )}
-              </div>
-            </div>
-          </form>
-        </section>
-      </main>
-    </RequireAuth>
-  );
+  const [status, setStatus] = useState("");
+  const [category, setCategory] = useState("Sports");
+  const [cardType, setCardType] = useState<"Raw" | "Graded">("Graded");
+  const [title, setTitle] = useState("Crimson Court Rookie");
+  const [year, setYear] = useState("2026");
+  const [setName, setSetName] = useState("Crimson Court Archive");
+  const [cardNumber, setCardNumber] = useState("CC-01");
+  const [subject, setSubject] = useState("Rookie Guard");
+  const [grader, setGrader] = useState("PSA");
+  const [grade, setGrade] = useState("10");
+  const [condition, setCondition] = useState("Near Mint");
+  const [askingPrice, setAskingPrice] = useState("1240");
+  const [minimumOffer, setMinimumOffer] = useState("1120");
+  const [marketValue, setMarketValue] = useState("1320");
+
+  const gradeOptions = grader === "PSA" ? psaGrades : standardGrades;
+  const subtitle =
+    cardType === "Graded"
+      ? `${category}: ${grader} ${grade}`
+      : `${category}: ${condition}`;
+  const badges = useMemo(() => {
+    const next = [cardType === "Graded" ? "Graded" : "Raw"];
+    if (Number(marketValue) >= 1200) next.push("Grail");
+    return next;
+  }, [cardType, marketValue]);
+
+  return (
+    <main className="list-page">
+      <style>{pageStyles}</style>
+      <div className="page-shell">
+        <Header />
+
+        <section className="page-heading">
+          <span>Seller Tools</span>
+          <h1>List a Card</h1>
+          <p>Create a premium GRAIL listing for sports cards, TCG cards, slabs, and raw cards.</p>
+        </section>
+
+        {status ? <p className="status-message">{status}</p> : null}
+
+        <section className="list-layout">
+          <div className="main-column">
+            <section className="panel form-section">
+              <h2>Photos</h2>
+              <p>Raw cards should include corners, surface, and edge photos so buyers can inspect condition.</p>
+              <div className="upload-grid">
+                {photoTypes.map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    className="upload-box"
+                    onClick={() => setStatus("Photo upload mock only.")}
+                  >
+                    <strong>{type}</strong>
+                    <span>Upload</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="panel form-section">
+              <h2>Card Info</h2>
+              <div className="field-grid">
+                <label>
+                  <span>Category</span>
+                  <select value={category} onChange={(event) => setCategory(event.target.value)}>
+                    {categories.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>Card title</span>
+                  <input value={title} onChange={(event) => setTitle(event.target.value)} />
+                </label>
+                <label>
+                  <span>Year</span>
+                  <input value={year} onChange={(event) => setYear(event.target.value)} />
+                </label>
+                <label>
+                  <span>Set</span>
+                  <input value={setName} onChange={(event) => setSetName(event.target.value)} />
+                </label>
+                <label>
+                  <span>Card number</span>
+                  <input value={cardNumber} onChange={(event) => setCardNumber(event.target.value)} />
+                </label>
+                <label>
+                  <span>Player / Character</span>
+                  <input value={subject} onChange={(event) => setSubject(event.target.value)} />
+                </label>
+                <label>
+                  <span>Card type</span>
+                  <select value={cardType} onChange={(event) => setCardType(event.target.value as "Raw" | "Graded")}>
+                    <option>Raw</option>
+                    <option>Graded</option>
+                  </select>
+                </label>
+                {cardType === "Raw" ? (
+                  <label>
+                    <span>Condition</span>
+                    <select value={condition} onChange={(event) => setCondition(event.target.value)}>
+                      {rawConditions.map((item) => <option key={item}>{item}</option>)}
+                    </select>
+                  </label>
+                ) : (
+                  <>
+                    <label>
+                      <span>Grader</span>
+                      <select value={grader} onChange={(event) => setGrader(event.target.value)}>
+                        {graders.map((item) => <option key={item}>{item}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Grade</span>
+                      <select value={grade} onChange={(event) => setGrade(event.target.value)}>
+                        {gradeOptions.map((item) => <option key={item}>{item}</option>)}
+                      </select>
+                    </label>
+                  </>
+                )}
+              </div>
+            </section>
+
+            <section className="panel form-section">
+              <h2>Pricing</h2>
+              <div className="field-grid three">
+                <label>
+                  <span>Asking price</span>
+                  <input value={askingPrice} onChange={(event) => setAskingPrice(event.target.value)} />
+                </label>
+                <label>
+                  <span>Minimum offer</span>
+                  <input value={minimumOffer} onChange={(event) => setMinimumOffer(event.target.value)} />
+                </label>
+                <label>
+                  <span>Market value placeholder</span>
+                  <input value={marketValue} onChange={(event) => setMarketValue(event.target.value)} />
+                </label>
+              </div>
+              <p>Grail tag is based on market value, not asking price.</p>
+              <p>Offers are available on every GRAIL listing. Sellers can set a minimum offer.</p>
+            </section>
+
+            <section className="panel form-section">
+              <h2>Shipping</h2>
+              <div className="field-grid three">
+                <label>
+                  <span>Shipping speed</span>
+                  <select defaultValue="1-2 business days">
+                    <option>1-2 business days</option>
+                    <option>2-3 business days</option>
+                    <option>3-5 business days</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Shipping cost</span>
+                  <input defaultValue="$14" />
+                </label>
+                <label className="toggle-field">
+                  <span>Local pickup placeholder</span>
+                  <button type="button" onClick={() => setStatus("Local pickup toggle mock only.")}>Off</button>
+                </label>
+              </div>
+            </section>
+          </div>
+
+          <aside className="preview-column">
+            <section className="panel preview-card">
+              <h2>Live Listing Preview</h2>
+              <div className="art-shell">
+                <div className={`mock-card ${cardType === "Raw" ? "raw-card" : ""}`}>
+                  {cardType === "Graded" ? (
+                    <div className="mock-label"><span>{grader} {grade}</span><span>{category}</span></div>
+                  ) : null}
+                  <div className="mock-art"><span /><strong /></div>
+                </div>
+              </div>
+              <div className="badge-row">
+                {badges.map((badge) => <span key={badge}>{badge}</span>)}
+              </div>
+              <h3>{title || "Untitled Card"}</h3>
+              <p>{subtitle}</p>
+              <p>Seller: VaultRunner</p>
+              <strong>{formatCurrency(askingPrice)}</strong>
+              <ActionCircles />
+              <button type="button" className="view-card" onClick={() => setStatus("Preview updated.")}>View Card</button>
+            </section>
+
+            <section className="panel action-panel">
+              <button type="button" onClick={() => setStatus("Draft saved.")}>Save Draft</button>
+              <button type="button" onClick={() => setStatus("Preview updated.")}>Preview Listing</button>
+              <button type="button" className="primary" onClick={() => setStatus("Listing published mock-only.")}>Publish Listing</button>
+              <Link href="/seller-dashboard">Back to Seller Dashboard</Link>
+            </section>
+          </aside>
+        </section>
+      </div>
+    </main>
+  );
 }
+
+const pageStyles = `
+  .list-page { min-height: 100vh; background: radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%), linear-gradient(180deg, #000 0%, #030304 58%, #000 100%); color: #fafafa; font-family: Arial, Helvetica, sans-serif; }
+  .page-shell { width: 1240px; margin: 0 auto; padding: 8px 0 38px; }
+  .panel { border: 1px solid #1d1d22; border-radius: 12px; background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)), rgba(5,5,6,0.92); box-shadow: 0 18px 44px rgba(0,0,0,0.28); }
+  .page-heading { margin-top: 18px; }
+  .page-heading span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+  .page-heading h1 { margin: 8px 0 0; color: #fff; font-size: 42px; line-height: 46px; font-weight: 900; }
+  .page-heading p, .form-section p, .preview-card p, .status-message { color: #a1a1aa; font-size: 13px; line-height: 18px; font-weight: 800; }
+  .status-message { margin: 16px 0 0; border: 1px solid rgba(52,211,153,0.24); border-radius: 10px; background: rgba(52,211,153,0.07); color: #86efac; padding: 10px; font-weight: 900; }
+  .list-layout { margin-top: 18px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+  .main-column, .preview-column { display: grid; gap: 14px; }
+  .form-section, .preview-card, .action-panel { padding: 16px; }
+  h2 { margin: 0; color: #fff; font-size: 20px; line-height: 24px; font-weight: 900; }
+  .upload-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .upload-box { min-height: 104px; border: 1px dashed rgba(201,205,211,0.24); border-radius: 10px; background: rgba(8,8,10,0.76); color: #fff; display: grid; place-items: center; gap: 4px; cursor: pointer; }
+  .upload-box span, label span { color: #C9CDD3; font-size: 12px; font-weight: 900; }
+  .field-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .field-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  label { display: grid; gap: 7px; }
+  input, select { border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; min-height: 42px; padding: 0 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none; }
+  button, .action-panel a, .view-card { min-height: 40px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055); color: #fff; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 12px; font-weight: 900; cursor: pointer; }
+  button:hover, .action-panel a:hover { border-color: rgba(231,222,208,0.62); background: rgba(231,222,208,0.11); }
+  .primary { background: #E7DED0; color: #111; }
+  .art-shell { margin: 16px auto 12px; width: 190px; height: 240px; border: 1px solid rgba(201,205,211,0.14); border-radius: 12px; background: #030304; display: flex; align-items: center; justify-content: center; }
+  .mock-card { width: 132px; height: 196px; border: 1px solid rgba(244,244,245,0.48); border-radius: 9px; background: linear-gradient(180deg, #eeeeef 0%, #fafafa 16%, #d7d7da 17%, #111827 18%, #050506 100%); padding: 7px; box-sizing: border-box; }
+  .mock-card.raw-card { background: linear-gradient(180deg, rgba(255,255,255,0.86), #15171b 10%, #050506 100%); }
+  .mock-label { height: 26px; border-radius: 5px; background: #f8fafc; color: #111827; font-size: 7px; font-weight: 900; display: flex; align-items: center; justify-content: space-between; padding: 0 5px; }
+  .mock-art { height: 124px; margin-top: 7px; border: 1px solid rgba(255,255,255,0.26); border-radius: 6px; position: relative; overflow: hidden; background: radial-gradient(circle at 50% 22%, rgba(231,222,208,0.32), transparent 16%), linear-gradient(145deg, #8f1d2c, #111827 54%, #030304); }
+  .raw-card .mock-art { height: 166px; margin-top: 0; background: radial-gradient(circle at 50% 22%, rgba(231,222,208,0.32), transparent 16%), linear-gradient(145deg, #0f766e, #111827 54%, #030304); }
+  .mock-art span { position: absolute; left: 28px; top: 30px; width: 70px; height: 70px; border: 1px solid rgba(255,255,255,0.2); border-radius: 50%; }
+  .mock-art strong { position: absolute; left: 52px; top: 42px; width: 34px; height: 74px; border-radius: 999px 999px 12px 12px; background: rgba(255,255,255,0.72); }
+  .badge-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge-row span { border: 1px solid rgba(231,222,208,0.28); border-radius: 999px; color: #E7DED0; padding: 5px 9px; font-size: 10px; font-weight: 900; }
+  .preview-card h3 { margin: 12px 0 0; color: #fff; font-size: 22px; line-height: 26px; font-weight: 900; }
+  .preview-card > strong { display: block; margin-top: 8px; color: #fff; font-size: 28px; line-height: 32px; }
+  .action-circles { margin-top: 14px; display: flex; gap: 10px; }
+  .action-circles span { width: 42px; height: 42px; border: 1px solid rgba(231,222,208,0.26); border-radius: 999px; background: rgba(8,8,10,0.82); display: inline-flex; align-items: center; justify-content: center; color: #E7DED0; font-weight: 900; }
+  .view-card { margin-top: 14px; width: 100%; }
+  .action-panel { display: grid; gap: 10px; }
+  @media (max-width: 1100px) { .page-shell { width: calc(100vw - 32px); } .list-layout, .field-grid, .field-grid.three, .upload-grid { grid-template-columns: 1fr; } }
+`;

@@ -45,12 +45,19 @@ export default function MessagesPage() {
 
   const filteredConversations = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
+    const sortedConversations = [...conversations].sort((first, second) => {
+      if (first.unread !== second.unread) {
+        return first.unread ? -1 : 1;
+      }
+
+      return second.sortRank - first.sortRank;
+    });
 
     if (!query) {
-      return conversations;
+      return sortedConversations;
     }
 
-    return conversations.filter((conversation) =>
+    return sortedConversations.filter((conversation) =>
       [
         conversation.person,
         conversation.cardTitle,
@@ -80,8 +87,10 @@ export default function MessagesPage() {
         conversation.id === activeConversation.id
           ? {
               ...conversation,
+              unread: false,
               lastSnippet: body,
               timestamp: "now",
+              sortRank: Date.now(),
               messages: [
                 ...conversation.messages,
                 {
@@ -150,16 +159,26 @@ export default function MessagesPage() {
                   key={conversation.id}
                   type="button"
                   className={conversation.id === activeConversation.id ? "active" : ""}
-                  onClick={() => setActiveId(conversation.id)}
+                  onClick={() => {
+                    setActiveId(conversation.id);
+                    setConversations((items) =>
+                      items.map((item) =>
+                        item.id === conversation.id ? { ...item, unread: false } : item,
+                      ),
+                    );
+                  }}
                 >
+                  {conversation.unread ? <span className="unread-dot" aria-hidden="true" /> : null}
                   <div>
-                    <strong>{conversation.person}</strong>
+                    <strong>
+                      {conversation.isActive ? <span className="online-dot" aria-hidden="true" /> : null}
+                      {conversation.person}
+                    </strong>
                     <span>{conversation.cardTitle}</span>
                     <p>{conversation.lastSnippet}</p>
                   </div>
                   <div className="conversation-meta">
                     <span>{conversation.timestamp}</span>
-                    {conversation.unread ? <em>New</em> : null}
                   </div>
                 </button>
               ))}
@@ -171,6 +190,7 @@ export default function MessagesPage() {
               <div>
                 <h2>{activeConversation.person}</h2>
                 <p>
+                  {activeConversation.isActive ? <span className="online-dot" aria-hidden="true" /> : null}
                   {activeConversation.badge} · {activeConversation.cardTitle}
                 </p>
               </div>
@@ -366,6 +386,7 @@ const pageStyles = `
   }
 
   .conversation-rows button {
+    position: relative;
     border: 1px solid #202026;
     border-radius: 10px;
     background: rgba(8,8,10,0.72);
@@ -376,6 +397,18 @@ const pageStyles = `
     gap: 10px;
     text-align: left;
     cursor: pointer;
+  }
+
+  .unread-dot {
+    position: absolute;
+    left: 7px;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 0 10px rgba(255,255,255,0.28);
+    transform: translateY(-50%);
   }
 
   .conversation-rows button.active,
@@ -392,6 +425,17 @@ const pageStyles = `
     font-weight: 900;
   }
 
+  .online-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #34d399;
+    box-shadow: 0 0 10px rgba(52,211,153,0.28);
+    display: inline-flex;
+    margin-right: 7px;
+    vertical-align: 1px;
+  }
+
   .conversation-rows span,
   .conversation-rows p,
   .conversation-meta {
@@ -403,18 +447,6 @@ const pageStyles = `
 
   .conversation-meta {
     text-align: right;
-  }
-
-  .conversation-meta em {
-    margin-top: 6px;
-    border-radius: 999px;
-    background: rgba(231,222,208,0.12);
-    color: #E7DED0;
-    padding: 3px 7px;
-    display: inline-flex;
-    font-style: normal;
-    font-size: 9px;
-    font-weight: 900;
   }
 
   .thread-panel {
@@ -617,6 +649,20 @@ const pageStyles = `
     display: grid;
     grid-template-columns: 1fr auto;
     gap: 10px;
+    align-items: center;
+    min-height: 46px;
+  }
+
+  .composer input {
+    height: 42px;
+    border: 1px solid #24242a;
+    border-radius: 10px;
+    background: #08080a;
+    padding: 0 12px;
+  }
+
+  .composer button {
+    height: 42px;
   }
 
   .composer input {

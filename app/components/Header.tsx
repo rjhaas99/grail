@@ -17,6 +17,7 @@ const mainMenuItems = [
   { label: "Portfolio", href: "/portfolio" },
   { label: "Offers", href: "/offers" },
   { label: "Messages", href: "/messages" },
+  { label: "Watched Cards", href: "/watched" },
   { label: "Seller Dashboard", href: "/seller-dashboard" },
 ];
 

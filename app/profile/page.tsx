@@ -4,24 +4,12 @@ import Link from "next/link";
 import { useState } from "react";
 import Header from "../components/Header";
 
-function Toggle({
-  checked,
-  onClick,
-  label,
-}: {
-  checked: boolean;
-  onClick: () => void;
-  label: string;
-}) {
+function LockedRow({ label }: { label: string }) {
   return (
-    <button
-      type="button"
-      className={`toggle-row ${checked ? "active" : ""}`}
-      onClick={onClick}
-    >
+    <div className="locked-row">
       <span>{label}</span>
-      <strong>{checked ? "On" : "Off"}</strong>
-    </button>
+      <strong>Locked On</strong>
+    </div>
   );
 }
 
@@ -35,8 +23,6 @@ function StatCard({ label, value }: { label: string; value: string }) {
 }
 
 export default function ProfilePage() {
-  const [publicProfile, setPublicProfile] = useState(true);
-  const [showSellerStats, setShowSellerStats] = useState(true);
   const [status, setStatus] = useState("");
 
   return (
@@ -52,7 +38,15 @@ export default function ProfilePage() {
         </section>
 
         <section className="profile-hero panel">
-          <div className="avatar">RH</div>
+          <button
+            type="button"
+            className="avatar"
+            onClick={() => setStatus("Profile photo upload mock.")}
+            title="Change Photo"
+          >
+            <span>RH</span>
+            <em>Change Photo</em>
+          </button>
           <div>
             <h2>Ryan Haas</h2>
             <p>@ryanjhaas99</p>
@@ -82,7 +76,8 @@ export default function ProfilePage() {
             </label>
             <label>
               <span>Username</span>
-              <input defaultValue="@ryanjhaas99" />
+              <input defaultValue="@ryanjhaas99" readOnly />
+              <small>Username changes are managed in Settings.</small>
             </label>
             <label>
               <span>Bio</span>
@@ -97,16 +92,9 @@ export default function ProfilePage() {
               <span>TCG Cards</span>
               <span>Grails</span>
             </div>
-            <Toggle
-              checked={publicProfile}
-              onClick={() => setPublicProfile((current) => !current)}
-              label="Public profile"
-            />
-            <Toggle
-              checked={showSellerStats}
-              onClick={() => setShowSellerStats((current) => !current)}
-              label="Show seller stats"
-            />
+            <LockedRow label="Public profile" />
+            <LockedRow label="Show seller stats" />
+            <p className="trust-note">Required for marketplace trust.</p>
             <div className="action-stack">
               <button type="button" onClick={() => setStatus("Profile changes saved.")}>
                 Save Changes
@@ -145,7 +133,16 @@ const pageStyles = `
   .avatar {
     width: 76px; height: 76px; border-radius: 999px; border: 1px solid rgba(201,205,211,0.26);
     background: radial-gradient(circle at 50% 18%, rgba(255,255,255,0.14), transparent 42%), linear-gradient(135deg, #1f2937, #050506);
-    color: #E7DED0; display: flex; align-items: center; justify-content: center; font-size: 23px; font-weight: 900;
+    color: #E7DED0; display: flex; align-items: center; justify-content: center; font-size: 23px; font-weight: 900; cursor: pointer; position: relative; overflow: hidden; padding: 0;
+  }
+  .avatar em {
+    position: absolute; inset: auto 0 0; min-height: 24px; background: rgba(0,0,0,0.72); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 9px; line-height: 10px; font-style: normal; opacity: 0; transition: opacity 160ms ease;
+  }
+  .avatar:hover {
+    border-color: rgba(231,222,208,0.62); box-shadow: 0 0 20px rgba(201,205,211,0.16);
+  }
+  .avatar:hover em {
+    opacity: 1;
   }
   .profile-hero h2, .form-panel h2, .side-panel h2 { margin: 0; color: #fff; font-size: 24px; line-height: 28px; font-weight: 900; }
   .pill-row { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
@@ -164,6 +161,8 @@ const pageStyles = `
   input, textarea {
     border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; padding: 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none;
   }
+  input[readonly] { color: #a1a1aa; cursor: not-allowed; }
+  label small, .trust-note { color: #85858f; font-size: 11px; line-height: 15px; font-weight: 800; }
   textarea { min-height: 112px; resize: vertical; }
   .category-list { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
   .toggle-row {
@@ -171,6 +170,12 @@ const pageStyles = `
     color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; cursor: pointer; font-weight: 900;
   }
   .toggle-row.active { border-color: rgba(231,222,208,0.48); background: rgba(231,222,208,0.08); }
+  .locked-row {
+    width: 100%; margin-top: 12px; min-height: 42px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.07);
+    color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; box-sizing: border-box; font-weight: 900;
+  }
+  .locked-row span::before { content: "LOCK"; margin-right: 7px; color: #C9CDD3; font-size: 9px; letter-spacing: 0.06em; }
+  .locked-row strong { color: #E7DED0; font-size: 12px; }
   .action-stack { margin-top: 16px; display: grid; gap: 10px; }
   .action-stack button, .action-stack a {
     min-height: 40px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055);

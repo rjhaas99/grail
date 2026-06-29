@@ -49,12 +49,46 @@ function ToggleRow({
   );
 }
 
+function LockedRow({ label }: { label: string }) {
+  return (
+    <div className="locked-row">
+      <span>{label}</span>
+      <strong>Locked On</strong>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [toggles, setToggles] = useState(initialToggles);
   const [status, setStatus] = useState("");
+  const [username, setUsername] = useState("ryanjhaas99");
+  const [usernameStatus, setUsernameStatus] = useState("");
+  const [usernameSaved, setUsernameSaved] = useState(false);
 
   function toggle(key: ToggleKey) {
     setToggles((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function checkUsername() {
+    const takenNames = ["admin", "grail", "vaultrunner", "ryanhaas"];
+    const normalized = username.trim().replace(/^@/, "").toLowerCase();
+
+    if (takenNames.includes(normalized)) {
+      setUsernameStatus("Username is already taken.");
+      return;
+    }
+
+    setUsernameStatus("Username is available.");
+  }
+
+  function saveUsername() {
+    if (usernameStatus !== "Username is available.") {
+      setUsernameStatus("Check availability before saving.");
+      return;
+    }
+
+    setUsernameSaved(true);
+    setUsernameStatus("Username updated. You can change it again tomorrow.");
   }
 
   return (
@@ -84,8 +118,27 @@ export default function SettingsPage() {
             </label>
             <label>
               <span>Username</span>
-              <input defaultValue="@ryanjhaas99" />
+              <input
+                value={username}
+                disabled={usernameSaved}
+                onChange={(event) => {
+                  setUsername(event.target.value);
+                  setUsernameStatus("");
+                }}
+              />
             </label>
+            <div className="username-actions">
+              <button type="button" onClick={checkUsername} disabled={usernameSaved}>
+                Check Availability
+              </button>
+              <button type="button" onClick={saveUsername} disabled={usernameSaved}>
+                Save Username
+              </button>
+            </div>
+            {usernameStatus ? <p className="field-note">{usernameStatus}</p> : null}
+            {usernameSaved ? (
+              <p className="field-note">Username can only be changed once per day.</p>
+            ) : null}
             <button type="button" onClick={() => setStatus("Password flow coming soon.")}>
               Change password
             </button>
@@ -93,9 +146,10 @@ export default function SettingsPage() {
 
           <div className="panel section-card">
             <h2>Privacy</h2>
-            <ToggleRow label="Public profile" checked={toggles.publicProfile} onClick={() => toggle("publicProfile")} />
-            <ToggleRow label="Show collection value" checked={toggles.showCollectionValue} onClick={() => toggle("showCollectionValue")} />
-            <ToggleRow label="Show seller stats" checked={toggles.showSellerStats} onClick={() => toggle("showSellerStats")} />
+            <LockedRow label="Public profile" />
+            <LockedRow label="Show collection value" />
+            <LockedRow label="Show seller stats" />
+            <p className="field-note">Required for marketplace trust and collection transparency.</p>
             <ToggleRow label="Allow messages from buyers" checked={toggles.allowBuyerMessages} onClick={() => toggle("allowBuyerMessages")} />
           </div>
 
@@ -180,16 +234,26 @@ const pageStyles = `
   input {
     border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; padding: 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none;
   }
+  input:disabled { color: #85858f; cursor: not-allowed; }
   button {
     min-height: 40px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055);
     color: #fff; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 900; cursor: pointer;
   }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
   button:hover { border-color: rgba(231,222,208,0.62); background: rgba(231,222,208,0.11); box-shadow: 0 0 18px rgba(201,205,211,0.13); }
   .section-card > button { margin-top: 14px; }
   .toggle-row {
     width: 100%; margin-top: 12px; background: #08080a; border-color: #24242a; justify-content: space-between;
   }
   .toggle-row.active { border-color: rgba(231,222,208,0.48); background: rgba(231,222,208,0.08); }
+  .locked-row {
+    width: 100%; margin-top: 12px; min-height: 42px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.07);
+    color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; box-sizing: border-box; font-weight: 900;
+  }
+  .locked-row span::before { content: "LOCK"; margin-right: 7px; color: #C9CDD3; font-size: 9px; letter-spacing: 0.06em; }
+  .locked-row strong { color: #E7DED0; font-size: 12px; }
+  .username-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .field-note { margin: 9px 0 0; color: #a1a1aa; font-size: 11px; line-height: 15px; font-weight: 800; }
   .security-row {
     margin-top: 12px; border: 1px solid #202026; border-radius: 10px; background: rgba(8,8,10,0.76); padding: 12px; display: flex; justify-content: space-between; gap: 10px;
   }

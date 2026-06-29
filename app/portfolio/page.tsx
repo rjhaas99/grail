@@ -1,431 +1,281 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../../lib/supabase";
+import { useMemo, useState } from "react";
 import Header from "../components/Header";
-import RequireAuth from "../components/RequireAuth";
+import {
+  type PortfolioCard,
+  mockPortfolioCards,
+  mockWatchedCards,
+} from "../lib/mockData";
 
-type ListingImage = {
-  image_url: string | null;
-  image_type: string | null;
-};
+type Tab = "Owned" | "Listed" | "Watched" | "Sold";
 
-type CardItem = {
-  id: string;
-  title: string;
-  subtitle: string;
-  price: string;
-  priceValue: number;
-costValue: number;
-  status: "Listed" | "Not Listed";
-  listed: boolean;
-imageUrl: string | null;
-};
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
 
-type ListingRow = {
-  id: string;
-  title: string | null;
-  year: string | null;
-  brand: string | null;
-  player: string | null;
-  grader: string | null;
-  grade: string | null;
-  condition: string | null;
-  price: number | null;
-purchase_price: number | null;
-  status: string | null;
-  created_at: string | null;
-listing_images: ListingImage[] | null;
-};
-
-export default function PortfolioPage() {
-  const [cards, setCards] = useState<CardItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadCards();
-  }, []);
-
-  async function loadCards() {
-    setLoading(true);
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("listings")
-      .select(
-  `
-  id,
-  title,
-  year,
-  brand,
-  player,
-  grader,
-  grade,
-  condition,
-  price,
-purchase_price,
-status,
-created_at,
-  listing_images (
-    image_url,
-    image_type
-  )
-`
-)
-      .eq("seller_id", user.id)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Portfolio cards error:", error.message);
-      setCards([]);
-      setLoading(false);
-      return;
-    }
-
-    const realCards: CardItem[] = ((data || []) as ListingRow[]).map((card) => {
-  const imageUrl =
-  card.listing_images?.find((image) => image.image_type === "front")
-    ?.image_url ||
-  card.listing_images?.[0]?.image_url ||
-  null;
-      const title =
-        card.title ||
-        [card.year, card.brand, card.player].filter(Boolean).join(" ") ||
-        "Untitled Card";
-
-      const subtitle =
-        card.grader && card.grade
-          ? `${card.grader} ${card.grade}`
-          : card.condition || "Trading Card";
-
-      const priceValue = Number(card.price || 0);
-const costValue = Number(card.purchase_price || 0);
-const listed = card.status === "active";
-
-      return {
-        id: card.id,
-        title,
-        subtitle,
-        price: formatMoney(priceValue),
-        priceValue,
-costValue,
-status: listed ? "Listed" : "Not Listed",
-        listed,
-imageUrl,
-      };
-    });
-
-    setCards(realCards);
-    setLoading(false);
-  }
-
-  function formatMoney(value: number) {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 0,
-    }).format(value);
-  }
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const [sortMode, setSortMode] = useState("all");
-
-  const shownCards = useMemo(() => {
-    let filteredCards = [...cards];
-
-    if (sortMode === "listed") {
-      filteredCards = filteredCards.filter((card) => card.listed);
-    }
-
-    if (sortMode === "not-listed") {
-      filteredCards = filteredCards.filter((card) => !card.listed);
-    }
-
-    if (sortMode === "price-high") {
-      filteredCards.sort((a, b) => b.priceValue - a.priceValue);
-    }
-
-    if (sortMode === "price-low") {
-      filteredCards.sort((a, b) => a.priceValue - b.priceValue);
-    }
-
-    return filteredCards;
-  }, [cards, sortMode]);
-
-  function chooseSort(mode: string) {
-    setSortMode(mode);
-    setSortMenuOpen(false);
-  }
-const collectionValue = cards.reduce(
-    (sum, card) => sum + card.priceValue,
-    0
-  );
-
-  const totalCost = cards.reduce(
-    (sum, card) => sum + card.costValue,
-    0
-  );
-
-  const profitLoss = collectionValue - totalCost;
-
-  function formatProfitLoss(value: number) {
-    if (value > 0) return `+${formatMoney(value)}`;
-    if (value < 0) return `-${formatMoney(Math.abs(value))}`;
-    return "$0";
-  }
+function CardArt({ accent }: { accent: string }) {
   return (
-    <RequireAuth>
-      <main className="min-h-screen bg-black text-white">
-        <Header />
-
-        <section className="mx-auto max-w-6xl px-6 py-16">
-          <p className="text-xs uppercase tracking-[0.4em] text-zinc-500">
-            Portfolio
-          </p>
-
-          <h1 className="mt-4 text-5xl font-semibold">My Collection</h1>
-
-          <p className="mt-4 text-zinc-400">
-            Track your inventory, collection value, and performance.
-          </p>
-
-          <div className="mt-12 grid gap-4 md:grid-cols-3">
-            <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-              <p className="text-zinc-500">Collection Value</p>
-              <h2 className="mt-2 text-4xl font-bold">
-  {formatMoney(collectionValue)}
-</h2>
-            </div>
-
-            <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-              <p className="text-zinc-500">Cards Owned</p>
-              <h2 className="mt-2 text-4xl font-bold">{cards.length}</h2>
-            </div>
-
-            <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-              <p className="text-zinc-500">Profit / Loss</p>
-              <h2
-  className={`mt-2 text-4xl font-bold ${
-  profitLoss > 0
-    ? "text-green-400"
-    : profitLoss < 0
-    ? "text-red-400"
-    : "text-zinc-500"
-}`}
->
-  {formatProfitLoss(profitLoss)}
-</h2>
-            </div>
-          </div>
-
-          <div className="mt-12 grid grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-6 items-start">
-            <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setSortMenuOpen(!sortMenuOpen)}
-                      className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-800 bg-black text-zinc-300 hover:border-zinc-600 hover:text-white"
-                      title="Sort cards"
-                    >
-                      <span className="text-xl leading-none">☰</span>
-                    </button>
-
-                    {sortMenuOpen && (
-                      <div className="absolute left-0 top-12 z-50 w-48 rounded-2xl border border-zinc-800 bg-black p-2 shadow-2xl">
-                        <button
-                          type="button"
-                          onClick={() => chooseSort("all")}
-                          className="block w-full rounded-xl px-4 py-3 text-left text-sm text-zinc-300 hover:bg-zinc-900 hover:text-white"
-                        >
-                          All Cards
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => chooseSort("listed")}
-                          className="block w-full rounded-xl px-4 py-3 text-left text-sm text-zinc-300 hover:bg-zinc-900 hover:text-white"
-                        >
-                          Listed
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => chooseSort("not-listed")}
-                          className="block w-full rounded-xl px-4 py-3 text-left text-sm text-zinc-300 hover:bg-zinc-900 hover:text-white"
-                        >
-                          Not Listed
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => chooseSort("price-high")}
-                          className="block w-full rounded-xl px-4 py-3 text-left text-sm text-zinc-300 hover:bg-zinc-900 hover:text-white"
-                        >
-                          Price: High to Low
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => chooseSort("price-low")}
-                          className="block w-full rounded-xl px-4 py-3 text-left text-sm text-zinc-300 hover:bg-zinc-900 hover:text-white"
-                        >
-                          Price: Low to High
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  <h3 className="text-2xl font-semibold">My Cards</h3>
-                </div>
-
-                <p className="text-sm text-zinc-500">{shownCards.length} Cards</p>
-              </div>
-
-              <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {shownCards.map((card) => (
-                  <div
-                    key={card.id}
-                    className="flex h-full flex-col rounded-2xl border border-zinc-900 bg-black p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex h-32 w-24 items-center justify-center overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900">
-  {card.imageUrl ? (
-    <img
-      src={card.imageUrl}
-      alt={card.title}
-      className="h-full w-full object-contain"
-    />
-  ) : (
-    <div className="h-24 w-16 rounded border-2 border-zinc-300 bg-zinc-800" />
-  )}
-</div>
-
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                          card.listed
-                            ? "bg-green-500 text-black"
-                            : "bg-zinc-800 text-zinc-300"
-                        }`}
-                      >
-                        {card.status}
-                      </span>
-                    </div>
-
-                    <p className="mt-4 block h-10 overflow-hidden text-sm font-semibold leading-5 hover:underline">
-                      {card.title}
-                    </p>
-
-                    <p className="mt-1 h-5 overflow-hidden text-sm text-zinc-500">
-                      {card.subtitle}
-                    </p>
-
-                    <p className="mt-3 text-xl font-bold">{card.price}</p>
-
-                    <div className="mt-auto flex gap-3 pt-4">
-                      {card.listed && (
-                        <Link
-                          href="/checkout"
-                          className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-800 text-sm hover:border-zinc-500"
-                          title="Buy Now"
-                        >
-  <svg
-    viewBox="0 0 24 24"
-    className="h-4 w-4 text-white"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <circle cx="9" cy="21" r="1" />
-    <circle cx="20" cy="21" r="1" />
-    <path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6" />
-  </svg>
-</Link>
-                      )}
-
-                      <Link
-  href={`/messages?listingId=${card.id}`}
-  className="relative h-9 w-9 rounded-full border border-zinc-800 text-white hover:border-zinc-500"
-  title="Message"
->
-  <svg
-    viewBox="0 0 24 24"
-    className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="3" y="5" width="18" height="14" rx="2" />
-    <path d="M3 7l9 6 9-6" />
-  </svg>
-</Link>
-
-                      <Link
-                        href="/make-offer"
-                        className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-800 text-sm font-bold hover:border-zinc-500"
-                        title="Make Offer"
-                      >
-                        $
-                      </Link>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-              <h3 className="text-2xl font-semibold">Seller Progress</h3>
-
-              <p className="mt-2 text-zinc-500">Level 1 Collector</p>
-
-              <div className="mt-6 h-3 rounded-full bg-zinc-900">
-                <div className="h-3 w-1/4 rounded-full bg-white" />
-              </div>
-
-              <p className="mt-3 text-sm text-zinc-500">$250 / $1,000 Sold</p>
-
-              <div className="mt-8 space-y-4">
-                <Link
-                  href="/listings"
-                  className="flex justify-between border-b border-zinc-900 pb-3 text-zinc-300 hover:text-white"
-                >
-                  <span>Active Listings</span>
-                  <span>8</span>
-                </Link>
-
-                <Link
-                  href="/offers"
-                  className="flex justify-between border-b border-zinc-900 pb-3 text-zinc-300 hover:text-white"
-                >
-                  <span>Pending Offers</span>
-                  <span>3</span>
-                </Link>
-
-                <Link
-                  href="/sales"
-                  className="flex justify-between text-zinc-300 hover:text-white"
-                >
-                  <span>Completed Sales</span>
-                  <span>14</span>
-                </Link>
-              </div>
-            </div>
-          </div>
-        </section>
-      </main>
-    </RequireAuth>
+    <div className="art-shell">
+      <div
+        className="card-art"
+        style={{
+          background: `radial-gradient(circle at 50% 22%, rgba(231,222,208,0.32), transparent 16%), linear-gradient(145deg, ${accent}, #111827 54%, #030304)`,
+        }}
+      >
+        <span />
+        <strong />
+      </div>
+    </div>
   );
 }
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stat-card panel">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+export default function PortfolioPage() {
+  const [activeTab, setActiveTab] = useState<Tab>("Owned");
+  const [status, setStatus] = useState("");
+  const [watched, setWatched] = useState(mockWatchedCards);
+
+  const ownedCards = mockPortfolioCards.filter((card) => card.status === "Owned");
+  const listedCards = mockPortfolioCards.filter((card) => card.status === "Listed");
+  const soldCards = mockPortfolioCards.filter((card) => card.status === "Sold");
+  const collectionValue = mockPortfolioCards
+    .filter((card) => card.status !== "Sold")
+    .reduce((sum, card) => sum + card.estimatedValue, 0);
+  const grailCount = mockPortfolioCards.filter((card) => card.tags.includes("Grail")).length;
+  const thirtyDayChange = "+8.4%";
+
+  const tabCount = useMemo(() => {
+    if (activeTab === "Owned") return ownedCards.length;
+    if (activeTab === "Listed") return listedCards.length;
+    if (activeTab === "Watched") return watched.length;
+    return soldCards.length;
+  }, [activeTab, listedCards.length, ownedCards.length, soldCards.length, watched.length]);
+
+  function renderOwnedCard(card: PortfolioCard) {
+    return (
+      <article key={card.id} className="collection-card">
+        <CardArt accent={card.accent} />
+        <div className="badge-row">
+          {card.tags.map((tag) => <span key={tag}>{tag}</span>)}
+        </div>
+        <h3>{card.title}</h3>
+        <p>{card.subtitle}</p>
+        <div className="value-grid">
+          <span>Market <strong>{formatCurrency(card.estimatedValue)}</strong></span>
+          <span>Cost <strong>{formatCurrency(card.costBasis)}</strong></span>
+          <span className={card.gainLoss >= 0 ? "positive" : "negative"}>
+            Gain/Loss <strong>{card.gainLoss >= 0 ? "+" : ""}{formatCurrency(card.gainLoss)}</strong>
+          </span>
+        </div>
+        <div className="card-actions">
+          <Link href={card.route}>View Details</Link>
+          <button type="button" onClick={() => setStatus("List for sale flow coming soon.")}>List For Sale</button>
+          <button type="button" onClick={() => setStatus("Note added mock-only.")}>Add Note</button>
+        </div>
+      </article>
+    );
+  }
+
+  return (
+    <main className="portfolio-page">
+      <style>{pageStyles}</style>
+      <div className="portfolio-shell">
+        <Header />
+
+        <section className="page-heading">
+          <span>Collection</span>
+          <h1>My Collection</h1>
+          <p>Track your owned cards, watched cards, values, and collection performance.</p>
+        </section>
+
+        {status ? <p className="status-message">{status}</p> : null}
+
+        <section className="stats-grid">
+          <StatCard label="Total Collection Value" value={formatCurrency(collectionValue)} />
+          <StatCard label="Cards Owned" value={String(ownedCards.length)} />
+          <StatCard label="30D Change" value={thirtyDayChange} />
+          <StatCard label="Grail Cards" value={String(grailCount)} />
+          <StatCard label="Watched Cards" value={String(watched.length)} />
+          <StatCard label="Listed For Sale" value={String(listedCards.length)} />
+        </section>
+
+        <section className="portfolio-layout">
+          <div className="main-column">
+            <section className="panel toolbar">
+              <div>
+                <h2>{activeTab}</h2>
+                <p>{tabCount} cards</p>
+              </div>
+              <div className="tabs">
+                {(["Owned", "Listed", "Watched", "Sold"] as Tab[]).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    className={activeTab === tab ? "active" : ""}
+                    onClick={() => setActiveTab(tab)}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {activeTab === "Owned" ? (
+              <section className="card-grid">{ownedCards.map(renderOwnedCard)}</section>
+            ) : null}
+
+            {activeTab === "Listed" ? (
+              <section className="list-panel panel">
+                {listedCards.map((card) => (
+                  <article key={card.id} className="list-row">
+                    <CardArt accent={card.accent} />
+                    <div>
+                      <h3>{card.title}</h3>
+                      <p>{card.subtitle}</p>
+                    </div>
+                    <strong>{formatCurrency(card.price ?? card.estimatedValue)}</strong>
+                    <span>{card.watches} watches</span>
+                    <span>{card.views} views</span>
+                    <div className="row-actions">
+                      <button type="button" onClick={() => setStatus("Edit listing mock-only.")}>Edit Listing</button>
+                      <Link href={card.route}>View Listing</Link>
+                    </div>
+                  </article>
+                ))}
+              </section>
+            ) : null}
+
+            {activeTab === "Watched" ? (
+              <section className="card-grid">
+                {watched.map((card) => (
+                  <article key={card.id} className="collection-card">
+                    <CardArt accent={card.accent} />
+                    <h3>{card.title}</h3>
+                    <p>{card.subtitle}</p>
+                    <div className="value-grid">
+                      <span>Asking <strong>{card.priceDisplay}</strong></span>
+                      <span>Market <strong>{formatCurrency(card.marketValue)}</strong></span>
+                      <span>{card.watchCount} watching</span>
+                    </div>
+                    <div className="card-actions">
+                      <Link href={card.route}>View Card</Link>
+                      <button type="button" onClick={() => setWatched((items) => items.filter((item) => item.id !== card.id))}>Remove Watch</button>
+                    </div>
+                  </article>
+                ))}
+              </section>
+            ) : null}
+
+            {activeTab === "Sold" ? (
+              <section className="list-panel panel">
+                {soldCards.map((card) => (
+                  <article key={card.id} className="list-row">
+                    <CardArt accent={card.accent} />
+                    <div>
+                      <h3>{card.title}</h3>
+                      <p>{card.subtitle}</p>
+                    </div>
+                    <strong>{formatCurrency(card.salePrice ?? card.estimatedValue)}</strong>
+                    <span>{card.soldDate}</span>
+                    <span>Buyer: {card.buyer}</span>
+                    <Link href={card.route}>View Details</Link>
+                  </article>
+                ))}
+              </section>
+            ) : null}
+          </div>
+
+          <aside className="sidebar">
+            <section className="panel side-card">
+              <h2>Collection Allocation</h2>
+              {["Sports 62%", "TCG 38%", "Graded 74%", "Raw 26%", "Grails 18%"].map((item) => (
+                <div key={item} className="allocation-row"><span>{item}</span><strong /></div>
+              ))}
+            </section>
+            <section className="panel side-card">
+              <h2>Collection Value</h2>
+              <svg className="mini-chart" viewBox="0 0 260 92" role="img" aria-label="Collection value chart">
+                <path d="M8 74 C32 64 42 47 66 53 C92 59 102 32 128 38 C154 44 164 69 188 55 C210 42 222 28 252 20" />
+              </svg>
+            </section>
+            <section className="panel side-card">
+              <h2>Recent Activity</h2>
+              <p>Watched Emerald Archive Guardian.</p>
+              <p>Listed Platinum Rookie Crest.</p>
+              <p>Offer sent on Crimson Court Rookie.</p>
+            </section>
+            <section className="panel side-card quick-actions">
+              <h2>Quick Actions</h2>
+              <Link href="/list">List a Card</Link>
+              <Link href="/browse">Browse Cards</Link>
+              <Link href="/collections/vault-runner">View Public Collection</Link>
+            </section>
+          </aside>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+const pageStyles = `
+  .portfolio-page { min-height: 100vh; background: radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%), linear-gradient(180deg, #000 0%, #030304 58%, #000 100%); color: #fafafa; font-family: Arial, Helvetica, sans-serif; }
+  .portfolio-shell { width: 1240px; margin: 0 auto; padding: 8px 0 38px; }
+  .panel { border: 1px solid #1d1d22; border-radius: 12px; background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)), rgba(5,5,6,0.92); box-shadow: 0 18px 44px rgba(0,0,0,0.28); }
+  .page-heading { margin-top: 18px; }
+  .page-heading span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+  .page-heading h1 { margin: 8px 0 0; color: #fff; font-size: 42px; line-height: 46px; font-weight: 900; }
+  .page-heading p, .toolbar p, .collection-card p, .list-row p, .side-card p, .status-message { color: #a1a1aa; font-size: 13px; line-height: 18px; font-weight: 800; }
+  .status-message { margin: 16px 0 0; border: 1px solid rgba(52,211,153,0.24); border-radius: 10px; background: rgba(52,211,153,0.07); color: #86efac; padding: 10px; font-weight: 900; }
+  .stats-grid { margin-top: 16px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+  .stat-card, .side-card { padding: 14px; }
+  .stat-card span, .value-grid span, .list-row span { color: #85858f; font-size: 11px; line-height: 14px; font-weight: 800; }
+  .stat-card strong { display: block; margin-top: 8px; color: #fff; font-size: 22px; line-height: 26px; font-weight: 900; }
+  .portfolio-layout { margin-top: 18px; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+  .main-column, .sidebar { display: grid; gap: 14px; }
+  .toolbar { padding: 14px; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+  h2 { margin: 0; color: #fff; font-size: 20px; line-height: 24px; font-weight: 900; }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  button, a { font-family: inherit; }
+  .tabs button, .card-actions a, .card-actions button, .row-actions a, .row-actions button, .quick-actions a, .list-row > a { min-height: 36px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055); color: #fff; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 12px; font-weight: 900; cursor: pointer; }
+  .tabs button.active, .tabs button:hover, .card-actions a:hover, .card-actions button:hover, .row-actions a:hover, .row-actions button:hover, .quick-actions a:hover { border-color: rgba(231,222,208,0.62); background: rgba(231,222,208,0.11); }
+  .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .collection-card { border: 1px solid #202026; border-radius: 12px; background: #070708; padding: 14px; display: grid; gap: 10px; }
+  .art-shell { width: 100%; height: 166px; border: 1px solid rgba(201,205,211,0.14); border-radius: 10px; background: #030304; display: flex; align-items: center; justify-content: center; }
+  .card-art { width: 92px; height: 128px; border: 1px solid rgba(244,244,245,0.48); border-radius: 8px; position: relative; overflow: hidden; }
+  .card-art span { position: absolute; left: 23px; top: 28px; width: 44px; height: 44px; border: 1px solid rgba(255,255,255,0.22); border-radius: 50%; }
+  .card-art strong { position: absolute; left: 39px; top: 38px; width: 24px; height: 54px; border-radius: 999px 999px 9px 9px; background: rgba(255,255,255,0.72); }
+  .badge-row { display: flex; gap: 7px; flex-wrap: wrap; }
+  .badge-row span { border: 1px solid rgba(231,222,208,0.28); border-radius: 999px; color: #E7DED0; padding: 4px 8px; font-size: 10px; font-weight: 900; }
+  .collection-card h3, .list-row h3 { margin: 0; color: #fff; font-size: 17px; line-height: 21px; font-weight: 900; }
+  .value-grid { display: grid; gap: 6px; }
+  .value-grid strong { color: #fff; }
+  .positive strong { color: #86efac; }
+  .negative strong { color: #fb7185; }
+  .card-actions, .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .list-panel { padding: 10px; display: grid; gap: 10px; }
+  .list-row { border: 1px solid #202026; border-radius: 10px; background: rgba(8,8,10,0.76); padding: 12px; display: grid; grid-template-columns: 86px 1fr auto auto auto auto; gap: 12px; align-items: center; }
+  .list-row .art-shell { width: 74px; height: 96px; }
+  .list-row .card-art { width: 54px; height: 76px; }
+  .list-row > strong { color: #fff; font-size: 18px; }
+  .allocation-row { margin-top: 10px; display: grid; gap: 6px; }
+  .allocation-row span { color: #C9CDD3; font-size: 12px; font-weight: 900; }
+  .allocation-row strong { height: 8px; border-radius: 999px; background: linear-gradient(90deg, #C9CDD3, #E7DED0); }
+  .mini-chart { width: 100%; height: 96px; margin-top: 10px; }
+  .mini-chart path { fill: none; stroke: #C9CDD3; stroke-width: 4; stroke-linecap: round; filter: drop-shadow(0 0 8px rgba(201,205,211,0.18)); }
+  .quick-actions { display: grid; gap: 10px; }
+  @media (max-width: 1100px) { .portfolio-shell { width: calc(100vw - 32px); } .stats-grid, .portfolio-layout, .card-grid, .list-row { grid-template-columns: 1fr; } .toolbar { display: grid; } }
+`;

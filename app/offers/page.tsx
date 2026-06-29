@@ -294,7 +294,7 @@ const pageStyles = `
   .offer-card {
     padding: 14px;
     display: grid;
-    grid-template-columns: 1fr 180px auto;
+    grid-template-columns: minmax(0, 1fr) 190px 360px;
     gap: 16px;
     align-items: center;
   }
@@ -344,6 +344,8 @@ const pageStyles = `
   .offer-values {
     display: grid;
     gap: 4px;
+    justify-self: start;
+    min-width: 190px;
   }
 
   .offer-values strong {
@@ -358,6 +360,7 @@ const pageStyles = `
     gap: 8px;
     flex-wrap: wrap;
     justify-content: flex-end;
+    width: 100%;
   }
 
   .offer-actions a,
