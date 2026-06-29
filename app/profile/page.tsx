@@ -1,231 +1,185 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { User } from "@supabase/supabase-js";
+import Link from "next/link";
+import { useState } from "react";
 import Header from "../components/Header";
-import RequireAuth from "../components/RequireAuth";
-import { supabase } from "../../lib/supabase";
 
-type Profile = {
-  full_name: string | null;
-  username: string | null;
-  email: string | null;
-  bio: string | null;
-  avatar_url: string | null;
-  seller_level: string | null;
-  total_sales: number | null;
-  total_orders: number | null;
-  positive_feedback: number | null;
-  verified: boolean | null;
-  created_at: string | null;
-};
+function Toggle({
+  checked,
+  onClick,
+  label,
+}: {
+  checked: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`toggle-row ${checked ? "active" : ""}`}
+      onClick={onClick}
+    >
+      <span>{label}</span>
+      <strong>{checked ? "On" : "Off"}</strong>
+    </button>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stat-card panel">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
 
 export default function ProfilePage() {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [publicProfile, setPublicProfile] = useState(true);
+  const [showSellerStats, setShowSellerStats] = useState(true);
+  const [status, setStatus] = useState("");
 
-  useEffect(() => {
-    let active = true;
+  return (
+    <main className="account-page">
+      <style>{pageStyles}</style>
+      <div className="account-shell">
+        <Header />
 
-    async function loadProfile() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        <section className="page-heading">
+          <span>Account</span>
+          <h1>Profile</h1>
+          <p>Manage your public collector profile and account identity.</p>
+        </section>
 
-      if (!active) return;
+        <section className="profile-hero panel">
+          <div className="avatar">RH</div>
+          <div>
+            <h2>Ryan Haas</h2>
+            <p>@ryanjhaas99</p>
+            <div className="pill-row">
+              <span>Level 1 Collector</span>
+              <span>Joined June 2026</span>
+              <span>United States</span>
+              <Link href="/collections/vault-runner">Public Collection</Link>
+            </div>
+          </div>
+        </section>
 
-      setUser(user);
+        <section className="stats-grid">
+          <StatCard label="Collection Value" value="$18,420" />
+          <StatCard label="Watched Cards" value="37" />
+          <StatCard label="Offers Sent" value="12" />
+          <StatCard label="Completed Purchases" value="5" />
+          <StatCard label="Seller Level" value="Level 1" />
+        </section>
 
-      if (!user) {
-        setLoading(false);
-        return;
-      }
+        <section className="content-grid">
+          <div className="panel form-panel">
+            <h2>Profile Details</h2>
+            <label>
+              <span>Display name</span>
+              <input defaultValue="Ryan Haas" />
+            </label>
+            <label>
+              <span>Username</span>
+              <input defaultValue="@ryanjhaas99" />
+            </label>
+            <label>
+              <span>Bio</span>
+              <textarea defaultValue="Collector focused on sports cards, TCG cards, and long-term grails." />
+            </label>
+          </div>
 
-      const { data } = await supabase
-        .from("profiles")
-        .select(
-          "full_name, username, email, bio, avatar_url, seller_level, total_sales, total_orders, positive_feedback, verified, created_at"
-        )
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (!active) return;
-
-      setProfile(data);
-      setLoading(false);
-    }
-
-    loadProfile();
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const displayName =
-    profile?.full_name ||
-    user?.user_metadata?.full_name ||
-    user?.email?.split("@")[0] ||
-    "Collector";
-
-  const username =
-    profile?.username ||
-    user?.user_metadata?.username ||
-    "grail_user";
-
-  const email = profile?.email || user?.email || "No email found";
-
-  const sellerLevel = profile?.seller_level || "Level 1 Collector";
-
-  const totalSales = profile?.total_sales ?? 0;
-  const totalOrders = profile?.total_orders ?? 0;
-  const feedback = profile?.positive_feedback ?? 0;
-
-  const memberSince = profile?.created_at
-    ? new Date(profile.created_at).toLocaleDateString("en-US", {
-        month: "long",
-        year: "numeric",
-      })
-    : "New member";
-
-  return (
-    <RequireAuth>
-      <main className="min-h-screen bg-black text-white">
-        <Header />
-
-        <section className="mx-auto max-w-6xl px-6 py-16">
-          <p className="text-xs uppercase tracking-[0.4em] text-zinc-500">
-            Profile
-          </p>
-
-          <h1 className="mt-4 text-5xl font-semibold tracking-tight">
-            My Account
-          </h1>
-
-          <p className="mt-4 max-w-2xl text-zinc-400">
-            View your collector profile, seller status, and public marketplace identity.
-          </p>
-
-          {loading ? (
-            <div className="mt-12 rounded-3xl border border-zinc-900 bg-zinc-950 p-8">
-              <p className="text-zinc-400">Loading profile...</p>
-            </div>
-          ) : (
-            <div className="mt-12 grid gap-6 lg:grid-cols-3">
-              <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6 lg:col-span-1">
-                <div className="flex flex-col items-center text-center">
-                  <div className="flex h-28 w-28 items-center justify-center rounded-full border border-zinc-800 bg-black text-4xl font-semibold">
-                    {displayName.charAt(0).toUpperCase()}
-                  </div>
-
-                  <h2 className="mt-6 text-2xl font-semibold">
-                    {displayName}
-                  </h2>
-
-                  <p className="mt-1 text-sm text-zinc-500">
-                    @{username}
-                  </p>
-
-                  <div className="mt-5 rounded-full border border-zinc-800 px-4 py-2 text-sm text-zinc-300">
-                    {sellerLevel}
-                  </div>
-
-                  {profile?.verified ? (
-                    <p className="mt-4 text-sm text-green-400">
-                      Verified seller
-                    </p>
-                  ) : (
-                    <p className="mt-4 text-sm text-zinc-500">
-                      Verification not completed
-                    </p>
-                  )}
-                </div>
-
-                <div className="mt-8 border-t border-zinc-900 pt-6">
-                  <p className="text-sm text-zinc-500">Member Since</p>
-                  <p className="mt-1 font-medium">{memberSince}</p>
-                </div>
-              </div>
-
-              <div className="space-y-6 lg:col-span-2">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-                    <p className="text-sm text-zinc-500">Total Sales</p>
-                    <h3 className="mt-3 text-3xl font-semibold">
-                      {totalSales}
-                    </h3>
-                  </div>
-
-                  <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-                    <p className="text-sm text-zinc-500">Orders</p>
-                    <h3 className="mt-3 text-3xl font-semibold">
-                      {totalOrders}
-                    </h3>
-                  </div>
-
-                  <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-                    <p className="text-sm text-zinc-500">Positive Feedback</p>
-                    <h3 className="mt-3 text-3xl font-semibold">
-                      {feedback}%
-                    </h3>
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-                  <h2 className="text-2xl font-semibold">
-                    Account Details
-                  </h2>
-
-                  <div className="mt-6 grid gap-4 md:grid-cols-2">
-                    <div className="rounded-2xl border border-zinc-900 bg-black p-5">
-                      <p className="text-sm text-zinc-500">Full Name</p>
-                      <p className="mt-2 font-medium">{displayName}</p>
-                    </div>
-
-                    <div className="rounded-2xl border border-zinc-900 bg-black p-5">
-                      <p className="text-sm text-zinc-500">Username</p>
-                      <p className="mt-2 font-medium">@{username}</p>
-                    </div>
-
-                    <div className="rounded-2xl border border-zinc-900 bg-black p-5 md:col-span-2">
-                      <p className="text-sm text-zinc-500">Email</p>
-                      <p className="mt-2 font-medium">{email}</p>
-                    </div>
-
-                    <div className="rounded-2xl border border-zinc-900 bg-black p-5 md:col-span-2">
-                      <p className="text-sm text-zinc-500">Bio</p>
-                      <p className="mt-2 leading-7 text-zinc-300">
-                        {profile?.bio ||
-                          "No bio added yet. This will become your public collector profile description."}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-                  <h2 className="text-2xl font-semibold">
-                    Seller Status
-                  </h2>
-
-                  <p className="mt-3 text-zinc-400">
-                    Your seller level is controlled by GRAIL based on completed sales,
-                    order history, and buyer feedback.
-                  </p>
-
-                  <div className="mt-6 h-3 rounded-full bg-zinc-900">
-                    <div className="h-3 w-1/4 rounded-full bg-white" />
-                  </div>
-
-                  <p className="mt-3 text-sm text-zinc-500">
-                    Level 1 Collector → Level 2 Dealer
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-      </main>
-    </RequireAuth>
-  );
+          <aside className="panel side-panel">
+            <h2>Preferences</h2>
+            <div className="category-list">
+              <span>Sports Cards</span>
+              <span>TCG Cards</span>
+              <span>Grails</span>
+            </div>
+            <Toggle
+              checked={publicProfile}
+              onClick={() => setPublicProfile((current) => !current)}
+              label="Public profile"
+            />
+            <Toggle
+              checked={showSellerStats}
+              onClick={() => setShowSellerStats((current) => !current)}
+              label="Show seller stats"
+            />
+            <div className="action-stack">
+              <button type="button" onClick={() => setStatus("Profile changes saved.")}>
+                Save Changes
+              </button>
+              <Link href="/collections/vault-runner">View Public Profile</Link>
+            </div>
+            {status ? <p className="status-message">{status}</p> : null}
+          </aside>
+        </section>
+      </div>
+    </main>
+  );
 }
+
+const pageStyles = `
+  .account-page {
+    min-height: 100vh;
+    background: radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%), linear-gradient(180deg, #000 0%, #030304 58%, #000 100%);
+    color: #fafafa;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  .account-shell { width: 1240px; margin: 0 auto; padding: 8px 0 38px; }
+  .panel {
+    border: 1px solid #1d1d22;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)), rgba(5,5,6,0.92);
+    box-shadow: 0 18px 44px rgba(0,0,0,0.28);
+  }
+  .page-heading { margin-top: 18px; }
+  .page-heading span {
+    color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .page-heading h1 { margin: 8px 0 0; color: #fff; font-size: 42px; line-height: 46px; font-weight: 900; }
+  .page-heading p, .profile-hero p, .status-message { color: #a1a1aa; font-size: 13px; line-height: 18px; font-weight: 800; }
+  .profile-hero { margin-top: 18px; padding: 18px; display: grid; grid-template-columns: 82px 1fr; gap: 16px; align-items: center; }
+  .avatar {
+    width: 76px; height: 76px; border-radius: 999px; border: 1px solid rgba(201,205,211,0.26);
+    background: radial-gradient(circle at 50% 18%, rgba(255,255,255,0.14), transparent 42%), linear-gradient(135deg, #1f2937, #050506);
+    color: #E7DED0; display: flex; align-items: center; justify-content: center; font-size: 23px; font-weight: 900;
+  }
+  .profile-hero h2, .form-panel h2, .side-panel h2 { margin: 0; color: #fff; font-size: 24px; line-height: 28px; font-weight: 900; }
+  .pill-row { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill-row span, .pill-row a, .category-list span {
+    border: 1px solid rgba(231,222,208,0.22); border-radius: 999px; background: rgba(231,222,208,0.055);
+    color: #E7DED0; min-height: 28px; padding: 0 10px; display: inline-flex; align-items: center; text-decoration: none; font-size: 11px; font-weight: 900;
+  }
+  .stats-grid { margin-top: 16px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+  .stat-card { min-height: 82px; padding: 14px; }
+  .stat-card span { color: #85858f; font-size: 11px; line-height: 14px; font-weight: 800; }
+  .stat-card strong { display: block; margin-top: 8px; color: #fff; font-size: 24px; line-height: 28px; font-weight: 900; }
+  .content-grid { margin-top: 16px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
+  .form-panel, .side-panel { padding: 16px; }
+  label { display: grid; gap: 7px; margin-top: 14px; }
+  label span { color: #C9CDD3; font-size: 12px; font-weight: 900; }
+  input, textarea {
+    border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; padding: 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none;
+  }
+  textarea { min-height: 112px; resize: vertical; }
+  .category-list { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .toggle-row {
+    width: 100%; margin-top: 12px; min-height: 42px; border: 1px solid #24242a; border-radius: 10px; background: #08080a;
+    color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; cursor: pointer; font-weight: 900;
+  }
+  .toggle-row.active { border-color: rgba(231,222,208,0.48); background: rgba(231,222,208,0.08); }
+  .action-stack { margin-top: 16px; display: grid; gap: 10px; }
+  .action-stack button, .action-stack a {
+    min-height: 40px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055);
+    color: #fff; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 12px; font-weight: 900; cursor: pointer;
+  }
+  .action-stack button { background: #E7DED0; color: #111; }
+  .status-message { margin: 12px 0 0; border: 1px solid rgba(52,211,153,0.24); border-radius: 10px; background: rgba(52,211,153,0.07); color: #86efac; padding: 10px; }
+  @media (max-width: 1100px) {
+    .account-shell { width: calc(100vw - 32px); }
+    .profile-hero, .stats-grid, .content-grid { grid-template-columns: 1fr; }
+  }
+`;

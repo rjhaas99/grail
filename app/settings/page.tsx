@@ -1,382 +1,203 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { User } from "@supabase/supabase-js";
+import { useState } from "react";
 import Header from "../components/Header";
-import RequireAuth from "../components/RequireAuth";
-import { supabase } from "../../lib/supabase";
 
-type Profile = {
-  full_name: string | null;
-  username: string | null;
-  email: string | null;
-  bio: string | null;
+type ToggleKey =
+  | "publicProfile"
+  | "showCollectionValue"
+  | "showSellerStats"
+  | "allowBuyerMessages"
+  | "offerAlerts"
+  | "messageAlerts"
+  | "orderUpdates"
+  | "marketAlerts"
+  | "sellerRewardUpdates"
+  | "autoWatch";
+
+const initialToggles: Record<ToggleKey, boolean> = {
+  publicProfile: true,
+  showCollectionValue: false,
+  showSellerStats: true,
+  allowBuyerMessages: true,
+  offerAlerts: true,
+  messageAlerts: true,
+  orderUpdates: true,
+  marketAlerts: true,
+  sellerRewardUpdates: true,
+  autoWatch: true,
 };
 
-export default function SettingsPage() {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [fullName, setFullName] = useState("");
-  const [username, setUsername] = useState("");
-  const [bio, setBio] = useState("");
-
-  const [offerAlerts, setOfferAlerts] = useState(true);
-  const [messageAlerts, setMessageAlerts] = useState(true);
-  const [salesAlerts, setSalesAlerts] = useState(true);
-  const [marketingEmails, setMarketingEmails] = useState(false);
-
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadSettings() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!active) return;
-
-      setUser(user);
-
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
-      const { data } = await supabase
-        .from("profiles")
-        .select("full_name, username, email, bio")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (!active) return;
-
-      setProfile(data);
-
-      setFullName(data?.full_name || user.user_metadata?.full_name || "");
-      setUsername(data?.username || user.user_metadata?.username || "");
-      setBio(data?.bio || "");
-
-      setLoading(false);
-    }
-
-    loadSettings();
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  async function handleSave() {
-    setMessage("");
-
-    if (!user) {
-      setMessage("You must be signed in to update settings.");
-      return;
-    }
-
-    if (!fullName.trim() || !username.trim()) {
-      setMessage("Full name and username are required.");
-      return;
-    }
-
-    try {
-      setSaving(true);
-
-      const cleanUsername = username.trim().toLowerCase();
-
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          full_name: fullName.trim(),
-          username: cleanUsername,
-          bio: bio.trim() || null,
-        })
-        .eq("id", user.id);
-
-      if (error) throw error;
-
-      setUsername(cleanUsername);
-      setMessage("Settings saved successfully.");
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Settings could not be saved. Please try again."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const email = profile?.email || user?.email || "No email found";
-
-  return (
-    <RequireAuth>
-      <main className="min-h-screen bg-black text-white">
-        <Header />
-
-        <section className="mx-auto max-w-6xl px-6 py-16">
-          <p className="text-xs uppercase tracking-[0.4em] text-zinc-500">
-            Settings
-          </p>
-
-          <h1 className="mt-4 text-5xl font-semibold tracking-tight">
-            Account Settings
-          </h1>
-
-          <p className="mt-4 max-w-2xl text-zinc-400">
-            Manage your GRAIL account, profile details, notifications, security, and marketplace preferences.
-          </p>
-
-          {loading ? (
-            <div className="mt-12 rounded-3xl border border-zinc-900 bg-zinc-950 p-8">
-              <p className="text-zinc-400">Loading settings...</p>
-            </div>
-          ) : (
-            <div className="mt-12 grid gap-6 lg:grid-cols-3">
-              <div className="space-y-6 lg:col-span-2">
-                <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-                  <h2 className="text-2xl font-semibold">
-                    Public Profile
-                  </h2>
-
-                  <p className="mt-2 text-sm text-zinc-500">
-                    This information appears on your GRAIL collector profile.
-                  </p>
-
-                  <div className="mt-6 space-y-5">
-                    <div>
-                      <label className="text-sm text-zinc-500">
-                        Full Name
-                      </label>
-
-                      <input
-                        value={fullName}
-                        onChange={(event) => setFullName(event.target.value)}
-                        className="mt-2 w-full rounded-2xl border border-zinc-800 bg-black p-4 text-white outline-none"
-                        placeholder="Full name"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-sm text-zinc-500">
-                        Username
-                      </label>
-
-                      <input
-                        value={username}
-                        onChange={(event) => setUsername(event.target.value)}
-                        className="mt-2 w-full rounded-2xl border border-zinc-800 bg-black p-4 text-white outline-none"
-                        placeholder="Username"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-sm text-zinc-500">
-                        Bio
-                      </label>
-
-                      <textarea
-                        value={bio}
-                        onChange={(event) => setBio(event.target.value)}
-                        className="mt-2 min-h-32 w-full rounded-2xl border border-zinc-800 bg-black p-4 text-white outline-none"
-                        placeholder="Tell buyers and sellers about your collection."
-                      />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleSave}
-                      disabled={saving}
-                      className="rounded-full bg-white px-8 py-4 font-semibold text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {saving ? "Saving..." : "Save Profile"}
-                    </button>
-
-                    {message && (
-                      <p className="text-sm text-zinc-400">
-                        {message}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-                  <h2 className="text-2xl font-semibold">
-                    Notification Preferences
-                  </h2>
-
-                  <p className="mt-2 text-sm text-zinc-500">
-                    Choose which updates GRAIL should send you.
-                  </p>
-
-                  <div className="mt-6 space-y-4">
-                    <SettingToggle
-                      title="Offer alerts"
-                      description="Get notified when buyers send, counter, accept, or decline offers."
-                      enabled={offerAlerts}
-                      setEnabled={setOfferAlerts}
-                    />
-
-                    <SettingToggle
-                      title="Message alerts"
-                      description="Get notified when buyers or sellers send you a message."
-                      enabled={messageAlerts}
-                      setEnabled={setMessageAlerts}
-                    />
-
-                    <SettingToggle
-                      title="Sales and order alerts"
-                      description="Get notified about purchases, payouts, shipping, and verification updates."
-                      enabled={salesAlerts}
-                      setEnabled={setSalesAlerts}
-                    />
-
-                    <SettingToggle
-                      title="Marketing emails"
-                      description="Receive marketplace updates, featured cards, promotions, and product news."
-                      enabled={marketingEmails}
-                      setEnabled={setMarketingEmails}
-                    />
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-                  <h2 className="text-2xl font-semibold">
-                    Security
-                  </h2>
-
-                  <p className="mt-2 text-sm text-zinc-500">
-                    Keep your account protected.
-                  </p>
-
-                  <div className="mt-6 grid gap-4 md:grid-cols-2">
-                    <button className="rounded-2xl border border-zinc-800 bg-black p-5 text-left hover:border-zinc-600">
-                      <p className="font-semibold">Change Password</p>
-                      <p className="mt-2 text-sm leading-6 text-zinc-500">
-                        Password reset flow will be connected next.
-                      </p>
-                    </button>
-
-                    <button className="rounded-2xl border border-zinc-800 bg-black p-5 text-left hover:border-zinc-600">
-                      <p className="font-semibold">Two-Factor Authentication</p>
-                      <p className="mt-2 text-sm leading-6 text-zinc-500">
-                        Add extra account protection before launch.
-                      </p>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-6">
-                <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-                  <h2 className="text-2xl font-semibold">
-                    Account
-                  </h2>
-
-                  <div className="mt-6 space-y-5">
-                    <div className="rounded-2xl border border-zinc-900 bg-black p-5">
-                      <p className="text-sm text-zinc-500">Email</p>
-                      <p className="mt-2 break-all font-medium">{email}</p>
-                    </div>
-
-                    <div className="rounded-2xl border border-zinc-900 bg-black p-5">
-                      <p className="text-sm text-zinc-500">Account Status</p>
-                      <p className="mt-2 font-medium text-green-400">
-                        Active
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-zinc-900 bg-black p-5">
-                      <p className="text-sm text-zinc-500">Seller Level</p>
-                      <p className="mt-2 font-medium">
-                        Level 1 Collector
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-                  <h2 className="text-2xl font-semibold">
-                    Marketplace Rules
-                  </h2>
-
-                  <div className="mt-6 space-y-4 text-sm leading-6 text-zinc-500">
-                    <p>
-                      Users can browse cards without an account.
-                    </p>
-
-                    <p>
-                      Buying, making offers, messaging sellers, listing cards, and viewing account pages require sign in.
-                    </p>
-
-                    <p>
-                      Seller stats, fees, verification, rewards, and payout controls should be controlled by GRAIL.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-red-900/40 bg-red-950/10 p-6">
-                  <h2 className="text-2xl font-semibold text-red-300">
-                    Danger Zone
-                  </h2>
-
-                  <p className="mt-3 text-sm leading-6 text-red-200/70">
-                    Account deletion should require confirmation and backend cleanup before launch.
-                  </p>
-
-                  <button className="mt-6 w-full rounded-full border border-red-800 px-6 py-3 text-sm font-semibold text-red-300 hover:bg-red-950/40">
-                    Request Account Deletion
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-      </main>
-    </RequireAuth>
-  );
-}
-
-function SettingToggle({
-  title,
-  description,
-  enabled,
-  setEnabled,
+function ToggleRow({
+  label,
+  checked,
+  onClick,
 }: {
-  title: string;
-  description: string;
-  enabled: boolean;
-  setEnabled: (value: boolean) => void;
+  label: string;
+  checked: boolean;
+  onClick: () => void;
 }) {
-  return (
-    <button
-      type="button"
-      onClick={() => setEnabled(!enabled)}
-      className="flex w-full items-center justify-between gap-5 rounded-2xl border border-zinc-900 bg-black p-5 text-left hover:border-zinc-700"
-    >
-      <div>
-        <p className="font-semibold">{title}</p>
-        <p className="mt-2 text-sm leading-6 text-zinc-500">
-          {description}
-        </p>
-      </div>
-
-      <span
-        className={`flex h-8 w-14 shrink-0 items-center rounded-full p-1 transition ${
-          enabled ? "bg-white" : "bg-zinc-800"
-        }`}
-      >
-        <span
-          className={`h-6 w-6 rounded-full transition ${
-            enabled ? "translate-x-6 bg-black" : "translate-x-0 bg-zinc-500"
-          }`}
-        />
-      </span>
-    </button>
-  );
+  return (
+    <button
+      type="button"
+      className={`toggle-row ${checked ? "active" : ""}`}
+      onClick={onClick}
+    >
+      <span>{label}</span>
+      <strong>{checked ? "On" : "Off"}</strong>
+    </button>
+  );
 }
+
+export default function SettingsPage() {
+  const [toggles, setToggles] = useState(initialToggles);
+  const [status, setStatus] = useState("");
+
+  function toggle(key: ToggleKey) {
+    setToggles((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  return (
+    <main className="settings-page">
+      <style>{pageStyles}</style>
+      <div className="settings-shell">
+        <Header />
+
+        <section className="page-heading">
+          <span>Preferences</span>
+          <h1>Settings</h1>
+          <p>Manage account preferences, privacy, security, and marketplace settings.</p>
+        </section>
+
+        {status ? <p className="status-message">{status}</p> : null}
+
+        <section className="settings-layout">
+          <div className="panel section-card">
+            <h2>Account</h2>
+            <label>
+              <span>Email</span>
+              <input defaultValue="ryanjhaas99@example.com" />
+            </label>
+            <label>
+              <span>Password</span>
+              <input defaultValue="************" type="password" />
+            </label>
+            <label>
+              <span>Username</span>
+              <input defaultValue="@ryanjhaas99" />
+            </label>
+            <button type="button" onClick={() => setStatus("Password flow coming soon.")}>
+              Change password
+            </button>
+          </div>
+
+          <div className="panel section-card">
+            <h2>Privacy</h2>
+            <ToggleRow label="Public profile" checked={toggles.publicProfile} onClick={() => toggle("publicProfile")} />
+            <ToggleRow label="Show collection value" checked={toggles.showCollectionValue} onClick={() => toggle("showCollectionValue")} />
+            <ToggleRow label="Show seller stats" checked={toggles.showSellerStats} onClick={() => toggle("showSellerStats")} />
+            <ToggleRow label="Allow messages from buyers" checked={toggles.allowBuyerMessages} onClick={() => toggle("allowBuyerMessages")} />
+          </div>
+
+          <div className="panel section-card">
+            <h2>Notifications</h2>
+            <ToggleRow label="Offer alerts" checked={toggles.offerAlerts} onClick={() => toggle("offerAlerts")} />
+            <ToggleRow label="Message alerts" checked={toggles.messageAlerts} onClick={() => toggle("messageAlerts")} />
+            <ToggleRow label="Order updates" checked={toggles.orderUpdates} onClick={() => toggle("orderUpdates")} />
+            <ToggleRow label="Market movement alerts" checked={toggles.marketAlerts} onClick={() => toggle("marketAlerts")} />
+            <ToggleRow label="Seller reward updates" checked={toggles.sellerRewardUpdates} onClick={() => toggle("sellerRewardUpdates")} />
+          </div>
+
+          <div className="panel section-card">
+            <h2>Marketplace Preferences</h2>
+            <label>
+              <span>Default offer minimum percentage</span>
+              <input defaultValue="85%" />
+            </label>
+            <label>
+              <span>Default shipping speed</span>
+              <input defaultValue="1-2 business days" />
+            </label>
+            <ToggleRow label="Auto-watch cards you offer on" checked={toggles.autoWatch} onClick={() => toggle("autoWatch")} />
+            <label>
+              <span>Preferred currency</span>
+              <input defaultValue="USD" />
+            </label>
+          </div>
+
+          <div className="panel section-card security-card">
+            <h2>Security</h2>
+            <div className="security-row">
+              <span>Two-factor authentication placeholder</span>
+              <strong>Not enabled</strong>
+            </div>
+            <div className="security-row">
+              <span>Active sessions placeholder</span>
+              <strong>2 sessions</strong>
+            </div>
+            <button type="button" onClick={() => setStatus("Session management coming soon.")}>
+              Sign out of all devices
+            </button>
+          </div>
+        </section>
+
+        <div className="save-row">
+          <button type="button" onClick={() => setStatus("Settings saved.")}>
+            Save Settings
+          </button>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+const pageStyles = `
+  .settings-page {
+    min-height: 100vh;
+    background: radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%), linear-gradient(180deg, #000 0%, #030304 58%, #000 100%);
+    color: #fafafa;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  .settings-shell { width: 1240px; margin: 0 auto; padding: 8px 0 38px; }
+  .panel {
+    border: 1px solid #1d1d22; border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)), rgba(5,5,6,0.92);
+    box-shadow: 0 18px 44px rgba(0,0,0,0.28);
+  }
+  .page-heading { margin-top: 18px; }
+  .page-heading span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+  .page-heading h1 { margin: 8px 0 0; color: #fff; font-size: 42px; line-height: 46px; font-weight: 900; }
+  .page-heading p, .status-message { color: #a1a1aa; font-size: 13px; line-height: 18px; font-weight: 800; }
+  .status-message {
+    margin: 16px 0 0; border: 1px solid rgba(52,211,153,0.24); border-radius: 10px; background: rgba(52,211,153,0.07);
+    color: #86efac; padding: 10px; font-weight: 900;
+  }
+  .settings-layout { margin-top: 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+  .section-card { padding: 16px; }
+  .section-card h2 { margin: 0; color: #fff; font-size: 20px; line-height: 24px; font-weight: 900; }
+  label { display: grid; gap: 7px; margin-top: 14px; }
+  label span, .security-row span { color: #C9CDD3; font-size: 12px; font-weight: 900; }
+  input {
+    border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; padding: 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none;
+  }
+  button {
+    min-height: 40px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055);
+    color: #fff; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 900; cursor: pointer;
+  }
+  button:hover { border-color: rgba(231,222,208,0.62); background: rgba(231,222,208,0.11); box-shadow: 0 0 18px rgba(201,205,211,0.13); }
+  .section-card > button { margin-top: 14px; }
+  .toggle-row {
+    width: 100%; margin-top: 12px; background: #08080a; border-color: #24242a; justify-content: space-between;
+  }
+  .toggle-row.active { border-color: rgba(231,222,208,0.48); background: rgba(231,222,208,0.08); }
+  .security-row {
+    margin-top: 12px; border: 1px solid #202026; border-radius: 10px; background: rgba(8,8,10,0.76); padding: 12px; display: flex; justify-content: space-between; gap: 10px;
+  }
+  .security-row strong { color: #fff; font-size: 13px; font-weight: 900; }
+  .save-row { margin-top: 16px; display: flex; justify-content: flex-end; }
+  .save-row button { background: #E7DED0; color: #111; min-width: 150px; }
+  @media (max-width: 1100px) {
+    .settings-shell { width: calc(100vw - 32px); }
+    .settings-layout { grid-template-columns: 1fr; }
+  }
+`;
