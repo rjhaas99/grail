@@ -2,111 +2,177 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabase";
 
 type Profile = {
   full_name: string | null;
   username: string | null;
-  seller_level: string | null;
 };
+
+const mainMenuItems = [
+  { label: "Browse Cards", href: "/browse" },
+  { label: "Sell a Card", href: "/list" },
+  { label: "Portfolio", href: "/portfolio" },
+  { label: "Offers", href: "/offers" },
+  { label: "Messages", href: "/messages" },
+  { label: "Seller Dashboard", href: "/dashboard" },
+];
+
+const accountItems = [
+  { label: "Profile", href: "/profile" },
+  { label: "Notifications", href: "/notifications" },
+  { label: "Billing & Payouts", href: "/billing" },
+  { label: "Orders", href: "/orders" },
+  { label: "Seller Rewards", href: "/rewards" },
+  { label: "Settings", href: "/settings" },
+];
 
 export default function Header() {
   const router = useRouter();
-  const pathname = usePathname();
-
   const menuRef = useRef<HTMLDivElement | null>(null);
   const accountRef = useRef<HTMLDivElement | null>(null);
+  const menuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const accountCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [mobileMenu, setMobileMenu] = useState(false);
-  const [mobileAccount, setMobileAccount] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
 
-  const menuItem =
-    "block w-full rounded-xl px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-900";
-
   const accountName =
     profile?.full_name ||
+    profile?.username ||
     user?.user_metadata?.full_name ||
     user?.email?.split("@")[0] ||
     "Account";
 
-  const sellerLevel = profile?.seller_level || "Level 1 Collector";
+  const accountInitial = accountName.trim().charAt(0).toUpperCase() || "G";
+  const dropdownLinkStyle = {
+    display: "block",
+    border: "1px solid transparent",
+    borderRadius: "10px",
+    padding: "8px 11px",
+    color: "#e4e4e7",
+    textDecoration: "none",
+    fontSize: "13px",
+    lineHeight: "17px",
+    fontWeight: 800,
+    transition:
+      "background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease",
+    boxSizing: "border-box" as const,
+  };
 
-  function closeAllMenus() {
-    setMenuOpen(false);
-    setAccountOpen(false);
-    setMobileMenu(false);
-    setMobileAccount(false);
+  function clearMenuCloseTimer() {
+    if (menuCloseTimer.current) {
+      clearTimeout(menuCloseTimer.current);
+      menuCloseTimer.current = null;
+    }
   }
 
-  async function loadUser() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  function clearAccountCloseTimer() {
+    if (accountCloseTimer.current) {
+      clearTimeout(accountCloseTimer.current);
+      accountCloseTimer.current = null;
+    }
+  }
 
-    setUser(user);
+  function closeMenus() {
+    clearMenuCloseTimer();
+    clearAccountCloseTimer();
+    setMenuOpen(false);
+    setAccountOpen(false);
+  }
 
-    if (!user) {
-      setProfile(null);
-      return;
+  function openMenuFromHover() {
+    clearMenuCloseTimer();
+    setAccountOpen(false);
+    setMenuOpen(true);
+  }
+
+  function closeMenuAfterHover() {
+    clearMenuCloseTimer();
+    menuCloseTimer.current = setTimeout(() => {
+      setMenuOpen(false);
+      menuCloseTimer.current = null;
+    }, 120);
+  }
+
+  function openAccountFromHover() {
+    clearAccountCloseTimer();
+    setMenuOpen(false);
+    setAccountOpen(true);
+  }
+
+  function closeAccountAfterHover() {
+    clearAccountCloseTimer();
+    accountCloseTimer.current = setTimeout(() => {
+      setAccountOpen(false);
+      accountCloseTimer.current = null;
+    }, 120);
+  }
+
+  async function getProfile(nextUser: User | null) {
+    if (!nextUser) {
+      return null;
     }
 
     const { data } = await supabase
       .from("profiles")
-      .select("full_name, username, seller_level")
-      .eq("id", user.id)
+      .select("full_name, username")
+      .eq("id", nextUser.id)
       .maybeSingle();
 
-    if (data) {
-      setProfile(data);
-    }
+    return data ?? null;
   }
 
   async function handleSignOut() {
     await supabase.auth.signOut();
-
     setUser(null);
     setProfile(null);
-    closeAllMenus();
-
-    router.push("/login");
+    closeMenus();
     router.refresh();
   }
 
   useEffect(() => {
-    loadUser();
+    let active = true;
+
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      const nextUser = session?.user ?? null;
+      const nextProfile = await getProfile(nextUser);
+
+      if (!active) {
+        return;
+      }
+
+      setUser(nextUser);
+      setProfile(nextProfile);
+    });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      loadUser();
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const nextUser = session?.user ?? null;
+      setUser(nextUser);
+      setProfile(await getProfile(nextUser));
     });
 
     return () => {
+      active = false;
       subscription.unsubscribe();
     };
   }, []);
 
   useEffect(() => {
-    closeAllMenus();
-  }, [pathname]);
-
-  useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as Node;
+      const clickedMenu = menuRef.current?.contains(target) ?? false;
+      const clickedAccount = accountRef.current?.contains(target) ?? false;
 
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(target) &&
-        accountRef.current &&
-        !accountRef.current.contains(target)
-      ) {
+      if (!clickedMenu && !clickedAccount) {
+        clearMenuCloseTimer();
+        clearAccountCloseTimer();
         setMenuOpen(false);
         setAccountOpen(false);
       }
@@ -119,253 +185,397 @@ export default function Header() {
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      clearMenuCloseTimer();
+      clearAccountCloseTimer();
+    };
+  }, []);
+
   return (
     <>
-      <header className="mx-auto flex max-w-7xl items-center justify-between px-8 py-6">
-        <div className="flex items-center gap-4">
-          <div ref={menuRef} className="relative hidden md:block">
-            <button
-              onClick={() => {
-                setAccountOpen(false);
-                setMenuOpen((current) => !current);
-              }}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-800 hover:border-zinc-600"
-            >
-              <span className="space-y-1">
-                <span className="block h-px w-4 bg-white" />
-                <span className="block h-px w-4 bg-white" />
-                <span className="block h-px w-4 bg-white" />
-              </span>
-            </button>
+      <style>
+        {`
+          .grail-dropdown-link:hover {
+            background: rgba(231, 222, 208, 0.075);
+            border-color: rgba(231, 222, 208, 0.22);
+            color: #ffffff !important;
+            transform: translateX(1px);
+          }
 
-            {menuOpen && (
-              <div className="absolute left-0 z-50 mt-3 w-64 rounded-2xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl">
-                <div className="px-3 py-3">
-                  <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">
-                    Menu
-                  </p>
-                </div>
+          .grail-dropdown-signout:hover {
+            background: rgba(248, 113, 113, 0.085) !important;
+            border-color: rgba(248, 113, 113, 0.24) !important;
+          }
+        `}
+      </style>
 
-                <Link onClick={closeAllMenus} href="/browse" className={menuItem}>
-                  Browse Cards
-                </Link>
-                <Link onClick={closeAllMenus} href="/list" className={menuItem}>
-                  Sell a Card
-                </Link>
-                <Link onClick={closeAllMenus} href="/portfolio" className={menuItem}>
-                  Portfolio
-                </Link>
-                <Link onClick={closeAllMenus} href="/offers" className={menuItem}>
-                  Offers
-                </Link>
-                <Link onClick={closeAllMenus} href="/messages" className={menuItem}>
-                  Messages
-                </Link>
-                <Link onClick={closeAllMenus} href="/dashboard" className={menuItem}>
-                  Seller Dashboard
-                </Link>
-              </div>
-            )}
-          </div>
-
+      <header
+      style={{
+        height: "54px",
+        width: "1240px",
+        margin: "0 auto",
+        display: "grid",
+        gridTemplateColumns: "230px 1fr 300px",
+        alignItems: "center",
+        borderBottom: "1px solid #17171c",
+        background: "#000",
+        color: "#fafafa",
+        fontFamily: "Arial, Helvetica, sans-serif",
+        position: "relative",
+        zIndex: 1000,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+        <div
+          ref={menuRef}
+          onMouseEnter={openMenuFromHover}
+          onMouseLeave={closeMenuAfterHover}
+          style={{ position: "relative" }}
+        >
           <button
-            onClick={() => setMobileMenu(true)}
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-800 md:hidden"
+            type="button"
+            aria-label="Open navigation"
+            aria-expanded={menuOpen}
+            onClick={() => {
+              setAccountOpen(false);
+              setMenuOpen((current) => !current);
+            }}
+            style={{
+              width: "40px",
+              height: "40px",
+              borderRadius: "999px",
+              border: menuOpen
+                ? "1px solid rgba(231,222,208,0.52)"
+                : "1px solid #27272a",
+              background: menuOpen ? "rgba(231,222,208,0.06)" : "transparent",
+              display: "grid",
+              gap: "4px",
+              placeContent: "center",
+              padding: 0,
+              cursor: "pointer",
+            }}
           >
-            <span className="space-y-1">
-              <span className="block h-px w-4 bg-white" />
-              <span className="block h-px w-4 bg-white" />
-              <span className="block h-px w-4 bg-white" />
-            </span>
+            {[0, 1, 2].map((line) => (
+              <span
+                key={line}
+                style={{
+                  display: "block",
+                  width: "16px",
+                  height: "1px",
+                  background: "#fff",
+                }}
+              />
+            ))}
           </button>
 
-          <Link
-            onClick={closeAllMenus}
-            href="/"
-            className="text-2xl font-semibold tracking-[0.35em] transition-opacity hover:opacity-70"
-          >
-            GRAIL
-          </Link>
-        </div>
-
-        <div className="hidden md:block">
-          {!user ? (
-            <div className="flex items-center gap-3">
-              <Link
-                onClick={closeAllMenus}
-                href="/login"
-                className="rounded-full border border-zinc-800 px-5 py-2 text-sm font-semibold text-white hover:border-zinc-600"
-              >
-                Sign In
-              </Link>
-
-              <Link
-                onClick={closeAllMenus}
-                href="/signup"
-                className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-zinc-200"
-              >
-                Create Account
-              </Link>
-            </div>
-          ) : (
-            <div ref={accountRef} className="relative">
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  setAccountOpen((current) => !current);
+          {menuOpen && (
+            <div
+              style={{
+                position: "absolute",
+                left: "-2px",
+                top: "48px",
+                width: "286px",
+                border: "1px solid rgba(231,222,208,0.18)",
+                borderRadius: "14px",
+                background:
+                  "linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.018)), rgba(5,5,6,0.9)",
+                boxShadow:
+                  "0 24px 54px rgba(0,0,0,0.58), inset 0 1px 0 rgba(231,222,208,0.08)",
+                padding: "10px",
+                zIndex: 3000,
+                backdropFilter: "blur(16px)",
+              }}
+            >
+              <p
+                style={{
+                  margin: "4px 12px 8px",
+                  color: "#8d949d",
+                  fontSize: "10px",
+                  lineHeight: "12px",
+                  fontWeight: 900,
+                  letterSpacing: "0.3em",
                 }}
-                className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-zinc-200"
               >
-                {accountName} ▾
-              </button>
+                MENU
+              </p>
 
-              {accountOpen && (
-                <div className="absolute right-0 z-50 mt-3 w-64 rounded-2xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl">
-                  <div className="px-3 py-3">
-                    <p className="text-base font-semibold text-white">
-                      {accountName}
-                    </p>
-                    <p className="mt-1 text-sm text-zinc-500">
-                      {sellerLevel}
-                    </p>
-                  </div>
-
-                  <div className="my-1 border-t border-zinc-800" />
-
-                  <Link onClick={closeAllMenus} href="/profile" className={menuItem}>
-                    Profile
-                  </Link>
-                  <Link onClick={closeAllMenus} href="/notifications" className={menuItem}>
-                    Notifications
-                  </Link>
-                  <Link onClick={closeAllMenus} href="/billing" className={menuItem}>
-                    Billing & Payouts
-                  </Link>
-                  <Link onClick={closeAllMenus} href="/orders" className={menuItem}>
-                    Orders
-                  </Link>
-                  <Link onClick={closeAllMenus} href="/rewards" className={menuItem}>
-                    Seller Rewards
-                  </Link>
-                  <Link onClick={closeAllMenus} href="/settings" className={menuItem}>
-                    Settings
-                  </Link>
-
-                  <div className="my-1 border-t border-zinc-800" />
-
-                  <button
-                    onClick={handleSignOut}
-                    className="block w-full rounded-xl px-3 py-2 text-left text-sm text-red-400 hover:bg-zinc-900"
-                  >
-                    Sign Out
-                  </button>
-                </div>
-              )}
+              {mainMenuItems.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={closeMenus}
+                  className="grail-dropdown-link"
+                  style={dropdownLinkStyle}
+                >
+                  {item.label}
+                </Link>
+              ))}
             </div>
           )}
         </div>
 
+        <Link
+          href="/"
+          onClick={closeMenus}
+          style={{
+            color: "#fff",
+            textDecoration: "none",
+            fontSize: "24px",
+            lineHeight: "28px",
+            fontWeight: 600,
+            letterSpacing: "0.35em",
+          }}
+        >
+          GRAIL
+        </Link>
+      </div>
+
+      <div
+        style={{
+          width: "590px",
+          height: "34px",
+          justifySelf: "center",
+          border: "1px solid #17171c",
+          borderRadius: "10px",
+          background: "#08080a",
+          display: "flex",
+          alignItems: "center",
+          gap: "11px",
+          padding: "0 14px",
+          color: "#7b7b85",
+          fontSize: "13px",
+          boxSizing: "border-box",
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: "12px",
+            height: "12px",
+            border: "2px solid #7b7b85",
+            borderRadius: "999px",
+            display: "inline-block",
+            boxSizing: "border-box",
+          }}
+        />
+        Search cards, sellers, collections...
+      </div>
+
+      <nav
+        aria-label="Account navigation"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          gap: "12px",
+        }}
+      >
         {!user ? (
-          <Link
-            onClick={closeAllMenus}
-            href="/login"
-            className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-black md:hidden"
-          >
-            Sign In
-          </Link>
+          <>
+            <Link
+              href="/login"
+              onClick={closeMenus}
+              style={{
+                height: "38px",
+                minWidth: "86px",
+                border: "1px solid #27272a",
+                borderRadius: "999px",
+                color: "#fff",
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "14px",
+                fontWeight: 600,
+                background: "#050506",
+              }}
+            >
+              Sign In
+            </Link>
+
+            <Link
+              href="/signup"
+              onClick={closeMenus}
+              style={{
+                height: "38px",
+                minWidth: "132px",
+                borderRadius: "999px",
+                color: "#111",
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "14px",
+                fontWeight: 600,
+                background: "#f4f4f5",
+              }}
+            >
+              Create Account
+            </Link>
+          </>
         ) : (
-          <button
-            onClick={() => setMobileAccount(true)}
-            className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-black md:hidden"
+          <div
+            ref={accountRef}
+            onMouseEnter={openAccountFromHover}
+            onMouseLeave={closeAccountAfterHover}
+            style={{ position: "relative" }}
           >
-            Account
-          </button>
+            <button
+              type="button"
+              aria-label="Open account menu"
+              aria-expanded={accountOpen}
+              onClick={() => {
+                setMenuOpen(false);
+                setAccountOpen((current) => !current);
+              }}
+              style={{
+                height: "38px",
+                maxWidth: "210px",
+                border: accountOpen
+                  ? "1px solid rgba(231,222,208,0.52)"
+                  : "1px solid rgba(201,205,211,0.22)",
+                borderRadius: "999px",
+                background: "rgba(9,9,11,0.82)",
+                color: "#fff",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "9px",
+                padding: "0 12px 0 7px",
+                cursor: "pointer",
+                fontSize: "13px",
+                fontWeight: 800,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: "26px",
+                  height: "26px",
+                  borderRadius: "999px",
+                  background: "#E7DED0",
+                  color: "#111",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "12px",
+                  fontWeight: 900,
+                  flexShrink: 0,
+                }}
+              >
+                {accountInitial}
+              </span>
+              <span
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {accountName}
+              </span>
+            </button>
+
+            {accountOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  right: 0,
+                  top: "48px",
+                  width: "286px",
+                  border: "1px solid rgba(231,222,208,0.18)",
+                  borderRadius: "14px",
+                  background:
+                    "linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.018)), rgba(5,5,6,0.9)",
+                  boxShadow:
+                    "0 24px 54px rgba(0,0,0,0.58), inset 0 1px 0 rgba(231,222,208,0.08)",
+                  padding: "10px",
+                  zIndex: 3000,
+                  backdropFilter: "blur(16px)",
+                }}
+              >
+                <div style={{ padding: "9px 12px 10px" }}>
+                  <p
+                    style={{
+                      margin: 0,
+                      color: "#fff",
+                      fontSize: "14px",
+                      lineHeight: "18px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    {accountName}
+                  </p>
+                  <p
+                    style={{
+                      margin: "3px 0 0",
+                      color: "#8d949d",
+                      fontSize: "12px",
+                      lineHeight: "15px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Level 1 Collector
+                  </p>
+                </div>
+
+                <div
+                  style={{
+                    height: "1px",
+                    background: "rgba(201,205,211,0.14)",
+                    margin: "5px 0",
+                  }}
+                />
+
+                {accountItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={closeMenus}
+                    className="grail-dropdown-link"
+                    style={dropdownLinkStyle}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+
+                <div
+                  style={{
+                    height: "1px",
+                    background: "rgba(201,205,211,0.14)",
+                    margin: "5px 0",
+                  }}
+                />
+
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="grail-dropdown-signout"
+                  style={{
+                    width: "100%",
+                    border: "1px solid transparent",
+                    borderRadius: "10px",
+                    background: "transparent",
+                    padding: "8px 11px",
+                    color: "#f87171",
+                    textAlign: "left",
+                    fontSize: "13px",
+                    lineHeight: "17px",
+                    fontWeight: 900,
+                    cursor: "pointer",
+                    transition:
+                      "background 160ms ease, border-color 160ms ease, color 160ms ease",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  Sign Out
+                </button>
+              </div>
+            )}
+          </div>
         )}
+      </nav>
       </header>
-
-      {mobileMenu && (
-        <div className="fixed inset-0 z-[999] bg-black p-8 text-white md:hidden">
-          <div className="flex items-center justify-between">
-            <p className="text-2xl font-semibold tracking-[0.35em]">GRAIL</p>
-
-            <button
-              onClick={() => setMobileMenu(false)}
-              className="rounded-full border border-zinc-800 px-4 py-2"
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="mt-10 space-y-3">
-            <Link onClick={closeAllMenus} href="/browse" className={menuItem}>
-              Browse Cards
-            </Link>
-            <Link onClick={closeAllMenus} href="/list" className={menuItem}>
-              Sell a Card
-            </Link>
-            <Link onClick={closeAllMenus} href="/portfolio" className={menuItem}>
-              Portfolio
-            </Link>
-            <Link onClick={closeAllMenus} href="/offers" className={menuItem}>
-              Offers
-            </Link>
-            <Link onClick={closeAllMenus} href="/messages" className={menuItem}>
-              Messages
-            </Link>
-            <Link onClick={closeAllMenus} href="/dashboard" className={menuItem}>
-              Seller Dashboard
-            </Link>
-          </div>
-        </div>
-      )}
-
-      {mobileAccount && user && (
-        <div className="fixed inset-0 z-[999] bg-black p-8 text-white md:hidden">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xl font-semibold">{accountName}</p>
-              <p className="text-sm text-zinc-500">{sellerLevel}</p>
-            </div>
-
-            <button
-              onClick={() => setMobileAccount(false)}
-              className="rounded-full border border-zinc-800 px-4 py-2"
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="mt-10 space-y-3">
-            <Link onClick={closeAllMenus} href="/profile" className={menuItem}>
-              Profile
-            </Link>
-            <Link onClick={closeAllMenus} href="/notifications" className={menuItem}>
-              Notifications
-            </Link>
-            <Link onClick={closeAllMenus} href="/billing" className={menuItem}>
-              Billing & Payouts
-            </Link>
-            <Link onClick={closeAllMenus} href="/orders" className={menuItem}>
-              Orders
-            </Link>
-            <Link onClick={closeAllMenus} href="/rewards" className={menuItem}>
-              Seller Rewards
-            </Link>
-            <Link onClick={closeAllMenus} href="/settings" className={menuItem}>
-              Settings
-            </Link>
-
-            <div className="my-4 border-t border-zinc-800" />
-
-            <button
-              onClick={handleSignOut}
-              className="block w-full rounded-xl px-3 py-2 text-left text-sm text-red-400 hover:bg-zinc-900"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
-      )}
     </>
   );
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import Header from "./components/Header";
 
 type HeroCardData = {
   href: string;
@@ -598,137 +599,7 @@ export default function Home() {
       </style>
 
       <div style={{ width: "1240px", margin: "0 auto", padding: "8px 0 34px" }}>
-        <header
-          style={{
-            height: "54px",
-            display: "grid",
-            gridTemplateColumns: "230px 1fr 300px",
-            alignItems: "center",
-            borderBottom: "1px solid #17171c",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-            <button
-              type="button"
-              aria-label="Open navigation"
-              style={{
-                width: "40px",
-                height: "40px",
-                borderRadius: "999px",
-                border: "1px solid #27272a",
-                background: "transparent",
-                display: "grid",
-                gap: "4px",
-                placeContent: "center",
-                padding: 0,
-              }}
-            >
-              {[0, 1, 2].map((line) => (
-                <span
-                  key={line}
-                  style={{
-                    display: "block",
-                    width: "16px",
-                    height: "1px",
-                    background: "#fff",
-                  }}
-                />
-              ))}
-            </button>
-
-            <Link
-              href="/"
-              style={{
-                color: "#fff",
-                textDecoration: "none",
-                fontSize: "24px",
-                lineHeight: "28px",
-                fontWeight: 600,
-                letterSpacing: "0.35em",
-              }}
-            >
-              GRAIL
-            </Link>
-          </div>
-
-          <div
-            style={{
-              width: "590px",
-              height: "34px",
-              justifySelf: "center",
-              border: "1px solid #17171c",
-              borderRadius: "10px",
-              background: "#08080a",
-              display: "flex",
-              alignItems: "center",
-              gap: "11px",
-              padding: "0 14px",
-              color: "#7b7b85",
-              fontSize: "13px",
-            }}
-          >
-            <span
-              aria-hidden="true"
-              style={{
-                width: "12px",
-                height: "12px",
-                border: "2px solid #7b7b85",
-                borderRadius: "999px",
-                display: "inline-block",
-              }}
-            />
-            Search cards, sellers, collections...
-          </div>
-
-          <nav
-            aria-label="Account navigation"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "flex-end",
-              gap: "12px",
-            }}
-          >
-            <Link
-              href="/login"
-              style={{
-                height: "38px",
-                minWidth: "86px",
-                border: "1px solid #27272a",
-                borderRadius: "999px",
-                color: "#fff",
-                textDecoration: "none",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "14px",
-                fontWeight: 600,
-                background: "#050506",
-              }}
-            >
-              Sign In
-            </Link>
-
-            <Link
-              href="/signup"
-              style={{
-                height: "38px",
-                minWidth: "132px",
-                borderRadius: "999px",
-                color: "#111",
-                textDecoration: "none",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "14px",
-                fontWeight: 600,
-                background: "#f4f4f5",
-              }}
-            >
-              Create Account
-            </Link>
-          </nav>
-        </header>
+        <Header />
 
         <section
           style={{
