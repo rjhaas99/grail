@@ -1,585 +1,767 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import Header from "../components/Header";
-import RequireAuth from "../components/RequireAuth";
-import { supabase } from "../../lib/supabase";
+
+type Message = {
+  id: string;
+  sender: "buyer" | "seller";
+  body: string;
+  time: string;
+};
 
 type Conversation = {
-  id: string;
-  listing_id: string | null;
-  order_id: string | null;
-  buyer_id: string | null;
-  seller_id: string | null;
-  card_title: string | null;
-  created_at: string | null;
-  updated_at: string | null;
+  id: string;
+  person: string;
+  badge: string;
+  cardTitle: string;
+  cardHref: string;
+  price: number;
+  currentOffer?: number;
+  lastSnippet: string;
+  timestamp: string;
+  unread?: boolean;
+  accent: string;
+  messages: Message[];
+  offer?: {
+    amount: number;
+    status: "Pending" | "Accepted" | "Countered" | "Declined";
+  };
 };
 
-type ChatMessage = {
-  id: string;
-  conversation_id: string | null;
-  sender_id: string | null;
-  body: string | null;
-  created_at: string | null;
-};
+const initialConversations: Conversation[] = [
+  {
+    id: "vault-runner",
+    person: "VaultRunner",
+    badge: "Level 4 Seller",
+    cardTitle: "Obsidian Court Ace",
+    cardHref: "/cards/browse-1",
+    price: 1240,
+    currentOffer: 1160,
+    lastSnippet: "I can ship this tomorrow with tracking.",
+    timestamp: "2m",
+    unread: true,
+    accent: "#8f1d2c",
+    messages: [
+      {
+        id: "m1",
+        sender: "buyer",
+        body: "Is the slab clean with no scratches?",
+        time: "10:12 AM",
+      },
+      {
+        id: "m2",
+        sender: "seller",
+        body: "Yes. The front and back are clean, and I can add extra photos before checkout.",
+        time: "10:14 AM",
+      },
+      {
+        id: "m3",
+        sender: "seller",
+        body: "I can ship this tomorrow with tracking.",
+        time: "10:16 AM",
+      },
+    ],
+    offer: {
+      amount: 1160,
+      status: "Pending",
+    },
+  },
+  {
+    id: "card-forge",
+    person: "CardForge",
+    badge: "Level 3 Seller",
+    cardTitle: "Silver Crest Sentinel",
+    cardHref: "/cards/browse-2",
+    price: 680,
+    lastSnippet: "The card is ready to ship.",
+    timestamp: "18m",
+    accent: "#334155",
+    messages: [
+      {
+        id: "m1",
+        sender: "seller",
+        body: "The card is ready to ship.",
+        time: "9:58 AM",
+      },
+    ],
+  },
+  {
+    id: "slab-street",
+    person: "SlabStreet",
+    badge: "Trusted Seller",
+    cardTitle: "Crimson Rookie Vault",
+    cardHref: "/cards/browse-4",
+    price: 520,
+    currentOffer: 485,
+    lastSnippet: "Offer is pending review.",
+    timestamp: "1h",
+    unread: true,
+    accent: "#1e3a8a",
+    messages: [
+      {
+        id: "m1",
+        sender: "buyer",
+        body: "Sending an offer based on recent comps.",
+        time: "8:42 AM",
+      },
+    ],
+    offer: {
+      amount: 485,
+      status: "Pending",
+    },
+  },
+  {
+    id: "pack-pilot",
+    person: "PackPilot",
+    badge: "Level 2 Seller",
+    cardTitle: "Shipping question",
+    cardHref: "/cards/browse-5",
+    price: 185,
+    lastSnippet: "Do you combine shipping on multiple cards?",
+    timestamp: "3h",
+    accent: "#7c3aed",
+    messages: [
+      {
+        id: "m1",
+        sender: "buyer",
+        body: "Do you combine shipping on multiple cards?",
+        time: "7:10 AM",
+      },
+    ],
+  },
+];
 
-type ListingLookup = {
-  id: string;
-  seller_id: string | null;
-  title: string | null;
-};
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
 
-type OrderLookup = {
-  id: string;
-  listing_id: string | null;
-  buyer_id: string | null;
-  seller_id: string | null;
-  status: string | null;
-  listings: {
-    id: string;
-    title: string | null;
-  } | null;
-};
+function CardArtwork({ accent }: { accent: string }) {
+  return (
+    <div className="card-art">
+      <div
+        className="card-face"
+        style={{
+          background: `radial-gradient(circle at 50% 22%, rgba(231,222,208,0.32), transparent 16%), linear-gradient(145deg, ${accent}, #111827 54%, #030304)`,
+        }}
+      >
+        <span />
+        <strong />
+      </div>
+    </div>
+  );
+}
 
 export default function MessagesPage() {
-  const [currentUserId, setCurrentUserId] = useState("");
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedConversationId, setSelectedConversationId] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [messageText, setMessageText] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [pageMessage, setPageMessage] = useState("");
-
-  useEffect(() => {
-    loadMessagesPage();
-  }, []);
-
-  useEffect(() => {
-    if (selectedConversationId) {
-      loadConversationMessages(selectedConversationId);
-    }
-  }, [selectedConversationId]);
-
-  async function loadMessagesPage() {
-    setLoading(true);
-    setPageMessage("");
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-
-    setCurrentUserId(user.id);
-
-    const params = new URLSearchParams(window.location.search);
-    const listingId = params.get("listingId");
-    const orderId = params.get("orderId");
-
-    let selectedId = "";
-
-    if (listingId) {
-      selectedId = await getOrCreateListingConversation(user.id, listingId);
-    }
-
-    if (orderId) {
-      selectedId = await getOrCreateOrderConversation(user.id, orderId);
-    }
-
-    await loadConversations(selectedId);
-    setLoading(false);
-  }
-
-  async function getOrCreateListingConversation(userId: string, listingId: string) {
-    const { data, error } = await supabase
-      .from("listings")
-      .select("id, seller_id, title")
-      .eq("id", listingId)
-      .maybeSingle();
-
-    if (error) {
-      setPageMessage(error.message);
-      return "";
-    }
-
-    if (!data) {
-      setPageMessage("Listing was not found.");
-      return "";
-    }
-
-    const listing = data as ListingLookup;
-
-    if (!listing.seller_id) {
-      setPageMessage("Seller was not found for this listing.");
-      return "";
-    }
-
-    if (listing.seller_id === userId) {
-      setPageMessage("You cannot start a message thread with yourself.");
-      return "";
-    }
-
-    const { data: existing } = await supabase
-      .from("chat_conversations")
-      .select("*")
-      .eq("listing_id", listing.id)
-      .eq("buyer_id", userId)
-      .eq("seller_id", listing.seller_id)
-      .maybeSingle();
-
-    if (existing) {
-      return (existing as Conversation).id;
-    }
-
-    const { data: created, error: createError } = await supabase
-      .from("chat_conversations")
-      .insert({
-        listing_id: listing.id,
-        order_id: null,
-        buyer_id: userId,
-        seller_id: listing.seller_id,
-        card_title: listing.title || "Card conversation",
-        updated_at: new Date().toISOString(),
-      })
-      .select("*")
-      .single();
-
-    if (createError) {
-      setPageMessage(createError.message);
-      return "";
-    }
-
-    return (created as Conversation).id;
-  }
-
-  async function getOrCreateOrderConversation(userId: string, orderId: string) {
-    const { data, error } = await supabase
-      .from("orders")
-      .select(
-        `
-        id,
-        listing_id,
-        buyer_id,
-        seller_id,
-        status,
-        listings (
-          id,
-          title
-        )
-      `
-      )
-      .eq("id", orderId)
-      .maybeSingle();
-
-    if (error) {
-      setPageMessage(error.message);
-      return "";
-    }
-
-    if (!data) {
-      setPageMessage("Order was not found.");
-      return "";
-    }
-
-    const order = data as unknown as OrderLookup;
-
-    if (!order.buyer_id || !order.seller_id) {
-      setPageMessage("Buyer or seller was not found for this order.");
-      return "";
-    }
-
-    if (order.buyer_id !== userId && order.seller_id !== userId) {
-      setPageMessage("You do not have access to this order conversation.");
-      return "";
-    }
-
-    const { data: existing } = await supabase
-      .from("chat_conversations")
-      .select("*")
-      .eq("order_id", order.id)
-      .eq("buyer_id", order.buyer_id)
-      .eq("seller_id", order.seller_id)
-      .maybeSingle();
-
-    if (existing) {
-      return (existing as Conversation).id;
-    }
-
-    const { data: created, error: createError } = await supabase
-      .from("chat_conversations")
-      .insert({
-        listing_id: order.listing_id,
-        order_id: order.id,
-        buyer_id: order.buyer_id,
-        seller_id: order.seller_id,
-        card_title: order.listings?.title || "Order conversation",
-        updated_at: new Date().toISOString(),
-      })
-      .select("*")
-      .single();
-
-    if (createError) {
-      setPageMessage(createError.message);
-      return "";
-    }
-
-    return (created as Conversation).id;
-  }
-
-  async function loadConversations(preferredConversationId = "") {
-    const { data, error } = await supabase
-      .from("chat_conversations")
-      .select("*")
-      .order("updated_at", { ascending: false });
-
-    if (error) {
-      setPageMessage(error.message);
-      setConversations([]);
-      return;
-    }
-
-    const rows = (data || []) as Conversation[];
-    setConversations(rows);
-
-    if (preferredConversationId) {
-      setSelectedConversationId(preferredConversationId);
-      return;
-    }
-
-    if (!selectedConversationId && rows.length > 0) {
-      setSelectedConversationId(rows[0].id);
-    }
-  }
-
-  async function loadConversationMessages(conversationId: string) {
-    setLoadingMessages(true);
-
-    const { data, error } = await supabase
-      .from("chat_messages")
-      .select("*")
-      .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      setPageMessage(error.message);
-      setMessages([]);
-      setLoadingMessages(false);
-      return;
-    }
-
-    setMessages((data || []) as ChatMessage[]);
-    setLoadingMessages(false);
-  }
-
-  async function sendMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const cleanMessage = messageText.trim();
-
-    if (!cleanMessage) return;
-
-    if (!selectedConversationId) {
-      setPageMessage("Select a conversation first.");
-      return;
-    }
-
-    setPageMessage("");
-
-    const { error } = await supabase.from("chat_messages").insert({
-      conversation_id: selectedConversationId,
-      sender_id: currentUserId,
-      body: cleanMessage,
-    });
-
-    if (error) {
-      setPageMessage(error.message);
-      return;
-    }
-
-    await supabase
-      .from("chat_conversations")
-      .update({ updated_at: new Date().toISOString() })
-      .eq("id", selectedConversationId);
-
-    setMessageText("");
-    await loadConversationMessages(selectedConversationId);
-    await loadConversations(selectedConversationId);
-  }
-
-  function formatDate(date: string | null) {
-    if (!date) return "Recently";
-
-    return new Date(date).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  }
-
-  function formatTime(date: string | null) {
-    if (!date) return "";
-
-    return new Date(date).toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }
-
-  function getOtherUserLabel(conversation: Conversation) {
-    if (conversation.buyer_id === currentUserId) return "Seller";
-    if (conversation.seller_id === currentUserId) return "Buyer";
-    return "User";
-  }
-
-  const selectedConversation = conversations.find(
-    (conversation) => conversation.id === selectedConversationId
-  );
-
-  return (
-    <RequireAuth>
-      <main className="min-h-screen bg-black text-white">
-        <Header />
-
-        <section className="mx-auto max-w-7xl px-6 py-16">
-          <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
-            <div>
-              <p className="text-xs uppercase tracking-[0.4em] text-zinc-500">
-                Messages
-              </p>
-
-              <h1 className="mt-4 text-5xl font-semibold tracking-tight">
-                Conversations
-              </h1>
-
-              <p className="mt-4 max-w-2xl text-zinc-400">
-                Message buyers and sellers about listings, orders, shipping, and offers.
-              </p>
-            </div>
-
-            <Link
-              href="/browse"
-              className="rounded-full bg-white px-6 py-3 text-sm font-semibold text-black hover:bg-zinc-200"
-            >
-              Browse Cards
-            </Link>
-          </div>
-
-          {pageMessage && (
-            <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
-              {pageMessage}
-            </div>
-          )}
-
-          {loading ? (
-            <div className="mt-12 rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-              <p className="text-zinc-400">Loading messages...</p>
-            </div>
-          ) : (
-            <div className="mt-12 grid min-h-[620px] gap-6 lg:grid-cols-[360px_1fr]">
-              <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-4">
-                <div className="flex items-center justify-between px-2 py-3">
-                  <h2 className="text-xl font-semibold">Inbox</h2>
-
-                  <p className="text-sm text-zinc-500">
-                    {conversations.length} total
-                  </p>
-                </div>
-
-                <div className="mt-4 space-y-3">
-                  {conversations.length === 0 ? (
-                    <div className="rounded-2xl border border-zinc-900 bg-black p-5">
-                      <p className="text-sm text-zinc-500">
-                        No conversations yet. Open a card and click Message Seller.
-                      </p>
-                    </div>
-                  ) : (
-                    conversations.map((conversation) => (
-                      <button
-                        key={conversation.id}
-                        type="button"
-                        onClick={() => setSelectedConversationId(conversation.id)}
-                        className={`w-full rounded-2xl border p-4 text-left transition ${
-                          selectedConversationId === conversation.id
-                            ? "border-white bg-white text-black"
-                            : "border-zinc-900 bg-black text-white hover:border-zinc-700"
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="font-semibold">
-                              {conversation.card_title || "Card conversation"}
-                            </p>
-
-                            <p
-                              className={`mt-1 text-sm ${
-                                selectedConversationId === conversation.id
-                                  ? "text-zinc-700"
-                                  : "text-zinc-500"
-                              }`}
-                            >
-                              {getOtherUserLabel(conversation)}
-                            </p>
-                          </div>
-
-                          <p
-                            className={`text-xs ${
-                              selectedConversationId === conversation.id
-                                ? "text-zinc-700"
-                                : "text-zinc-600"
-                            }`}
-                          >
-                            {formatDate(conversation.updated_at)}
-                          </p>
-                        </div>
-
-                        {conversation.order_id && (
-                          <p
-                            className={`mt-3 inline-block rounded-full px-3 py-1 text-xs ${
-                              selectedConversationId === conversation.id
-                                ? "bg-black text-white"
-                                : "bg-zinc-950 text-zinc-400"
-                            }`}
-                          >
-                            Order chat
-                          </p>
-                        )}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div className="flex rounded-3xl border border-zinc-900 bg-zinc-950">
-                {!selectedConversation ? (
-                  <div className="flex flex-1 items-center justify-center p-8 text-center">
-                    <div>
-                      <h2 className="text-2xl font-semibold">
-                        No conversation selected
-                      </h2>
-
-                      <p className="mt-3 text-zinc-500">
-                        Choose a conversation or start one from a card page.
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-1 flex-col">
-                    <div className="border-b border-zinc-900 p-6">
-                      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-                        <div>
-                          <h2 className="text-2xl font-semibold">
-                            {selectedConversation.card_title || "Card conversation"}
-                          </h2>
-
-                          <p className="mt-1 text-sm text-zinc-500">
-                            Messaging {getOtherUserLabel(selectedConversation)}
-                          </p>
-                        </div>
-
-                        <div className="flex flex-wrap gap-3">
-                          {selectedConversation.listing_id && (
-                            <Link
-                              href={`/cards/${selectedConversation.listing_id}`}
-                              className="rounded-full border border-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600 hover:text-white"
-                            >
-                              View Card
-                            </Link>
-                          )}
-
-                          {selectedConversation.order_id && (
-                            <Link
-                              href="/orders"
-                              className="rounded-full border border-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600 hover:text-white"
-                            >
-                              View Orders
-                            </Link>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex-1 space-y-4 overflow-y-auto p-6">
-                      {loadingMessages ? (
-                        <p className="text-zinc-500">Loading conversation...</p>
-                      ) : messages.length === 0 ? (
-                        <div className="rounded-2xl border border-zinc-900 bg-black p-6 text-center">
-                          <h3 className="text-xl font-semibold">
-                            Start the conversation
-                          </h3>
-
-                          <p className="mt-3 text-sm text-zinc-500">
-                            Send the first message about this card or order.
-                          </p>
-                        </div>
-                      ) : (
-                        messages.map((chatMessage) => {
-                          const isMine = chatMessage.sender_id === currentUserId;
-
-                          return (
-                            <div
-                              key={chatMessage.id}
-                              className={`flex ${
-                                isMine ? "justify-end" : "justify-start"
-                              }`}
-                            >
-                              <div
-                                className={`max-w-[75%] rounded-3xl px-5 py-4 ${
-                                  isMine
-                                    ? "bg-white text-black"
-                                    : "bg-black text-white"
-                                }`}
-                              >
-                                <p className="text-sm leading-6">
-                                  {chatMessage.body}
-                                </p>
-
-                                <p
-                                  className={`mt-2 text-xs ${
-                                    isMine ? "text-zinc-600" : "text-zinc-500"
-                                  }`}
-                                >
-                                  {formatTime(chatMessage.created_at)}
-                                </p>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-
-                    <form
-                      onSubmit={sendMessage}
-                      className="border-t border-zinc-900 p-5"
-                    >
-                      <div className="flex flex-col gap-3 md:flex-row">
-                        <input
-                          value={messageText}
-                          onChange={(event) => setMessageText(event.target.value)}
-                          className="flex-1 rounded-full border border-zinc-800 bg-black px-5 py-4 outline-none placeholder:text-zinc-600"
-                          placeholder="Type a message..."
-                        />
-
-                        <button
-                          type="submit"
-                          className="rounded-full bg-white px-8 py-4 font-semibold text-black hover:bg-zinc-200"
-                        >
-                          Send
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </section>
-      </main>
-    </RequireAuth>
-  );
+  const [conversations, setConversations] = useState(initialConversations);
+  const [activeId, setActiveId] = useState(initialConversations[0].id);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [draft, setDraft] = useState("");
+  const [counterAmount, setCounterAmount] = useState("");
+  const [counterFor, setCounterFor] = useState("");
+
+  const filteredConversations = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    if (!query) {
+      return conversations;
+    }
+
+    return conversations.filter((conversation) =>
+      [
+        conversation.person,
+        conversation.cardTitle,
+        conversation.lastSnippet,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [conversations, searchQuery]);
+
+  const activeConversation =
+    conversations.find((conversation) => conversation.id === activeId) ||
+    conversations[0];
+
+  function sendMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const body = draft.trim();
+
+    if (!body) {
+      return;
+    }
+
+    setConversations((items) =>
+      items.map((conversation) =>
+        conversation.id === activeConversation.id
+          ? {
+              ...conversation,
+              lastSnippet: body,
+              timestamp: "now",
+              messages: [
+                ...conversation.messages,
+                {
+                  id: `local-${conversation.messages.length + 1}`,
+                  sender: "buyer",
+                  body,
+                  time: "Now",
+                },
+              ],
+            }
+          : conversation,
+      ),
+    );
+    setDraft("");
+  }
+
+  function updateOffer(status: "Accepted" | "Countered" | "Declined") {
+    setConversations((items) =>
+      items.map((conversation) =>
+        conversation.id === activeConversation.id && conversation.offer
+          ? {
+              ...conversation,
+              offer: {
+                amount:
+                  status === "Countered" && counterAmount
+                    ? Number(counterAmount)
+                    : conversation.offer.amount,
+                status,
+              },
+            }
+          : conversation,
+      ),
+    );
+    setCounterFor("");
+    setCounterAmount("");
+  }
+
+  return (
+    <main className="messages-page">
+      <style>{pageStyles}</style>
+      <div className="messages-shell">
+        <Header />
+
+        <section className="page-heading">
+          <span>Messages</span>
+          <h1>Messages</h1>
+          <p>Buyer and seller conversations for cards, offers, and shipping.</p>
+        </section>
+
+        <section className="messages-layout">
+          <aside className="conversation-list panel">
+            <label className="message-search">
+              <span aria-hidden="true" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search messages"
+                aria-label="Search messages"
+              />
+            </label>
+
+            <div className="conversation-rows">
+              {filteredConversations.map((conversation) => (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  className={conversation.id === activeConversation.id ? "active" : ""}
+                  onClick={() => setActiveId(conversation.id)}
+                >
+                  <div>
+                    <strong>{conversation.person}</strong>
+                    <span>{conversation.cardTitle}</span>
+                    <p>{conversation.lastSnippet}</p>
+                  </div>
+                  <div className="conversation-meta">
+                    <span>{conversation.timestamp}</span>
+                    {conversation.unread ? <em>New</em> : null}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </aside>
+
+          <section className="thread-panel panel">
+            <header className="thread-header">
+              <div>
+                <h2>{activeConversation.person}</h2>
+                <p>
+                  {activeConversation.badge} · {activeConversation.cardTitle}
+                </p>
+              </div>
+              <Link href={activeConversation.cardHref}>View Card</Link>
+            </header>
+
+            <Link className="card-preview" href={activeConversation.cardHref}>
+              <CardArtwork accent={activeConversation.accent} />
+              <div>
+                <h3>{activeConversation.cardTitle}</h3>
+                <p>{formatCurrency(activeConversation.price)}</p>
+                {activeConversation.currentOffer ? (
+                  <span>
+                    Current offer {formatCurrency(activeConversation.currentOffer)}
+                  </span>
+                ) : null}
+              </div>
+              <strong>View Card</strong>
+            </Link>
+
+            {activeConversation.offer ? (
+              <div className="offer-card">
+                <div>
+                  <span>Offer</span>
+                  <strong>{formatCurrency(activeConversation.offer.amount)}</strong>
+                  <p>Status: {activeConversation.offer.status}</p>
+                </div>
+                <div className="offer-actions">
+                  <button type="button" onClick={() => updateOffer("Accepted")}>
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCounterFor(activeConversation.id)}
+                  >
+                    Counter
+                  </button>
+                  <button type="button" onClick={() => updateOffer("Declined")}>
+                    Decline
+                  </button>
+                </div>
+                {counterFor === activeConversation.id ? (
+                  <div className="counter-row">
+                    <input
+                      type="number"
+                      value={counterAmount}
+                      onChange={(event) => setCounterAmount(event.target.value)}
+                      placeholder="Counter amount"
+                    />
+                    <button type="button" onClick={() => updateOffer("Countered")}>
+                      Send
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="message-thread">
+              {activeConversation.messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`message-bubble ${message.sender}`}
+                >
+                  <p>{message.body}</p>
+                  <span>{message.time}</span>
+                </div>
+              ))}
+            </div>
+
+            <form className="composer" onSubmit={sendMessage}>
+              <input
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                placeholder="Write a message..."
+                aria-label="Write a message"
+              />
+              <button type="submit">Send</button>
+            </form>
+          </section>
+        </section>
+      </div>
+    </main>
+  );
 }
+
+const pageStyles = `
+  .messages-page {
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%),
+      linear-gradient(180deg, #000 0%, #030304 58%, #000 100%);
+    color: #fafafa;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  .messages-shell {
+    width: 1240px;
+    margin: 0 auto;
+    padding: 8px 0 38px;
+  }
+
+  .panel {
+    border: 1px solid #1d1d22;
+    border-radius: 12px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)),
+      rgba(5,5,6,0.92);
+    box-shadow: 0 18px 44px rgba(0,0,0,0.28);
+  }
+
+  .page-heading {
+    margin-top: 18px;
+  }
+
+  .page-heading span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .page-heading h1 {
+    margin: 8px 0 0;
+    color: #fff;
+    font-size: 42px;
+    line-height: 46px;
+    font-weight: 900;
+  }
+
+  .page-heading p,
+  .thread-header p,
+  .card-preview p,
+  .card-preview span,
+  .offer-card p {
+    color: #a1a1aa;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 800;
+  }
+
+  .messages-layout {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 16px;
+    min-height: 680px;
+  }
+
+  .conversation-list,
+  .thread-panel {
+    padding: 14px;
+  }
+
+  .message-search {
+    height: 38px;
+    border: 1px solid #24242a;
+    border-radius: 9px;
+    background: #08080a;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+  }
+
+  .message-search span {
+    width: 12px;
+    height: 12px;
+    border: 2px solid #777985;
+    border-radius: 999px;
+    box-sizing: border-box;
+  }
+
+  .message-search input,
+  .composer input,
+  .counter-row input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: #f4f4f5;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .conversation-rows {
+    margin-top: 12px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .conversation-rows button {
+    border: 1px solid #202026;
+    border-radius: 10px;
+    background: rgba(8,8,10,0.72);
+    color: inherit;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .conversation-rows button.active,
+  .conversation-rows button:hover {
+    border-color: rgba(231,222,208,0.44);
+    background: rgba(231,222,208,0.07);
+  }
+
+  .conversation-rows strong {
+    display: block;
+    color: #fff;
+    font-size: 13px;
+    line-height: 17px;
+    font-weight: 900;
+  }
+
+  .conversation-rows span,
+  .conversation-rows p,
+  .conversation-meta {
+    color: #a1a1aa;
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: 800;
+  }
+
+  .conversation-meta {
+    text-align: right;
+  }
+
+  .conversation-meta em {
+    margin-top: 6px;
+    border-radius: 999px;
+    background: rgba(231,222,208,0.12);
+    color: #E7DED0;
+    padding: 3px 7px;
+    display: inline-flex;
+    font-style: normal;
+    font-size: 9px;
+    font-weight: 900;
+  }
+
+  .thread-panel {
+    display: grid;
+    grid-template-rows: auto auto auto 1fr auto;
+    gap: 12px;
+  }
+
+  .thread-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+
+  .thread-header h2,
+  .card-preview h3 {
+    margin: 0;
+    color: #fff;
+    font-size: 22px;
+    line-height: 26px;
+    font-weight: 900;
+  }
+
+  .thread-header a,
+  .card-preview strong,
+  .offer-actions button,
+  .counter-row button,
+  .composer button {
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    color: #fff;
+    min-height: 36px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .thread-header a:hover,
+  .card-preview:hover strong,
+  .offer-actions button:hover,
+  .counter-row button:hover,
+  .composer button:hover {
+    border-color: rgba(231,222,208,0.62);
+    background: rgba(231,222,208,0.11);
+    box-shadow: 0 0 18px rgba(201,205,211,0.13);
+  }
+
+  .card-preview {
+    border: 1px solid #202026;
+    border-radius: 12px;
+    background: rgba(8,8,10,0.76);
+    padding: 12px;
+    display: grid;
+    grid-template-columns: 86px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .card-art {
+    width: 74px;
+    height: 96px;
+    border: 1px solid rgba(201,205,211,0.14);
+    border-radius: 9px;
+    background: #030304;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .card-face {
+    width: 54px;
+    height: 76px;
+    border: 1px solid rgba(244,244,245,0.48);
+    border-radius: 7px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 12px 22px rgba(0,0,0,0.55);
+  }
+
+  .card-face span {
+    position: absolute;
+    left: 13px;
+    top: 18px;
+    width: 28px;
+    height: 28px;
+    border: 1px solid rgba(255,255,255,0.22);
+    border-radius: 50%;
+  }
+
+  .card-face strong {
+    position: absolute;
+    left: 23px;
+    top: 24px;
+    width: 14px;
+    height: 30px;
+    border-radius: 999px 999px 8px 8px;
+    background: rgba(255,255,255,0.75);
+  }
+
+  .offer-card {
+    border: 1px solid rgba(52,211,153,0.18);
+    border-radius: 12px;
+    background: rgba(52,211,153,0.055);
+    padding: 12px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+  }
+
+  .offer-card span {
+    color: #86efac;
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .offer-card strong {
+    display: block;
+    margin-top: 5px;
+    color: #fff;
+    font-size: 24px;
+    line-height: 28px;
+    font-weight: 900;
+  }
+
+  .offer-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .counter-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+  }
+
+  .counter-row input {
+    border: 1px solid #24242a;
+    border-radius: 10px;
+    background: #08080a;
+    padding: 0 12px;
+    min-height: 38px;
+  }
+
+  .message-thread {
+    min-height: 280px;
+    overflow-y: auto;
+    border: 1px solid #202026;
+    border-radius: 12px;
+    background: rgba(8,8,10,0.52);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .message-bubble {
+    max-width: 70%;
+    border: 1px solid #202026;
+    border-radius: 12px;
+    background: rgba(5,5,6,0.9);
+    padding: 10px;
+  }
+
+  .message-bubble.buyer {
+    align-self: flex-end;
+    border-color: rgba(231,222,208,0.26);
+    background: rgba(231,222,208,0.07);
+  }
+
+  .message-bubble p {
+    margin: 0;
+    color: #fff;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 800;
+  }
+
+  .message-bubble span {
+    display: block;
+    margin-top: 6px;
+    color: #85858f;
+    font-size: 10px;
+    line-height: 13px;
+    font-weight: 800;
+  }
+
+  .composer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+  }
+
+  .composer input {
+    border: 1px solid #24242a;
+    border-radius: 10px;
+    background: #08080a;
+    padding: 0 12px;
+    min-height: 42px;
+  }
+
+  @media (max-width: 1100px) {
+    .messages-shell {
+      width: calc(100vw - 32px);
+    }
+
+    .messages-layout,
+    .card-preview,
+    .offer-card {
+      grid-template-columns: 1fr;
+    }
+
+    .thread-panel {
+      grid-template-rows: auto;
+    }
+  }
+`;

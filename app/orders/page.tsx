@@ -1,367 +1,218 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import Header from "../components/Header";
-import RequireAuth from "../components/RequireAuth";
-import { supabase } from "../../lib/supabase";
 
-type Listing = {
-  id: string;
-  title: string | null;
-  price: number | null;
-};
-
-type Order = {
-  id: string;
-  listing_id: string | null;
-  buyer_id: string | null;
-  seller_id: string | null;
-  card_price: number | null;
-  buyer_fee: number | null;
-  shipping_amount: number | null;
-  total_amount: number | null;
-  status: string | null;
-  created_at: string | null;
-  listings: Listing | null;
-};
-
-const statusStyles: Record<string, string> = {
-  pending: "border-yellow-500/30 bg-yellow-500/10 text-yellow-300",
-  paid: "border-blue-500/30 bg-blue-500/10 text-blue-300",
-  shipped: "border-blue-500/30 bg-blue-500/10 text-blue-300",
-  completed: "border-green-500/30 bg-green-500/10 text-green-300",
-  cancelled: "border-red-500/30 bg-red-500/10 text-red-300",
-};
+const orders = [
+  {
+    id: "GRAIL-1048",
+    cardTitle: "Crimson Court Rookie",
+    href: "/cards/browse-1",
+    status: "Processing",
+    seller: "VaultRunner",
+    total: "$1,355",
+  },
+  {
+    id: "GRAIL-1039",
+    cardTitle: "Midnight Arc Holo",
+    href: "/cards/browse-3",
+    status: "Shipped",
+    seller: "SlabStreet",
+    total: "$438",
+  },
+  {
+    id: "GRAIL-1027",
+    cardTitle: "Sapphire Prospect Vault",
+    href: "/cards/browse-8",
+    status: "Delivered",
+    seller: "CollectorCorner",
+    total: "$166",
+  },
+];
 
 export default function OrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [currentUserId, setCurrentUserId] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
+  return (
+    <main className="orders-page">
+      <style>{pageStyles}</style>
+      <div className="orders-shell">
+        <Header />
 
-  useEffect(() => {
-    loadOrders();
-  }, []);
+        <section className="page-heading">
+          <div>
+            <span>Orders</span>
+            <h1>Orders</h1>
+            <p>Mock order history for card purchases and shipping status.</p>
+          </div>
+          <Link href="/browse">Browse Cards</Link>
+        </section>
 
-  async function loadOrders() {
-    setLoading(true);
-    setMessage("");
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-
-    setCurrentUserId(user.id);
-
-    const { data, error } = await supabase
-      .from("orders")
-      .select(
-        `
-        id,
-        listing_id,
-        buyer_id,
-        seller_id,
-        card_price,
-        buyer_fee,
-        shipping_amount,
-        total_amount,
-        status,
-        created_at,
-        listings (
-          id,
-          title,
-          price
-        )
-      `
-      )
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      setMessage(error.message);
-      setOrders([]);
-      setLoading(false);
-      return;
-    }
-
-    setOrders((data || []) as unknown as Order[]);
-    setLoading(false);
-  }
-
-  function formatPrice(price: number | null) {
-    if (!price) return "$0.00";
-
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 2,
-    }).format(price);
-  }
-
-  function formatDate(date: string | null) {
-    if (!date) return "Recently";
-
-    return new Date(date).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  }
-
-  function getRole(order: Order) {
-    if (order.buyer_id === currentUserId) return "Buyer";
-    if (order.seller_id === currentUserId) return "Seller";
-    return "User";
-  }
-
-  const buyingOrders = orders.filter((order) => order.buyer_id === currentUserId);
-  const sellingOrders = orders.filter((order) => order.seller_id === currentUserId);
-  const inProgressOrders = orders.filter(
-    (order) => order.status !== "completed" && order.status !== "cancelled"
-  );
-
-  return (
-    <RequireAuth>
-      <main className="min-h-screen bg-black text-white">
-        <Header />
-
-        <section className="mx-auto max-w-6xl px-6 py-16">
-          <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
-            <div>
-              <p className="text-xs uppercase tracking-[0.4em] text-zinc-500">
-                Orders
-              </p>
-
-              <h1 className="mt-4 text-5xl font-semibold tracking-tight">
-                Order History
-              </h1>
-
-              <p className="mt-4 max-w-2xl text-zinc-400">
-                Track purchases, sales, checkout totals, and transaction status.
-              </p>
-            </div>
-
-            <Link
-              href="/browse"
-              className="rounded-full bg-white px-6 py-3 text-sm font-semibold text-black hover:bg-zinc-200"
-            >
-              Browse Cards
-            </Link>
-          </div>
-
-          {message && (
-            <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
-              {message}
-            </div>
-          )}
-
-          <div className="mt-12 grid gap-4 md:grid-cols-4">
-            <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-              <p className="text-sm text-zinc-500">Total Orders</p>
-              <h2 className="mt-3 text-4xl font-semibold">{orders.length}</h2>
-            </div>
-
-            <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-              <p className="text-sm text-zinc-500">Buying</p>
-              <h2 className="mt-3 text-4xl font-semibold">
-                {buyingOrders.length}
-              </h2>
-            </div>
-
-            <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-              <p className="text-sm text-zinc-500">Selling</p>
-              <h2 className="mt-3 text-4xl font-semibold">
-                {sellingOrders.length}
-              </h2>
-            </div>
-
-            <div className="rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-              <p className="text-sm text-zinc-500">In Progress</p>
-              <h2 className="mt-3 text-4xl font-semibold">
-                {inProgressOrders.length}
-              </h2>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="mt-12 rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-              <p className="text-zinc-400">Loading orders...</p>
-            </div>
-          ) : orders.length === 0 ? (
-            <div className="mt-12 rounded-3xl border border-zinc-900 bg-zinc-950 p-8 text-center">
-              <h2 className="text-2xl font-semibold">No orders yet</h2>
-
-              <p className="mt-3 text-zinc-500">
-                Orders will appear here after you buy or sell a card.
-              </p>
-
-              <Link
-                href="/browse"
-                className="mt-6 inline-block rounded-full bg-white px-6 py-3 text-sm font-semibold text-black hover:bg-zinc-200"
-              >
-                Browse Cards
-              </Link>
-            </div>
-          ) : (
-            <div className="mt-12 rounded-3xl border border-zinc-900 bg-zinc-950 p-4">
-              <div className="flex items-center justify-between px-2 py-3">
-                <h2 className="text-2xl font-semibold">Recent Orders</h2>
-
-                <button className="rounded-full border border-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-600 hover:text-white">
-                  Export
-                </button>
-              </div>
-
-              <div className="mt-4 space-y-4">
-                {orders.map((order) => {
-                  const role = getRole(order);
-                  const status = order.status || "pending";
-
-                  return (
-                    <div
-                      key={order.id}
-                      className="rounded-2xl border border-zinc-900 bg-black p-5"
-                    >
-                      <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-3">
-                            <p className="text-sm text-zinc-500">
-                              {order.id.slice(0, 8).toUpperCase()}
-                            </p>
-
-                            <span className="rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-400">
-                              {role}
-                            </span>
-
-                            <span
-                              className={`rounded-full border px-3 py-1 text-xs capitalize ${
-                                statusStyles[status] ||
-                                "border-zinc-800 bg-zinc-900 text-zinc-300"
-                              }`}
-                            >
-                              {status}
-                            </span>
-                          </div>
-
-                          <Link
-                            href={
-                              order.listing_id
-                                ? `/cards/${order.listing_id}`
-                                : "/browse"
-                            }
-                            className="mt-4 block text-2xl font-semibold hover:underline"
-                          >
-                            {order.listings?.title || "Untitled Card"}
-                          </Link>
-
-                          <div className="mt-5 grid gap-3 text-sm text-zinc-400 md:grid-cols-3">
-                            <div>
-                              <p className="text-zinc-600">Role</p>
-                              <p className="mt-1 text-zinc-300">{role}</p>
-                            </div>
-
-                            <div>
-                              <p className="text-zinc-600">Date</p>
-                              <p className="mt-1 text-zinc-300">
-                                {formatDate(order.created_at)}
-                              </p>
-                            </div>
-
-                            <div>
-                              <p className="text-zinc-600">Listing ID</p>
-                              <p className="mt-1 text-zinc-300">
-                                {order.listing_id
-                                  ? order.listing_id.slice(0, 8)
-                                  : "Missing"}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="min-w-[210px] rounded-2xl border border-zinc-900 bg-zinc-950 p-5 lg:text-right">
-                          <p className="text-sm text-zinc-500">Card Price</p>
-                          <p className="mt-1 text-xl font-semibold">
-                            {formatPrice(order.card_price)}
-                          </p>
-
-                          <p className="mt-4 text-sm text-zinc-500">Total</p>
-                          <p className="mt-1 text-2xl font-bold">
-                            {formatPrice(order.total_amount)}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-5 grid gap-3 border-t border-zinc-900 pt-5 text-sm md:grid-cols-3">
-                        <div className="rounded-2xl bg-zinc-950 p-4">
-                          <p className="text-zinc-500">Buyer Fee</p>
-                          <p className="mt-1 font-semibold">
-                            {formatPrice(order.buyer_fee)}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-zinc-950 p-4">
-                          <p className="text-zinc-500">Shipping</p>
-                          <p className="mt-1 font-semibold">
-                            {formatPrice(order.shipping_amount)}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-zinc-950 p-4">
-                          <p className="text-zinc-500">Status</p>
-                          <p className="mt-1 font-semibold capitalize">
-                            {status}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-5 flex flex-wrap gap-3">
-                        <Link
-                          href={
-                            order.listing_id
-                              ? `/cards/${order.listing_id}`
-                              : "/browse"
-                          }
-                          className="rounded-full border border-zinc-800 px-5 py-2 text-sm text-zinc-300 hover:border-zinc-600 hover:text-white"
-                        >
-                          View Card
-                        </Link>
-
-                        <Link
-                          href={`/messages?orderId=${order.id}`}
-                          className="rounded-full border border-zinc-800 px-5 py-2 text-sm text-zinc-300 hover:border-zinc-600 hover:text-white"
-                        >
-                          Message
-                        </Link>
-
-                        <Link
-                          href="/billing"
-                          className="rounded-full border border-zinc-800 px-5 py-2 text-sm text-zinc-300 hover:border-zinc-600 hover:text-white"
-                        >
-                          Payment Details
-                        </Link>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          <div className="mt-8 rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-            <h2 className="text-2xl font-semibold">Checkout Status</h2>
-
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-zinc-500">
-              This order flow now creates real database orders. Before launch,
-              we still need to connect a real payment processor so money is actually collected.
-            </p>
-          </div>
-        </section>
-      </main>
-    </RequireAuth>
-  );
+        <section className="orders-list panel">
+          {orders.map((order) => (
+            <article key={order.id} className="order-row">
+              <div>
+                <span>{order.id}</span>
+                <h2>{order.cardTitle}</h2>
+                <p>Seller: {order.seller}</p>
+              </div>
+              <strong className={`status status-${order.status.toLowerCase()}`}>
+                {order.status}
+              </strong>
+              <strong>{order.total}</strong>
+              <Link href={order.href}>View Card</Link>
+            </article>
+          ))}
+        </section>
+      </div>
+    </main>
+  );
 }
+
+const pageStyles = `
+  .orders-page {
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%),
+      linear-gradient(180deg, #000 0%, #030304 58%, #000 100%);
+    color: #fafafa;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  .orders-shell {
+    width: 1240px;
+    margin: 0 auto;
+    padding: 8px 0 38px;
+  }
+
+  .panel {
+    border: 1px solid #1d1d22;
+    border-radius: 12px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)),
+      rgba(5,5,6,0.92);
+    box-shadow: 0 18px 44px rgba(0,0,0,0.28);
+  }
+
+  .page-heading {
+    margin-top: 18px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+  }
+
+  .page-heading span,
+  .order-row span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .page-heading h1 {
+    margin: 8px 0 0;
+    color: #fff;
+    font-size: 42px;
+    line-height: 46px;
+    font-weight: 900;
+  }
+
+  .page-heading p,
+  .order-row p {
+    color: #a1a1aa;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 800;
+  }
+
+  .page-heading a,
+  .order-row a {
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    color: #fff;
+    min-height: 38px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .orders-list {
+    margin-top: 18px;
+    padding: 10px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .order-row {
+    border: 1px solid #202026;
+    border-radius: 10px;
+    background: rgba(8,8,10,0.76);
+    padding: 14px;
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 16px;
+    align-items: center;
+  }
+
+  .order-row h2 {
+    margin: 6px 0 0;
+    color: #fff;
+    font-size: 18px;
+    line-height: 22px;
+    font-weight: 900;
+  }
+
+  .order-row > strong {
+    color: #fff;
+    font-size: 16px;
+    font-weight: 900;
+  }
+
+  .status {
+    border: 1px solid rgba(201,205,211,0.28);
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 10px;
+    line-height: 12px;
+    text-transform: uppercase;
+  }
+
+  .status-processing {
+    color: #C9CDD3;
+    background: rgba(201,205,211,0.08);
+  }
+
+  .status-shipped {
+    color: #93c5fd;
+    background: rgba(96,165,250,0.08);
+    border-color: rgba(96,165,250,0.24);
+  }
+
+  .status-delivered {
+    color: #86efac;
+    background: rgba(52,211,153,0.08);
+    border-color: rgba(52,211,153,0.24);
+  }
+
+  @media (max-width: 1100px) {
+    .orders-shell {
+      width: calc(100vw - 32px);
+    }
+
+    .page-heading,
+    .order-row {
+      grid-template-columns: 1fr;
+    }
+
+    .page-heading {
+      display: grid;
+      align-items: start;
+    }
+  }
+`;

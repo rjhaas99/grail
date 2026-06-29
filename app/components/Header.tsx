@@ -17,7 +17,7 @@ const mainMenuItems = [
   { label: "Portfolio", href: "/portfolio" },
   { label: "Offers", href: "/offers" },
   { label: "Messages", href: "/messages" },
-  { label: "Seller Dashboard", href: "/dashboard" },
+  { label: "Seller Dashboard", href: "/seller-dashboard" },
 ];
 
 const accountItems = [

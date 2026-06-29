@@ -524,7 +524,11 @@ export default function CardDetailPage() {
   const [selectedPhoto, setSelectedPhoto] =
     useState<(typeof photoViews)[number]>("Front");
   const [isWatching, setIsWatching] = useState(false);
-  const [actionMessage, setActionMessage] = useState("");
+  const [isOfferOpen, setIsOfferOpen] = useState(false);
+  const [offerAmount, setOfferAmount] = useState("");
+  const [offerMessage, setOfferMessage] = useState("");
+  const [offerError, setOfferError] = useState("");
+  const [sentOfferAmount, setSentOfferAmount] = useState<number | null>(null);
 
   function goToPhoto(direction: "previous" | "next") {
     setSelectedPhoto((current) => {
@@ -536,6 +540,23 @@ export default function CardDetailPage() {
 
       return photoViews[nextIndex];
     });
+  }
+
+  function submitOffer() {
+    if (!card) {
+      return;
+    }
+
+    const amount = Number(offerAmount);
+
+    if (!amount || amount < card.minOffer) {
+      setOfferError("Offer is below the seller's minimum.");
+      setSentOfferAmount(null);
+      return;
+    }
+
+    setOfferError("");
+    setSentOfferAmount(amount);
   }
 
   if (!card) {
@@ -651,30 +672,25 @@ export default function CardDetailPage() {
               </p>
 
               <div className="purchase-buttons">
-                <button
-                  type="button"
-                  className="buy-button"
-                  onClick={() => setActionMessage("Buy flow coming soon.")}
-                >
+                <Link className="buy-button" href={`/checkout/${card.id}`}>
                   Buy Now
-                </button>
+                </Link>
                 <button
                   type="button"
-                  onClick={() => setActionMessage("Offer flow coming soon.")}
+                  onClick={() => {
+                    setIsOfferOpen(true);
+                    setOfferAmount("");
+                    setOfferMessage("");
+                    setOfferError("");
+                    setSentOfferAmount(null);
+                  }}
                 >
                   Make Offer
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setActionMessage("Message flow coming soon.")}
-                >
+                <Link href="/messages">
                   Message Seller
-                </button>
+                </Link>
               </div>
-
-              {actionMessage ? (
-                <p className="action-status">{actionMessage}</p>
-              ) : null}
 
               <p className="offer-note">
                 Minimum offer: {formatCurrency(card.minOffer)}
@@ -762,6 +778,81 @@ export default function CardDetailPage() {
           </article>
         </section>
       </div>
+
+      {isOfferOpen ? (
+        <div className="offer-modal-backdrop" role="presentation">
+          <section
+            className="offer-modal panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Make offer"
+          >
+            <div className="offer-modal-header">
+              <div>
+                <span>Make Offer</span>
+                <h2>{card.title}</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close offer modal"
+                onClick={() => setIsOfferOpen(false)}
+              >
+                x
+              </button>
+            </div>
+
+            <div className="offer-summary-grid">
+              <DetailRow label="Asking Price" value={formatCurrency(card.askingPrice)} />
+              <DetailRow label="Market Value" value={formatCurrency(card.marketValue)} />
+              <DetailRow label="Minimum Offer" value={formatCurrency(card.minOffer)} />
+            </div>
+
+            <label className="offer-field">
+              <span>Your offer</span>
+              <input
+                type="number"
+                min="0"
+                value={offerAmount}
+                onChange={(event) => setOfferAmount(event.target.value)}
+                placeholder="Enter offer amount"
+              />
+            </label>
+
+            <label className="offer-field">
+              <span>Add a message to seller</span>
+              <textarea
+                value={offerMessage}
+                onChange={(event) => setOfferMessage(event.target.value)}
+                placeholder="Optional message"
+              />
+            </label>
+
+            <p className="offer-helper">
+              Offers below the seller&apos;s minimum may not be accepted.
+            </p>
+
+            {offerError ? <p className="offer-error">{offerError}</p> : null}
+
+            {sentOfferAmount ? (
+              <div className="offer-confirmation">
+                <strong>Offer sent to seller.</strong>
+                <p>Offer amount: {formatCurrency(sentOfferAmount)}</p>
+                <p>Status: Pending</p>
+                <p>Seller has 24 hours to respond.</p>
+              </div>
+            ) : null}
+
+            <div className="offer-modal-actions">
+              <button type="button" className="buy-button" onClick={submitOffer}>
+                Submit Offer
+              </button>
+              <button type="button" onClick={() => setIsOfferOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -1352,7 +1443,9 @@ const pageStyles = `
     gap: 10px;
   }
 
-  .purchase-buttons button {
+  .purchase-buttons button,
+  .purchase-buttons a,
+  .offer-modal-actions button {
     height: 44px;
     border: 1px solid rgba(231,222,208,0.28);
     border-radius: 10px;
@@ -1361,6 +1454,10 @@ const pageStyles = `
     font-size: 13px;
     font-weight: 900;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
   }
 
   .purchase-buttons .buy-button {
@@ -1368,7 +1465,9 @@ const pageStyles = `
     color: #111;
   }
 
-  .purchase-buttons button:hover {
+  .purchase-buttons button:hover,
+  .purchase-buttons a:hover,
+  .offer-modal-actions button:hover {
     border-color: rgba(231,222,208,0.62);
     box-shadow: 0 0 20px rgba(201,205,211,0.14);
   }
@@ -1383,6 +1482,139 @@ const pageStyles = `
     font-size: 12px;
     line-height: 16px;
     font-weight: 900;
+  }
+
+  .offer-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: rgba(0,0,0,0.72);
+    backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .offer-modal {
+    width: min(560px, 100%);
+    padding: 18px;
+  }
+
+  .offer-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+  }
+
+  .offer-modal-header span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .offer-modal-header h2 {
+    margin: 7px 0 0;
+    color: #fff;
+    font-size: 26px;
+    line-height: 30px;
+    font-weight: 900;
+  }
+
+  .offer-modal-header button {
+    width: 34px;
+    height: 34px;
+    border: 1px solid rgba(231,222,208,0.22);
+    border-radius: 999px;
+    background: rgba(231,222,208,0.055);
+    color: #E7DED0;
+    cursor: pointer;
+    font-weight: 900;
+  }
+
+  .offer-summary-grid {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .offer-field {
+    margin-top: 14px;
+    display: grid;
+    gap: 7px;
+  }
+
+  .offer-field span {
+    color: #C9CDD3;
+    font-size: 12px;
+    line-height: 15px;
+    font-weight: 900;
+  }
+
+  .offer-field input,
+  .offer-field textarea {
+    width: 100%;
+    border: 1px solid #24242a;
+    border-radius: 10px;
+    background: #08080a;
+    color: #fff;
+    padding: 12px;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    outline: none;
+  }
+
+  .offer-field textarea {
+    min-height: 92px;
+    resize: vertical;
+  }
+
+  .offer-helper,
+  .offer-error,
+  .offer-confirmation p {
+    margin: 10px 0 0;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 17px;
+    font-weight: 800;
+  }
+
+  .offer-error {
+    color: #fb7185;
+  }
+
+  .offer-confirmation {
+    margin-top: 14px;
+    border: 1px solid rgba(52,211,153,0.24);
+    border-radius: 10px;
+    background: rgba(52,211,153,0.07);
+    padding: 12px;
+  }
+
+  .offer-confirmation strong {
+    color: #86efac;
+    font-size: 13px;
+    line-height: 17px;
+    font-weight: 900;
+  }
+
+  .offer-modal-actions {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .offer-modal-actions .buy-button {
+    background: #E7DED0;
+    color: #111;
   }
 
   .offer-note {
