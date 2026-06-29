@@ -1,4 +1,4 @@
-export type ListingTag = "Graded" | "Raw" | "Hot" | "Grail";
+export type ListingTag = "Graded" | "Raw" | "Hot" | "Grail" | "Collection";
 export type CardCategory = "Sports" | "TCG";
 export type OfferStatus =
   | "Pending"
@@ -68,6 +68,8 @@ export type MockListing = {
   isRaw: boolean;
   isHot: boolean;
   isGrail: boolean;
+  isCollectionOnly?: boolean;
+  listingStatus?: string | null;
   accent: string;
   artworkTone: string;
   cardDetailRoute: string;
@@ -696,13 +698,20 @@ const listingSeeds = [
 export function getListingTag(listing: {
   conditionDisplay?: string;
   condition?: string;
+  tags?: ListingTag[];
+  tag?: ListingTag;
   marketValue: number;
   watchCount: number;
   views?: number;
   viewCount?: number;
   isGrail?: boolean;
   isHot?: boolean;
+  isCollectionOnly?: boolean;
 }): ListingTag {
+  if (listing.isCollectionOnly || listing.tag === "Collection" || listing.tags?.includes("Collection")) {
+    return "Collection";
+  }
+
   if (listing.isGrail || listing.marketValue >= 1200) {
     return "Grail";
   }

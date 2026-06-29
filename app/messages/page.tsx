@@ -168,7 +168,9 @@ export default function MessagesPage() {
                     );
                   }}
                 >
-                  {conversation.unread ? <span className="unread-dot" aria-hidden="true" /> : null}
+                  <span className="unread-slot" aria-hidden="true">
+                    {conversation.unread ? <span className="unread-dot" /> : null}
+                  </span>
                   <div>
                     <strong>
                       {conversation.isActive ? <span className="online-dot" aria-hidden="true" /> : null}
@@ -393,22 +395,27 @@ const pageStyles = `
     color: inherit;
     padding: 12px;
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 14px 1fr auto;
     gap: 10px;
+    align-items: center;
     text-align: left;
     cursor: pointer;
   }
 
+  .unread-slot {
+    width: 14px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
   .unread-dot {
-    position: absolute;
-    left: 7px;
-    top: 50%;
     width: 8px;
     height: 8px;
     border-radius: 999px;
     background: #fff;
     box-shadow: 0 0 10px rgba(255,255,255,0.28);
-    transform: translateY(-50%);
   }
 
   .conversation-rows button.active,

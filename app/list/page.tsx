@@ -8,6 +8,7 @@ import Header from "../components/Header";
 import { supabase } from "../../lib/supabase";
 
 type CardType = "Raw" | "Graded";
+type ListingMode = "sale" | "collection";
 type StatusType = "success" | "error" | "info";
 type ImageType =
   | "front"
@@ -67,6 +68,8 @@ type ListingDraft = {
   year: string;
   brand: string;
   cardNumber: string;
+  serialNumber?: string;
+  customSerialNumber?: string;
   cardType: CardType;
   grader: string;
   grade: string;
@@ -143,6 +146,27 @@ const standardGrades = [
   "1.5",
   "1",
   "Authentic",
+];
+const serialNumberOptions = [
+  "Not Serial Numbered",
+  "1/1",
+  "/2",
+  "/3",
+  "/4",
+  "/5",
+  "/10",
+  "/25",
+  "/49",
+  "/50",
+  "/75",
+  "/99",
+  "/100",
+  "/149",
+  "/199",
+  "/249",
+  "/299",
+  "/499",
+  "Custom",
 ];
 
 function formatCurrency(value: string | number) {
@@ -232,13 +256,17 @@ export default function ListCardPage() {
   const [existingImageUrls, setExistingImageUrls] = useState<
     Partial<Record<ImageType, string>>
   >({});
+  const [listingMode, setListingMode] = useState<ListingMode>("sale");
+  const [isAutoTitle, setIsAutoTitle] = useState(true);
   const [category, setCategory] = useState("Sports");
   const [cardType, setCardType] = useState<CardType>("Graded");
-  const [title, setTitle] = useState("Crimson Court Rookie");
+  const [title, setTitle] = useState("");
   const [year, setYear] = useState("2026");
   const [setName, setSetName] = useState("Crimson Court Archive");
   const [cardNumber, setCardNumber] = useState("CC-01");
   const [subject, setSubject] = useState("Rookie Guard");
+  const [serialNumber, setSerialNumber] = useState("Not Serial Numbered");
+  const [customSerialNumber, setCustomSerialNumber] = useState("");
   const [grader, setGrader] = useState("PSA");
   const [grade, setGrade] = useState("10");
   const [condition, setCondition] = useState("Near Mint");
@@ -279,10 +307,20 @@ export default function ListCardPage() {
   }, []);
 
   useEffect(() => {
-    const draftId = new URLSearchParams(window.location.search).get("draft");
+    const searchParams = new URLSearchParams(window.location.search);
+    const draftId = searchParams.get("draft");
+    const isCollectionModeParam = searchParams.get("mode") === "collection";
 
-    if (!draftId || new URLSearchParams(window.location.search).get("edit")) {
-      return;
+    const modeTimer = window.setTimeout(() => {
+      if (isCollectionModeParam) {
+        setListingMode("collection");
+        setAskingPrice("");
+        setMinimumOffer("");
+      }
+    }, 0);
+
+    if (!draftId || searchParams.get("edit")) {
+      return () => window.clearTimeout(modeTimer);
     }
 
     const preloadTimer = window.setTimeout(() => {
@@ -295,11 +333,14 @@ export default function ListCardPage() {
 
       setEditingDraftId(draft.id);
       setTitle(draft.title);
+      setIsAutoTitle(false);
       setCategory(draft.category);
       setSubject(draft.subject);
       setYear(draft.year);
       setSetName(draft.brand);
       setCardNumber(draft.cardNumber);
+      setSerialNumber(draft.serialNumber || "Not Serial Numbered");
+      setCustomSerialNumber(draft.customSerialNumber || "");
       setCardType(draft.cardType);
       setGrader(draft.grader);
       setGrade(draft.grade);
@@ -311,7 +352,10 @@ export default function ListCardPage() {
       setStatus({ type: "info", text: "Draft loaded." });
     }, 0);
 
-    return () => window.clearTimeout(preloadTimer);
+    return () => {
+      window.clearTimeout(modeTimer);
+      window.clearTimeout(preloadTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -404,6 +448,7 @@ export default function ListCardPage() {
         setCategory(listing.sport || "Sports");
         setCardType(nextCardType);
         setTitle(listing.title || "");
+        setIsAutoTitle(false);
         setYear(listing.year || "");
         setSetName(listing.brand || "");
         setCardNumber(listing.card_number || "");
@@ -441,6 +486,20 @@ export default function ListCardPage() {
 
   const gradeOptions = grader === "PSA" ? psaGrades : standardGrades;
   const isEditMode = Boolean(editListingId);
+  const isCollectionMode = listingMode === "collection";
+  const serialDisplay =
+    serialNumber === "Custom"
+      ? customSerialNumber.trim()
+      : serialNumber === "Not Serial Numbered"
+        ? ""
+        : serialNumber;
+  const generatedTitle = useMemo(() => {
+    const conditionPart = cardType === "Graded" ? `${grader} ${grade}` : condition;
+    return [year, setName, subject, serialDisplay, conditionPart]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(" ");
+  }, [cardType, condition, grade, grader, serialDisplay, setName, subject, year]);
   const subtitle =
     cardType === "Graded"
       ? `${category}: ${grader} ${grade}`
@@ -458,15 +517,11 @@ export default function ListCardPage() {
   const previewTitle = buildTitle() || "Untitled Card";
 
   function buildTitle() {
-    if (title.trim()) {
+    if (!isAutoTitle && title.trim()) {
       return title.trim();
     }
 
-    if (cardType === "Graded") {
-      return [year, setName, subject, grader, grade].filter(Boolean).join(" ");
-    }
-
-    return [year, setName, subject, condition].filter(Boolean).join(" ");
+    return generatedTitle;
   }
 
   function handlePhotoChange(imageType: ImageType, file: File | undefined) {
@@ -518,6 +573,8 @@ export default function ListCardPage() {
       year,
       brand: setName,
       cardNumber,
+      serialNumber,
+      customSerialNumber,
       cardType,
       grader,
       grade,
@@ -577,11 +634,12 @@ export default function ListCardPage() {
       return "Card type is required.";
     }
 
-    if (!askingPrice || Number.isNaN(priceNumber) || priceNumber <= 0) {
+    if (!isCollectionMode && (!askingPrice || Number.isNaN(priceNumber) || priceNumber <= 0)) {
       return "Asking price must be a positive number.";
     }
 
     if (
+      !isCollectionMode &&
       minimumOffer.trim() &&
       (!Number.isFinite(minimumOfferNumber) ||
         minimumOfferNumber > priceNumber)
@@ -612,7 +670,8 @@ export default function ListCardPage() {
       grader: cardType === "Graded" ? clean(grader) : null,
       grade: cardType === "Graded" ? clean(grade) : null,
       condition: cardType === "Raw" ? clean(condition) : null,
-      price: Number(askingPrice),
+      price: isCollectionMode ? null : Number(askingPrice),
+      collection_note: serialDisplay ? `Serial Number: ${serialDisplay}` : null,
     };
   }
 
@@ -821,7 +880,9 @@ export default function ListCardPage() {
         .insert({
           seller_id: currentSession.user.id,
           ...buildListingFields(),
-          status: "active",
+          status: isCollectionMode ? "collection" : "active",
+          is_collection_card: isCollectionMode,
+          is_public_collection: isCollectionMode,
         })
         .select("id")
         .single();
@@ -852,7 +913,10 @@ export default function ListCardPage() {
         return;
       }
 
-      setStatus({ type: "success", text: "Listing published." });
+      setStatus({
+        type: "success",
+        text: isCollectionMode ? "Card added to collection." : "Listing published.",
+      });
     } catch (error) {
       console.error("Publish listing error:", error);
       setStatus({
@@ -874,9 +938,12 @@ export default function ListCardPage() {
     setCategory("Sports");
     setCardType("Graded");
     setTitle("");
+    setIsAutoTitle(true);
     setYear("");
     setSetName("");
     setCardNumber("");
+    setSerialNumber("Not Serial Numbered");
+    setCustomSerialNumber("");
     setSubject("");
     setGrader("PSA");
     setGrade("10");
@@ -904,7 +971,9 @@ export default function ListCardPage() {
           <p>
             {isEditMode
               ? "Update your GRAIL listing details, price, and listing photos."
-              : "Create a premium GRAIL listing for sports cards, TCG cards, slabs, and raw cards."}
+              : isCollectionMode
+                ? "Add a card to your public GRAIL collection without listing it for sale."
+                : "Create a premium GRAIL listing for sports cards, TCG cards, slabs, and raw cards."}
           </p>
         </section>
 
@@ -927,7 +996,13 @@ export default function ListCardPage() {
 
         {publishedListingId ? (
           <section className="publish-success panel">
-            <strong>{isEditMode ? "Listing updated." : "Listing published."}</strong>
+            <strong>
+              {isEditMode
+                ? "Listing updated."
+                : isCollectionMode
+                  ? "Card added to collection."
+                  : "Listing published."}
+            </strong>
             <div>
               <Link href={`/cards/${publishedListingId}`}>View Listing</Link>
               <Link href="/browse">Browse Listings</Link>
@@ -1000,9 +1075,15 @@ export default function ListCardPage() {
                 <label>
                   <span>Card title</span>
                   <input
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
+                    value={isAutoTitle ? generatedTitle : title}
+                    onChange={(event) => {
+                      setIsAutoTitle(false);
+                      setTitle(event.target.value);
+                    }}
                   />
+                  <small>
+                    Auto title: {generatedTitle || "Add card details to generate a title."}
+                  </small>
                 </label>
                 <label>
                   <span>Year</span>
@@ -1028,6 +1109,33 @@ export default function ListCardPage() {
                     value={subject}
                     onChange={(event) => setSubject(event.target.value)}
                   />
+                </label>
+                <label>
+                  <span>Serial Number</span>
+                  <select
+                    value={serialNumber}
+                    onChange={(event) => setSerialNumber(event.target.value)}
+                  >
+                    {serialNumberOptions.map((item) => (
+                      <option key={item}>{item}</option>
+                    ))}
+                  </select>
+                </label>
+                {serialNumber === "Custom" ? (
+                  <label>
+                    <span>Custom serial</span>
+                    <input
+                      value={customSerialNumber}
+                      onChange={(event) => setCustomSerialNumber(event.target.value)}
+                      placeholder="/35 or 12/99"
+                    />
+                  </label>
+                ) : null}
+                <label className="toggle-field">
+                  <span>Title mode</span>
+                  <button type="button" onClick={() => setIsAutoTitle(true)}>
+                    Use Auto Title
+                  </button>
                 </label>
                 <label>
                   <span>Card type</span>
@@ -1090,6 +1198,8 @@ export default function ListCardPage() {
                   <input
                     value={askingPrice}
                     inputMode="decimal"
+                    disabled={isCollectionMode}
+                    placeholder={isCollectionMode ? "Not listed for sale" : undefined}
                     onChange={(event) => setAskingPrice(event.target.value)}
                   />
                 </label>
@@ -1098,6 +1208,8 @@ export default function ListCardPage() {
                   <input
                     value={minimumOffer}
                     inputMode="decimal"
+                    disabled={isCollectionMode}
+                    placeholder={isCollectionMode ? "Not available for collection cards" : undefined}
                     onChange={(event) => setMinimumOffer(event.target.value)}
                   />
                 </label>
@@ -1115,6 +1227,9 @@ export default function ListCardPage() {
                 Offers are available on every GRAIL listing. Sellers can set a
                 minimum offer.
               </p>
+              {isCollectionMode ? (
+                <p>This card will appear in your public collection without Buy or Make Offer actions.</p>
+              ) : null}
             </section>
 
             <section className="panel form-section">
@@ -1188,7 +1303,7 @@ export default function ListCardPage() {
               <h3>{previewTitle}</h3>
               <p>{subtitle}</p>
               <p>Seller: {session?.user.email || "GRAIL Seller"}</p>
-              <strong>{formatCurrency(askingPrice)}</strong>
+              <strong>{isCollectionMode ? "In Collection" : formatCurrency(askingPrice)}</strong>
               <ActionCircles />
               <button
                 type="button"
@@ -1225,10 +1340,14 @@ export default function ListCardPage() {
                 {isPublishing
                   ? isEditMode
                     ? "Saving..."
-                    : "Publishing..."
+                    : isCollectionMode
+                      ? "Adding..."
+                      : "Publishing..."
                   : isEditMode
                     ? "Save Changes"
-                    : "Publish Listing"}
+                    : isCollectionMode
+                      ? "Add to Collection"
+                      : "Publish Listing"}
               </button>
               {!session && !isCheckingAuth ? (
                 <Link href="/login">Sign In to Publish</Link>
@@ -1299,8 +1418,8 @@ export default function ListCardPage() {
                 <h3>{previewTitle}</h3>
                 <p>{subtitle}</p>
                 <div className="preview-detail-grid">
-                  <span>Asking Price <strong>{formatCurrency(askingPrice)}</strong></span>
-                  <span>Minimum Offer <strong>{minimumOffer ? formatCurrency(minimumOffer) : "Not set"}</strong></span>
+                  <span>Asking Price <strong>{isCollectionMode ? "In Collection" : formatCurrency(askingPrice)}</strong></span>
+                  <span>Minimum Offer <strong>{isCollectionMode ? "Not available" : minimumOffer ? formatCurrency(minimumOffer) : "Not set"}</strong></span>
                   <span>Card Type <strong>{cardType}</strong></span>
                   <span>
                     {cardType === "Graded" ? "Grade" : "Condition"}{" "}
@@ -1365,6 +1484,8 @@ const pageStyles = `
   .field-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   label { display: grid; gap: 7px; }
   input, select { border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; min-height: 42px; padding: 0 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none; }
+  input:disabled { color: #85858f; cursor: not-allowed; }
+  label small { color: #85858f; font-size: 11px; line-height: 15px; font-weight: 800; }
   button, .action-panel a, .view-card { min-height: 40px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055); color: #fff; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 12px; font-weight: 900; cursor: pointer; }
   button:hover, .action-panel a:hover { border-color: rgba(231,222,208,0.62); background: rgba(231,222,208,0.11); }
   button:disabled { cursor: not-allowed; opacity: 0.45; }

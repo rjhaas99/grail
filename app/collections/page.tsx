@@ -1,9 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Header from "../components/Header";
+import { supabase } from "../../lib/supabase";
 import { buildMockSellerListings, mockSellers } from "../lib/mockData";
+import type { MockSeller } from "../lib/mockData";
+
+type CollectionSeller = MockSeller & {
+  searchText?: string;
+};
+
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  username: string | null;
+};
+
+type ListingRow = {
+  seller_id: string | null;
+  title: string | null;
+  sport: string | null;
+  price: number | null;
+  status: string | null;
+  is_collection_card?: boolean | null;
+  is_public_collection?: boolean | null;
+};
 
 const filters = ["All", "Grail Collections", "Sports", "TCG", "Top Sellers", "New Collections"];
 
@@ -15,22 +37,156 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function getInitials(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "GC";
+}
+
+function getProfileSlug(profile: ProfileRow) {
+  const username = profile.username?.replace(/^@/, "").trim();
+  return username ? encodeURIComponent(username) : profile.id;
+}
+
 export default function CollectionsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("All");
   const [followed, setFollowed] = useState<string[]>([]);
+  const [realSellers, setRealSellers] = useState<CollectionSeller[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadRealCollections() {
+      try {
+        const { data: profileData, error: profileError } = await supabase
+          .from("profiles")
+          .select("id, full_name, username")
+          .limit(50);
+
+        if (profileError) {
+          throw profileError;
+        }
+
+        const profiles = (profileData || []) as ProfileRow[];
+        const profileIds = profiles.map((profile) => profile.id);
+        let listings: ListingRow[] = [];
+
+        if (profileIds.length > 0) {
+          const { data: listingData, error: listingError } = await supabase
+            .from("listings")
+            .select("seller_id, title, sport, price, status, is_collection_card, is_public_collection")
+            .in("seller_id", profileIds)
+            .or("status.eq.active,status.eq.collection,is_public_collection.eq.true");
+
+          if (listingError) {
+            console.error("Collections listing fetch error:", listingError);
+          } else {
+            listings = (listingData || []) as ListingRow[];
+          }
+        }
+
+        const listingsBySeller = new Map<string, ListingRow[]>();
+        listings.forEach((listing) => {
+          if (!listing.seller_id) {
+            return;
+          }
+          listingsBySeller.set(listing.seller_id, [
+            ...(listingsBySeller.get(listing.seller_id) || []),
+            listing,
+          ]);
+        });
+
+        const mappedSellers = profiles.map((profile) => {
+          const sellerListings = listingsBySeller.get(profile.id) || [];
+          const name = profile.full_name || profile.username || "GRAIL Seller";
+          const slug = getProfileSlug(profile);
+          const totalValue = sellerListings.reduce(
+            (sum, listing) => sum + Number(listing.price || 0),
+            0,
+          );
+
+          return {
+            slug,
+            name,
+            initials: getInitials(name),
+            level: "GRAIL Seller",
+            rewardsBadge: "Public Collection",
+            completedSales: 0,
+            activeListings: sellerListings.length,
+            responseTime: "Same day",
+            shipSpeed: "2 business days",
+            rating: "New seller",
+            reviews: 0,
+            joinedDate: "GRAIL Seller",
+            location: "United States",
+            bio: `Public collection for ${name}.`,
+            collectionValue: totalValue,
+            avgListingPrice: sellerListings.length
+              ? Math.round(totalValue / sellerListings.length)
+              : 0,
+            fastShippingStreak: "Not available",
+            responseScore: "New",
+            cancellationRate: "N/A",
+            sellerTags: ["Public Collection"],
+            levelProgress: 0,
+            buyerRating: "New",
+            priceOffset: 0,
+            route: `/collections/${slug}`,
+            searchText: [
+              name,
+              profile.username,
+              slug,
+              `Public collection for ${name}.`,
+              "GRAIL Seller",
+              "Public Collection",
+              ...sellerListings.map((listing) => listing.title || ""),
+            ].join(" "),
+          } satisfies CollectionSeller;
+        });
+
+        if (isMounted) {
+          setRealSellers(mappedSellers);
+        }
+      } catch (error) {
+        console.error("Collections profile fetch error:", error);
+      }
+    }
+
+    loadRealCollections();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const collections = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
+    const combinedSellers: CollectionSeller[] = [
+      ...realSellers,
+      ...mockSellers.filter(
+        (mockSeller) => !realSellers.some((seller) => seller.slug === mockSeller.slug),
+      ),
+    ];
 
-    return mockSellers.filter((seller) => {
+    return combinedSellers.filter((seller) => {
       if (activeFilter === "Top Sellers" && !seller.sellerTags.includes("Top Closer")) return false;
       if (activeFilter === "New Collections" && !["collector-corner", "pack-pilot"].includes(seller.slug)) return false;
       if (activeFilter === "Grail Collections" && seller.collectionValue < 70000) return false;
-      if (query && ![seller.name, seller.bio, seller.level, seller.rewardsBadge].join(" ").toLowerCase().includes(query)) return false;
+      if (query && ![
+        seller.name,
+        seller.slug,
+        seller.bio,
+        seller.level,
+        seller.rewardsBadge,
+        seller.searchText,
+      ].join(" ").toLowerCase().includes(query)) return false;
       return true;
     });
-  }, [activeFilter, searchQuery]);
+  }, [activeFilter, realSellers, searchQuery]);
 
   function toggleFollow(slug: string) {
     setFollowed((items) =>

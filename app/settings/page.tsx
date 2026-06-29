@@ -4,10 +4,6 @@ import { useState } from "react";
 import Header from "../components/Header";
 
 type ToggleKey =
-  | "publicProfile"
-  | "showCollectionValue"
-  | "showSellerStats"
-  | "allowBuyerMessages"
   | "offerAlerts"
   | "messageAlerts"
   | "orderUpdates"
@@ -16,10 +12,6 @@ type ToggleKey =
   | "autoWatch";
 
 const initialToggles: Record<ToggleKey, boolean> = {
-  publicProfile: true,
-  showCollectionValue: false,
-  showSellerStats: true,
-  allowBuyerMessages: true,
   offerAlerts: true,
   messageAlerts: true,
   orderUpdates: true,
@@ -49,21 +41,14 @@ function ToggleRow({
   );
 }
 
-function LockedRow({ label }: { label: string }) {
-  return (
-    <div className="locked-row">
-      <span>{label}</span>
-      <strong>Locked On</strong>
-    </div>
-  );
-}
-
 export default function SettingsPage() {
   const [toggles, setToggles] = useState(initialToggles);
   const [status, setStatus] = useState("");
   const [username, setUsername] = useState("ryanjhaas99");
   const [usernameStatus, setUsernameStatus] = useState("");
   const [usernameSaved, setUsernameSaved] = useState(false);
+  const [blockedUsers, setBlockedUsers] = useState(["SpamCollector", "LowballKing"]);
+  const [blockedUserInput, setBlockedUserInput] = useState("");
 
   function toggle(key: ToggleKey) {
     setToggles((current) => ({ ...current, [key]: !current[key] }));
@@ -89,6 +74,22 @@ export default function SettingsPage() {
 
     setUsernameSaved(true);
     setUsernameStatus("Username updated. You can change it again tomorrow.");
+  }
+
+  function blockUser() {
+    const user = blockedUserInput.trim();
+
+    if (!user) {
+      return;
+    }
+
+    setBlockedUsers((items) =>
+      items.some((item) => item.toLowerCase() === user.toLowerCase())
+        ? items
+        : [...items, user],
+    );
+    setBlockedUserInput("");
+    setStatus("Blocked user added.");
   }
 
   return (
@@ -145,15 +146,6 @@ export default function SettingsPage() {
           </div>
 
           <div className="panel section-card">
-            <h2>Privacy</h2>
-            <LockedRow label="Public profile" />
-            <LockedRow label="Show collection value" />
-            <LockedRow label="Show seller stats" />
-            <p className="field-note">Required for marketplace trust and collection transparency.</p>
-            <ToggleRow label="Allow messages from buyers" checked={toggles.allowBuyerMessages} onClick={() => toggle("allowBuyerMessages")} />
-          </div>
-
-          <div className="panel section-card">
             <h2>Notifications</h2>
             <ToggleRow label="Offer alerts" checked={toggles.offerAlerts} onClick={() => toggle("offerAlerts")} />
             <ToggleRow label="Message alerts" checked={toggles.messageAlerts} onClick={() => toggle("messageAlerts")} />
@@ -177,6 +169,37 @@ export default function SettingsPage() {
               <span>Preferred currency</span>
               <input defaultValue="USD" />
             </label>
+          </div>
+
+          <div className="panel section-card">
+            <h2>Messaging / Blocked Users</h2>
+            <p className="field-note">Everyone can message by default. Block specific users here.</p>
+            <label>
+              <span>Search or add user</span>
+              <input
+                value={blockedUserInput}
+                onChange={(event) => setBlockedUserInput(event.target.value)}
+                placeholder="Username or display name"
+              />
+            </label>
+            <button type="button" onClick={blockUser}>
+              Block User
+            </button>
+            <div className="blocked-list">
+              {blockedUsers.map((user) => (
+                <div key={user} className="blocked-row">
+                  <span>{user}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBlockedUsers((items) => items.filter((item) => item !== user))
+                    }
+                  >
+                    Unblock
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="panel section-card security-card">
@@ -246,14 +269,14 @@ const pageStyles = `
     width: 100%; margin-top: 12px; background: #08080a; border-color: #24242a; justify-content: space-between;
   }
   .toggle-row.active { border-color: rgba(231,222,208,0.48); background: rgba(231,222,208,0.08); }
-  .locked-row {
-    width: 100%; margin-top: 12px; min-height: 42px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.07);
-    color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; box-sizing: border-box; font-weight: 900;
-  }
-  .locked-row span::before { content: "LOCK"; margin-right: 7px; color: #C9CDD3; font-size: 9px; letter-spacing: 0.06em; }
-  .locked-row strong { color: #E7DED0; font-size: 12px; }
   .username-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
   .field-note { margin: 9px 0 0; color: #a1a1aa; font-size: 11px; line-height: 15px; font-weight: 800; }
+  .blocked-list { margin-top: 12px; display: grid; gap: 8px; }
+  .blocked-row {
+    border: 1px solid #202026; border-radius: 10px; background: rgba(8,8,10,0.76);
+    padding: 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  .blocked-row span { color: #fff; font-size: 13px; font-weight: 900; }
   .security-row {
     margin-top: 12px; border: 1px solid #202026; border-radius: 10px; background: rgba(8,8,10,0.76); padding: 12px; display: flex; justify-content: space-between; gap: 10px;
   }

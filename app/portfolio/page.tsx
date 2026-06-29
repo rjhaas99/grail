@@ -183,6 +183,11 @@ function isActiveListing(listing: SupabasePortfolioListing) {
   return listing.status?.toLowerCase() === "active";
 }
 
+function isCollectionOnlyListing(listing: SupabasePortfolioListing) {
+  const status = listing.status?.toLowerCase();
+  return status === "collection" || Boolean(listing.is_collection_card);
+}
+
 function getListingImageUrl(listing: SupabasePortfolioListing) {
   return (
     listing.listing_images?.find((image) => image.image_type === "front")
@@ -226,7 +231,7 @@ function getListingSubtitle(listing: SupabasePortfolioListing) {
 }
 
 function getListingValue(listing: SupabasePortfolioListing) {
-  return listing.estimated_value ?? listing.price ?? 0;
+  return listing.estimated_value ?? (isActiveListing(listing) ? listing.price : null) ?? 0;
 }
 
 function getListingCostBasis(listing: SupabasePortfolioListing) {
@@ -237,7 +242,7 @@ function getListingTags(listing: SupabasePortfolioListing) {
   const isGraded =
     Boolean(listing.grader && listing.grade) ||
     listing.card_type?.toLowerCase() === "graded";
-  const tags = [isGraded ? "Graded" : "Raw"];
+  const tags = [isCollectionOnlyListing(listing) ? "Collection" : isGraded ? "Graded" : "Raw"];
 
   if (listing.estimated_value && listing.estimated_value >= 1200) {
     tags.push("Grail");
@@ -366,6 +371,8 @@ export default function PortfolioPage() {
   const [realDataError, setRealDataError] = useState("");
   const [pendingStatusAction, setPendingStatusAction] =
     useState<PendingStatusAction | null>(null);
+  const [relistPrice, setRelistPrice] = useState("");
+  const [isChangingRelistPrice, setIsChangingRelistPrice] = useState(false);
   const [listingNotes, setListingNotes] = useState<Record<string, string>>(() => readNotes());
   const [noteDraft, setNoteDraft] = useState<NoteDraft | null>(null);
 
@@ -391,6 +398,24 @@ export default function PortfolioPage() {
   const realGrailCount = realListings.filter(
     (listing) => listing.estimated_value && listing.estimated_value >= 1200,
   ).length;
+  const allocationRows = useMemo(() => {
+    if (!shouldShowLivePortfolio || realListings.length === 0) {
+      return [];
+    }
+
+    const total = realListings.length;
+    const rows = [
+      ["Sports", realListings.filter((listing) => getListingCategory(listing) === "Sports").length],
+      ["TCG", realListings.filter((listing) => getListingCategory(listing) === "TCG").length],
+      ["Graded", realListings.filter((listing) => listing.grader || listing.card_type?.toLowerCase() === "graded").length],
+      ["Raw", realListings.filter((listing) => !listing.grader && listing.card_type?.toLowerCase() !== "graded").length],
+      ["Grails", realListings.filter((listing) => listing.estimated_value && listing.estimated_value >= 1200).length],
+      ["Listed", realListings.filter(isActiveListing).length],
+      ["Collection-only", realListings.filter((listing) => !isActiveListing(listing)).length],
+    ];
+
+    return rows.map(([label, count]) => `${label} ${Math.round((Number(count) / total) * 100)}%`);
+  }, [realListings, shouldShowLivePortfolio]);
   const collectionValue = shouldShowLivePortfolio ? realCollectionValue : mockCollectionValue;
   const cardsOwnedCount = shouldShowLivePortfolio ? realListings.length : ownedCards.length;
   const listedForSaleCount = shouldShowLivePortfolio
@@ -516,6 +541,7 @@ export default function PortfolioPage() {
   async function updateListingStatus(
     listing: SupabasePortfolioListing,
     nextStatus: ListingStatusValue,
+    price?: number,
   ) {
     if (!session?.user.id) {
       setStatus("Sign in to manage your listings.");
@@ -525,9 +551,17 @@ export default function PortfolioPage() {
     setIsUpdatingListing(true);
 
     try {
+      const updatePayload: { status: ListingStatusValue; price?: number } = {
+        status: nextStatus,
+      };
+
+      if (nextStatus === "active" && price !== undefined) {
+        updatePayload.price = price;
+      }
+
       const { data, error } = await supabase
         .from("listings")
-        .update({ status: nextStatus })
+        .update(updatePayload)
         .eq("id", listing.id)
         .eq("seller_id", session.user.id)
         .select("id, status")
@@ -545,12 +579,18 @@ export default function PortfolioPage() {
       setRealListings((currentListings) =>
         currentListings.map((currentListing) =>
           currentListing.id === listing.id
-            ? { ...currentListing, status: nextStatus }
+            ? {
+                ...currentListing,
+                status: nextStatus,
+                price: updatePayload.price ?? currentListing.price,
+              }
             : currentListing,
         ),
       );
       setStatus(nextStatus === "active" ? "Listing relisted." : "Listing unlisted.");
       setPendingStatusAction(null);
+      setIsChangingRelistPrice(false);
+      setRelistPrice("");
     } catch (error) {
       console.error("Portfolio listing status update error:", error);
       setStatus("Listing status could not be updated. Please try again.");
@@ -565,6 +605,27 @@ export default function PortfolioPage() {
       title,
       value: listingNotes[listingId] || "",
     });
+  }
+
+  function openRelistModal(listing: SupabasePortfolioListing) {
+    setPendingStatusAction({ listing, nextStatus: "active" });
+    setRelistPrice(listing.price ? String(listing.price) : "");
+    setIsChangingRelistPrice(!listing.price);
+  }
+
+  function confirmRelist() {
+    if (!pendingStatusAction) {
+      return;
+    }
+
+    const price = Number(relistPrice || pendingStatusAction.listing.price || 0);
+
+    if (!price || price <= 0) {
+      setStatus("Add a valid asking price before relisting.");
+      return;
+    }
+
+    updateListingStatus(pendingStatusAction.listing, "active", price);
   }
 
   function saveNote() {
@@ -649,6 +710,11 @@ export default function PortfolioPage() {
     const costBasis = getListingCostBasis(listing);
     const gainLoss = costBasis && value ? value - costBasis : null;
     const isActive = isActiveListing(listing);
+    const statusLabel = isActive
+      ? "Listed"
+      : isCollectionOnlyListing(listing)
+        ? "In Collection"
+        : "Not Listed";
     const savedNote = listingNotes[listing.id];
 
     return (
@@ -668,7 +734,7 @@ export default function PortfolioPage() {
           <span className={gainLoss === null || gainLoss >= 0 ? "positive" : "negative"}>
             Gain/Loss <strong>{gainLoss === null ? "—" : `${gainLoss >= 0 ? "+" : ""}${formatCurrency(gainLoss)}`}</strong>
           </span>
-          <span>Quantity <strong>{listing.quantity || 1}</strong></span>
+          <span>Status <strong>{statusLabel}</strong></span>
         </div>
         {savedNote ? <p className="saved-note">Note: {savedNote}</p> : null}
         <div className="card-actions">
@@ -686,7 +752,7 @@ export default function PortfolioPage() {
             <button
               type="button"
               disabled={isUpdatingListing}
-              onClick={() => updateListingStatus(listing, "active")}
+              onClick={() => openRelistModal(listing)}
             >
               Relist
             </button>
@@ -938,7 +1004,12 @@ export default function PortfolioPage() {
           <aside className="sidebar">
             <section className="panel side-card">
               <h2>Collection Allocation</h2>
-              {["Sports 62%", "TCG 38%", "Graded 74%", "Raw 26%", "Grails 18%"].map((item) => (
+              {shouldShowLivePortfolio && realListings.length === 0 ? (
+                <p>No cards to allocate yet.</p>
+              ) : (allocationRows.length > 0
+                ? allocationRows
+                : ["Sports 62%", "TCG 38%", "Graded 74%", "Raw 26%", "Grails 18%"]
+              ).map((item) => (
                 <div key={item} className="allocation-row"><span>{item}</span><strong /></div>
               ))}
             </section>
@@ -956,6 +1027,7 @@ export default function PortfolioPage() {
             </section>
             <section className="panel side-card quick-actions">
               <h2>Quick Actions</h2>
+              <Link href="/list?mode=collection">Add Card to Collection</Link>
               <Link href="/list">List a Card</Link>
               <Link href="/browse">Browse Cards</Link>
               <Link href="/collections/vault-runner">View Public Collection</Link>
@@ -1015,42 +1087,92 @@ export default function PortfolioPage() {
             className="panel draft-modal confirm-modal"
             role="dialog"
             aria-modal="true"
-            aria-label="Confirm unlist"
+            aria-label="Confirm listing status change"
           >
             <div className="draft-modal-header">
               <div>
                 <span>Listing Status</span>
-                <h2>Unlist this card?</h2>
+                <h2>
+                  {pendingStatusAction.nextStatus === "active"
+                    ? "Relist this card?"
+                    : "Unlist this card?"}
+                </h2>
               </div>
               <button
                 type="button"
-                aria-label="Close unlist confirmation"
-                onClick={() => setPendingStatusAction(null)}
+                aria-label="Close listing status confirmation"
+                onClick={() => {
+                  setPendingStatusAction(null);
+                  setIsChangingRelistPrice(false);
+                  setRelistPrice("");
+                }}
               >
                 x
               </button>
             </div>
-            <p className="confirm-copy">
-              It will be removed from Browse but kept in your collection.
-            </p>
+            {pendingStatusAction.nextStatus === "active" ? (
+              <>
+                <p className="confirm-copy">
+                  {pendingStatusAction.listing.price
+                    ? `Relist at original price of ${formatCurrency(pendingStatusAction.listing.price)}?`
+                    : "Add an asking price before relisting this card."}
+                </p>
+                {isChangingRelistPrice || !pendingStatusAction.listing.price ? (
+                  <label className="note-field">
+                    <span>Asking price</span>
+                    <input
+                      value={relistPrice}
+                      inputMode="decimal"
+                      onChange={(event) => setRelistPrice(event.target.value)}
+                      placeholder="Enter asking price"
+                    />
+                  </label>
+                ) : null}
+              </>
+            ) : (
+              <p className="confirm-copy">
+                It will be removed from Browse but kept in your collection.
+              </p>
+            )}
             <div className="card-actions modal-actions">
               <button
                 type="button"
-                onClick={() => setPendingStatusAction(null)}
+                onClick={() => {
+                  setPendingStatusAction(null);
+                  setIsChangingRelistPrice(false);
+                  setRelistPrice("");
+                }}
               >
                 Cancel
               </button>
+              {pendingStatusAction.nextStatus === "active" &&
+              pendingStatusAction.listing.price &&
+              !isChangingRelistPrice ? (
+                <button
+                  type="button"
+                  onClick={() => setIsChangingRelistPrice(true)}
+                >
+                  Change Price
+                </button>
+              ) : null}
               <button
                 type="button"
                 disabled={isUpdatingListing}
                 onClick={() =>
-                  updateListingStatus(
-                    pendingStatusAction.listing,
-                    pendingStatusAction.nextStatus,
-                  )
+                  pendingStatusAction.nextStatus === "active"
+                    ? confirmRelist()
+                    : updateListingStatus(pendingStatusAction.listing, "inactive")
                 }
               >
-                {isUpdatingListing ? "Unlisting..." : "Unlist Card"}
+                {isUpdatingListing
+                  ? pendingStatusAction.nextStatus === "active"
+                    ? "Relisting..."
+                    : "Unlisting..."
+                  : pendingStatusAction.nextStatus === "active"
+                    ? pendingStatusAction.listing.price && !isChangingRelistPrice
+                      ? `Relist at ${formatCurrency(pendingStatusAction.listing.price)}`
+                      : "Relist Card"
+                    : "Unlist Card"}
               </button>
             </div>
           </section>
@@ -1181,8 +1303,9 @@ const pageStyles = `
   .confirm-copy { margin: 14px 0 0; color: #a1a1aa; font-size: 13px; line-height: 19px; font-weight: 800; }
   .note-field { margin-top: 16px; display: grid; gap: 8px; }
   .note-field span { color: #C9CDD3; font-size: 12px; font-weight: 900; }
-  .note-field textarea { min-height: 120px; border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; padding: 12px; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px; font-weight: 800; outline: none; }
-  .note-field textarea:focus { border-color: rgba(231,222,208,0.55); box-shadow: 0 0 0 3px rgba(231,222,208,0.08); }
+  .note-field textarea, .note-field input { border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; padding: 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none; }
+  .note-field textarea { min-height: 120px; resize: vertical; }
+  .note-field textarea:focus, .note-field input:focus { border-color: rgba(231,222,208,0.55); box-shadow: 0 0 0 3px rgba(231,222,208,0.08); }
   @media (max-width: 1100px) { .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .portfolio-layout, .card-grid, .list-row, .draft-modal-body { grid-template-columns: 1fr; } .toolbar { display: grid; } }
   @media (max-width: 640px) { .stats-grid { grid-template-columns: 1fr; } .page-heading h1 { font-size: 34px; line-height: 38px; } }
 `;

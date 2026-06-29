@@ -1,17 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { ChangeEvent, useRef, useState } from "react";
 import Header from "../components/Header";
-
-function LockedRow({ label }: { label: string }) {
-  return (
-    <div className="locked-row">
-      <span>{label}</span>
-      <strong>Locked On</strong>
-    </div>
-  );
-}
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
@@ -24,6 +16,23 @@ function StatCard({ label, value }: { label: string; value: string }) {
 
 export default function ProfilePage() {
   const [status, setStatus] = useState("");
+  const [avatarPreview, setAvatarPreview] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  function handleAvatarChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAvatarPreview(String(reader.result || ""));
+      setStatus("Profile photo preview updated. Save profile to persist later.");
+    };
+    reader.readAsDataURL(file);
+  }
 
   return (
     <main className="account-page">
@@ -41,12 +50,29 @@ export default function ProfilePage() {
           <button
             type="button"
             className="avatar"
-            onClick={() => setStatus("Profile photo upload mock.")}
+            onClick={() => fileInputRef.current?.click()}
             title="Change Photo"
           >
-            <span>RH</span>
+            {avatarPreview ? (
+              <Image
+                src={avatarPreview}
+                alt="Profile photo preview"
+                width={76}
+                height={76}
+                unoptimized
+              />
+            ) : (
+              <span>RH</span>
+            )}
             <em>Change Photo</em>
           </button>
+          <input
+            ref={fileInputRef}
+            className="avatar-input"
+            type="file"
+            accept="image/*"
+            onChange={handleAvatarChange}
+          />
           <div>
             <h2>Ryan Haas</h2>
             <p>@ryanjhaas99</p>
@@ -92,9 +118,6 @@ export default function ProfilePage() {
               <span>TCG Cards</span>
               <span>Grails</span>
             </div>
-            <LockedRow label="Public profile" />
-            <LockedRow label="Show seller stats" />
-            <p className="trust-note">Required for marketplace trust.</p>
             <div className="action-stack">
               <button type="button" onClick={() => setStatus("Profile changes saved.")}>
                 Save Changes
@@ -144,6 +167,8 @@ const pageStyles = `
   .avatar:hover em {
     opacity: 1;
   }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .avatar-input { display: none; }
   .profile-hero h2, .form-panel h2, .side-panel h2 { margin: 0; color: #fff; font-size: 24px; line-height: 28px; font-weight: 900; }
   .pill-row { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
   .pill-row span, .pill-row a, .category-list span {
@@ -165,17 +190,6 @@ const pageStyles = `
   label small, .trust-note { color: #85858f; font-size: 11px; line-height: 15px; font-weight: 800; }
   textarea { min-height: 112px; resize: vertical; }
   .category-list { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
-  .toggle-row {
-    width: 100%; margin-top: 12px; min-height: 42px; border: 1px solid #24242a; border-radius: 10px; background: #08080a;
-    color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; cursor: pointer; font-weight: 900;
-  }
-  .toggle-row.active { border-color: rgba(231,222,208,0.48); background: rgba(231,222,208,0.08); }
-  .locked-row {
-    width: 100%; margin-top: 12px; min-height: 42px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.07);
-    color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; box-sizing: border-box; font-weight: 900;
-  }
-  .locked-row span::before { content: "LOCK"; margin-right: 7px; color: #C9CDD3; font-size: 9px; letter-spacing: 0.06em; }
-  .locked-row strong { color: #E7DED0; font-size: 12px; }
   .action-stack { margin-top: 16px; display: grid; gap: 10px; }
   .action-stack button, .action-stack a {
     min-height: 40px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055);

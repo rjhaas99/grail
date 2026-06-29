@@ -41,6 +41,8 @@ type SupabaseListingRow = {
   price: number | null;
   status: string | null;
   created_at: string | null;
+  is_collection_card?: boolean | null;
+  is_public_collection?: boolean | null;
   listing_images: ListingImageRow[] | null;
 };
 
@@ -223,6 +225,13 @@ function mapSupabaseListing(
     [listing.year, listing.brand, listing.player].filter(Boolean).join(" ") ||
     "Untitled Card";
   const price = Number(listing.price || 0);
+  const status = listing.status?.toLowerCase() || "";
+  const isCollectionOnly =
+    status !== "active" &&
+    (status === "collection" ||
+      Boolean(listing.is_collection_card) ||
+      Boolean(listing.is_public_collection));
+  const displayPrice = isCollectionOnly ? 0 : price;
   const sellerName = profile?.full_name || profile?.username || "GRAIL Seller";
   const sellerSlug = getSellerSlug(profile, listing.seller_id);
   const isGraded = Boolean(listing.grader && listing.grade) ||
@@ -248,23 +257,31 @@ function mapSupabaseListing(
     sellerLevel: "GRAIL Seller",
     sellerRoute: `/collections/${sellerSlug}`,
     sellerHref: `/collections/${sellerSlug}`,
-    price,
-    priceDisplay: price ? formatCurrency(price) : "Price not listed",
-    askingPrice: price,
+    price: displayPrice,
+    priceDisplay: isCollectionOnly
+      ? status === "inactive"
+        ? "Not Listed"
+        : "In Collection"
+      : price
+        ? formatCurrency(price)
+        : "Price not listed",
+    askingPrice: displayPrice,
     marketValue: 0,
-    minimumOffer: price ? Math.round(price * 0.85) : 0,
-    minOffer: price ? Math.round(price * 0.85) : 0,
+    minimumOffer: displayPrice ? Math.round(displayPrice * 0.85) : 0,
+    minOffer: displayPrice ? Math.round(displayPrice * 0.85) : 0,
     watchCount: 0,
     views: 0,
     viewCount: 0,
     listedOrder: totalCount - index,
     listedDate: formatListedDate(listing.created_at),
-    tags: [isGraded ? "Graded" : "Raw"],
-    tag: isGraded ? "Graded" : "Raw",
+    tags: [isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw"],
+    tag: isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw",
     isGraded,
     isRaw,
     isHot: false,
     isGrail: false,
+    isCollectionOnly,
+    listingStatus: listing.status,
     accent,
     artworkTone: "live listing",
     imageUrl: getImageUrl(listing),
@@ -573,13 +590,15 @@ export default function BrowsePage() {
               price,
               status,
               created_at,
+              is_collection_card,
+              is_public_collection,
               listing_images (
                 image_url,
                 image_type
               )
             `,
           )
-          .eq("status", "active")
+          .or("status.eq.active,status.eq.collection,is_public_collection.eq.true")
           .order("created_at", { ascending: false });
 
         if (error) {
@@ -1543,6 +1562,12 @@ export default function BrowsePage() {
             color: #99f6e4;
           }
 
+          .badge-collection {
+            border-color: rgba(201,205,211,0.38);
+            background: rgba(201,205,211,0.08);
+            color: #C9CDD3;
+          }
+
           .listing-title {
             grid-area: title;
             margin: 0;
@@ -2173,6 +2198,8 @@ export default function BrowsePage() {
                   const tag = getListingTag(listing);
                   const isOwnerListing =
                     Boolean(currentUserId) && listing.sellerId === currentUserId;
+                  const isCollectionOnly = tag === "Collection" || listing.isCollectionOnly;
+                  const canUseBuyerActions = !isOwnerListing && !isCollectionOnly;
 
                   return (
                     <article key={listing.href} className="listing-card">
@@ -2218,7 +2245,7 @@ export default function BrowsePage() {
                         <div className="listing-actions">
                           {isOwnerListing ? (
                             <p className="owner-note">This is your listing.</p>
-                          ) : (
+                          ) : canUseBuyerActions ? (
                             <div className="action-circles">
                               <Link
                                 href={`/checkout/${listing.id}`}
@@ -2253,6 +2280,20 @@ export default function BrowsePage() {
                                   $
                                 </span>
                               </button>
+                            </div>
+                          ) : (
+                            <div className="action-circles collection-actions">
+                              <Link
+                                href="/messages"
+                                className="action-button"
+                                aria-label={`Message ${listing.seller}`}
+                                title="Message"
+                              >
+                                <span
+                                  className="action-icon message-icon"
+                                  aria-hidden="true"
+                                />
+                              </Link>
                             </div>
                           )}
 
