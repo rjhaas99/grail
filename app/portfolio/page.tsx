@@ -2,7 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
 import {
   type PortfolioCard,
@@ -11,6 +13,37 @@ import {
 } from "../lib/mockData";
 
 type Tab = "Owned" | "Listed" | "Drafts" | "Watched" | "Sold";
+
+type ListingImageRow = {
+  image_url: string | null;
+  image_type: string | null;
+};
+
+type SupabasePortfolioListing = {
+  id: string;
+  seller_id: string | null;
+  title: string | null;
+  sport: string | null;
+  player: string | null;
+  year: string | null;
+  brand: string | null;
+  card_number: string | null;
+  card_type: string | null;
+  grader: string | null;
+  grade: string | null;
+  condition: string | null;
+  price: number | null;
+  status: string | null;
+  created_at: string | null;
+  estimated_value?: number | null;
+  cost_basis?: number | null;
+  purchase_price?: number | null;
+  is_collection_card?: boolean | null;
+  is_public_collection?: boolean | null;
+  collection_note?: string | null;
+  quantity?: number | null;
+  listing_images: ListingImageRow[] | null;
+};
 
 type ListingDraft = {
   id: string;
@@ -33,6 +66,58 @@ type ListingDraft = {
 };
 
 const draftStorageKey = "grail-listing-drafts";
+const realListingAccents = ["#334155", "#0f766e", "#1e3a8a", "#7c3aed", "#475569", "#8f1d2c"];
+
+const portfolioListingSelect = `
+  id,
+  seller_id,
+  title,
+  sport,
+  player,
+  year,
+  brand,
+  card_number,
+  card_type,
+  grader,
+  grade,
+  condition,
+  price,
+  status,
+  created_at,
+  estimated_value,
+  cost_basis,
+  purchase_price,
+  is_collection_card,
+  is_public_collection,
+  collection_note,
+  quantity,
+  listing_images (
+    image_url,
+    image_type
+  )
+`;
+
+const basePortfolioListingSelect = `
+  id,
+  seller_id,
+  title,
+  sport,
+  player,
+  year,
+  brand,
+  card_number,
+  card_type,
+  grader,
+  grade,
+  condition,
+  price,
+  status,
+  created_at,
+  listing_images (
+    image_url,
+    image_type
+  )
+`;
 
 function readDrafts() {
   if (typeof window === "undefined") {
@@ -56,6 +141,83 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function formatOptionalCurrency(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? formatCurrency(value)
+    : "—";
+}
+
+function isActiveListing(listing: SupabasePortfolioListing) {
+  return listing.status?.toLowerCase() === "active";
+}
+
+function getListingImageUrl(listing: SupabasePortfolioListing) {
+  return (
+    listing.listing_images?.find((image) => image.image_type === "front")
+      ?.image_url ||
+    listing.listing_images?.[0]?.image_url ||
+    null
+  );
+}
+
+function getListingTitle(listing: SupabasePortfolioListing) {
+  return (
+    listing.title ||
+    [listing.year, listing.brand, listing.player, listing.card_number]
+      .filter(Boolean)
+      .join(" ") ||
+    "Untitled Card"
+  );
+}
+
+function getListingCategory(listing: SupabasePortfolioListing) {
+  const source = `${listing.sport || ""} ${listing.card_type || ""}`.toLowerCase();
+  return source.includes("tcg") ? "TCG" : "Sports";
+}
+
+function getListingCondition(listing: SupabasePortfolioListing) {
+  if (listing.grader && listing.grade) {
+    return `${listing.grader} ${listing.grade}`;
+  }
+
+  const condition = listing.condition?.trim();
+
+  if (condition) {
+    return condition.toLowerCase().includes("raw") ? condition : `Raw ${condition}`;
+  }
+
+  return listing.card_type?.toLowerCase() === "graded" ? "Graded" : "Raw";
+}
+
+function getListingSubtitle(listing: SupabasePortfolioListing) {
+  return `${getListingCategory(listing)}: ${getListingCondition(listing)}`;
+}
+
+function getListingValue(listing: SupabasePortfolioListing) {
+  return listing.estimated_value ?? listing.price ?? 0;
+}
+
+function getListingCostBasis(listing: SupabasePortfolioListing) {
+  return listing.cost_basis ?? listing.purchase_price ?? null;
+}
+
+function getListingTags(listing: SupabasePortfolioListing) {
+  const isGraded =
+    Boolean(listing.grader && listing.grade) ||
+    listing.card_type?.toLowerCase() === "graded";
+  const tags = [isGraded ? "Graded" : "Raw"];
+
+  if (listing.estimated_value && listing.estimated_value >= 1200) {
+    tags.push("Grail");
+  }
+
+  if (isActiveListing(listing)) {
+    tags.push("Listed");
+  }
+
+  return tags;
+}
+
 function CardArt({ accent }: { accent: string }) {
   return (
     <div className="art-shell">
@@ -70,6 +232,33 @@ function CardArt({ accent }: { accent: string }) {
       </div>
     </div>
   );
+}
+
+function ListingArt({
+  listing,
+  accent,
+}: {
+  listing: SupabasePortfolioListing;
+  accent: string;
+}) {
+  const imageUrl = getListingImageUrl(listing);
+
+  if (imageUrl) {
+    return (
+      <div className="art-shell">
+        <Image
+          className="draft-image"
+          src={imageUrl}
+          alt={getListingTitle(listing)}
+          width={140}
+          height={180}
+          unoptimized
+        />
+      </div>
+    );
+  }
+
+  return <CardArt accent={accent} />;
 }
 
 function DraftArt({ draft }: { draft: ListingDraft }) {
@@ -100,21 +289,185 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function EmptyState({
+  title,
+  copy,
+  actionHref,
+  actionLabel,
+  secondaryHref,
+  secondaryLabel,
+}: {
+  title: string;
+  copy: string;
+  actionHref?: string;
+  actionLabel?: string;
+  secondaryHref?: string;
+  secondaryLabel?: string;
+}) {
+  return (
+    <section className="list-panel panel">
+      <article className="empty-drafts empty-state">
+        <h3>{title}</h3>
+        <p>{copy}</p>
+        <div className="empty-actions">
+          {actionHref && actionLabel ? <Link href={actionHref}>{actionLabel}</Link> : null}
+          {secondaryHref && secondaryLabel ? (
+            <Link href={secondaryHref}>{secondaryLabel}</Link>
+          ) : null}
+        </div>
+      </article>
+    </section>
+  );
+}
+
 export default function PortfolioPage() {
   const [activeTab, setActiveTab] = useState<Tab>("Owned");
   const [status, setStatus] = useState("");
   const [watched, setWatched] = useState(mockWatchedCards);
   const [drafts, setDrafts] = useState<ListingDraft[]>(() => readDrafts());
   const [previewDraft, setPreviewDraft] = useState<ListingDraft | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoaded, setAuthLoaded] = useState(false);
+  const [realListings, setRealListings] = useState<SupabasePortfolioListing[]>([]);
+  const [isLoadingListings, setIsLoadingListings] = useState(false);
+  const [realDataError, setRealDataError] = useState("");
 
   const ownedCards = mockPortfolioCards.filter((card) => card.status === "Owned");
   const listedCards = mockPortfolioCards.filter((card) => card.status === "Listed");
   const soldCards = mockPortfolioCards.filter((card) => card.status === "Sold");
-  const collectionValue = mockPortfolioCards
+  const mockCollectionValue = mockPortfolioCards
     .filter((card) => card.status !== "Sold")
     .reduce((sum, card) => sum + card.estimatedValue, 0);
-  const grailCount = mockPortfolioCards.filter((card) => card.tags.includes("Grail")).length;
+  const mockGrailCount = mockPortfolioCards.filter((card) => card.tags.includes("Grail")).length;
+  const isLoggedIn = Boolean(session?.user.id);
+  const shouldShowLivePortfolio = isLoggedIn && !realDataError;
+  const activeRealListings = realListings.filter(isActiveListing);
+  const explicitOwnedRealListings = realListings.filter(
+    (listing) => listing.is_collection_card || !isActiveListing(listing),
+  );
+  const ownedRealListings =
+    explicitOwnedRealListings.length > 0 ? explicitOwnedRealListings : realListings;
+  const realCollectionValue = realListings.reduce(
+    (sum, listing) => sum + getListingValue(listing),
+    0,
+  );
+  const realGrailCount = realListings.filter(
+    (listing) => listing.estimated_value && listing.estimated_value >= 1200,
+  ).length;
+  const collectionValue = shouldShowLivePortfolio ? realCollectionValue : mockCollectionValue;
+  const cardsOwnedCount = shouldShowLivePortfolio ? realListings.length : ownedCards.length;
+  const listedForSaleCount = shouldShowLivePortfolio
+    ? activeRealListings.length
+    : listedCards.length;
+  const grailCount = shouldShowLivePortfolio ? realGrailCount : mockGrailCount;
   const thirtyDayChange = "+8.4%";
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSession() {
+      const {
+        data: { session: currentSession },
+      } = await supabase.auth.getSession();
+
+      if (isMounted) {
+        setSession(currentSession);
+        setAuthLoaded(true);
+      }
+    }
+
+    loadSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAuthLoaded(true);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!session?.user.id) {
+      const clearTimer = window.setTimeout(() => {
+        if (isMounted) {
+          setRealListings([]);
+          setRealDataError("");
+          setIsLoadingListings(false);
+        }
+      }, 0);
+
+      return () => {
+        isMounted = false;
+        window.clearTimeout(clearTimer);
+      };
+    }
+
+    async function loadUserListings() {
+      await Promise.resolve();
+
+      if (!isMounted || !session?.user.id) {
+        return;
+      }
+
+      setIsLoadingListings(true);
+      setRealDataError("");
+
+      try {
+        const primaryResult = await supabase
+          .from("listings")
+          .select(portfolioListingSelect)
+          .eq("seller_id", session.user.id)
+          .order("created_at", { ascending: false });
+        let data = primaryResult.data as SupabasePortfolioListing[] | null;
+        let error = primaryResult.error;
+
+        if (error) {
+          console.error("Portfolio extended listing fetch error:", error);
+
+          const fallbackResult = await supabase
+            .from("listings")
+            .select(basePortfolioListingSelect)
+            .eq("seller_id", session.user.id)
+            .order("created_at", { ascending: false });
+
+          data = fallbackResult.data as SupabasePortfolioListing[] | null;
+          error = fallbackResult.error;
+        }
+
+        if (error) {
+          throw error;
+        }
+
+        if (isMounted) {
+          setRealListings(data || []);
+        }
+      } catch (error) {
+        console.error("Portfolio listings error:", error);
+
+        if (isMounted) {
+          setRealListings([]);
+          setRealDataError("Could not load your live collection. Showing local demo data.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingListings(false);
+        }
+      }
+    }
+
+    loadUserListings();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [session?.user.id]);
 
   function deleteDraft(draftId: string) {
     const nextDrafts = drafts.filter((draft) => draft.id !== draftId);
@@ -138,12 +491,26 @@ export default function PortfolioPage() {
   }
 
   const tabCount = useMemo(() => {
-    if (activeTab === "Owned") return ownedCards.length;
-    if (activeTab === "Listed") return listedCards.length;
+    if (activeTab === "Owned") {
+      return shouldShowLivePortfolio ? ownedRealListings.length : ownedCards.length;
+    }
+    if (activeTab === "Listed") {
+      return shouldShowLivePortfolio ? activeRealListings.length : listedCards.length;
+    }
     if (activeTab === "Drafts") return drafts.length;
     if (activeTab === "Watched") return watched.length;
     return soldCards.length;
-  }, [activeTab, drafts.length, listedCards.length, ownedCards.length, soldCards.length, watched.length]);
+  }, [
+    activeTab,
+    activeRealListings.length,
+    drafts.length,
+    listedCards.length,
+    ownedCards.length,
+    ownedRealListings.length,
+    shouldShowLivePortfolio,
+    soldCards.length,
+    watched.length,
+  ]);
 
   function renderOwnedCard(card: PortfolioCard) {
     return (
@@ -170,6 +537,69 @@ export default function PortfolioPage() {
     );
   }
 
+  function renderRealOwnedCard(listing: SupabasePortfolioListing, index: number) {
+    const title = getListingTitle(listing);
+    const value = getListingValue(listing);
+    const costBasis = getListingCostBasis(listing);
+    const gainLoss = costBasis && value ? value - costBasis : null;
+
+    return (
+      <article key={listing.id} className="collection-card">
+        <ListingArt
+          listing={listing}
+          accent={realListingAccents[index % realListingAccents.length]}
+        />
+        <div className="badge-row">
+          {getListingTags(listing).map((tag) => <span key={tag}>{tag}</span>)}
+        </div>
+        <h3>{title}</h3>
+        <p>{getListingSubtitle(listing)}</p>
+        <div className="value-grid">
+          <span>Market <strong>{formatOptionalCurrency(value)}</strong></span>
+          <span>Cost <strong>{formatOptionalCurrency(costBasis)}</strong></span>
+          <span className={gainLoss === null || gainLoss >= 0 ? "positive" : "negative"}>
+            Gain/Loss <strong>{gainLoss === null ? "—" : `${gainLoss >= 0 ? "+" : ""}${formatCurrency(gainLoss)}`}</strong>
+          </span>
+          <span>Quantity <strong>{listing.quantity || 1}</strong></span>
+        </div>
+        <div className="card-actions">
+          <Link href={`/cards/${listing.id}`}>View Details</Link>
+          <button type="button" onClick={() => setStatus("List for sale flow coming soon.")}>
+            List For Sale
+          </button>
+          <Link href={`/list?edit=${listing.id}`}>Edit Listing</Link>
+          <button type="button" onClick={() => setStatus("Note added mock-only.")}>
+            Add Note
+          </button>
+        </div>
+      </article>
+    );
+  }
+
+  function renderRealListedRow(listing: SupabasePortfolioListing, index: number) {
+    return (
+      <article key={listing.id} className="list-row">
+        <ListingArt
+          listing={listing}
+          accent={realListingAccents[index % realListingAccents.length]}
+        />
+        <div>
+          <h3>{getListingTitle(listing)}</h3>
+          <p>{getListingSubtitle(listing)}</p>
+        </div>
+        <strong>{formatOptionalCurrency(listing.price)}</strong>
+        <span>0 watches</span>
+        <span>0 views</span>
+        <span>Active</span>
+        <div className="row-actions">
+          <Link href={`/list?edit=${listing.id}`}>Edit Listing</Link>
+          <button type="button" onClick={() => setStatus("Unlist mock-only.")}>Unlist</button>
+          <Link href={`/cards/${listing.id}`}>View Listing</Link>
+        </div>
+      </article>
+    );
+  }
+
   return (
     <main className="portfolio-page">
       <style>{pageStyles}</style>
@@ -183,14 +613,25 @@ export default function PortfolioPage() {
         </section>
 
         {status ? <p className="status-message">{status}</p> : null}
+        {realDataError ? <p className="status-message warning">{realDataError}</p> : null}
+        {authLoaded && !isLoggedIn ? (
+          <section className="panel auth-panel">
+            <div>
+              <h2>Sign in to view your collection.</h2>
+              <p>Your real GRAIL listings and collection cards appear here after you sign in.</p>
+            </div>
+            <Link href="/login">Sign In</Link>
+          </section>
+        ) : null}
+        {!authLoaded ? <p className="status-message neutral">Checking account session...</p> : null}
 
         <section className="stats-grid">
           <StatCard label="Total Collection Value" value={formatCurrency(collectionValue)} />
-          <StatCard label="Cards Owned" value={String(ownedCards.length)} />
+          <StatCard label="Cards Owned" value={String(cardsOwnedCount)} />
           <StatCard label="30D Change" value={thirtyDayChange} />
           <StatCard label="Grail Cards" value={String(grailCount)} />
           <StatCard label="Watched Cards" value={String(watched.length)} />
-          <StatCard label="Listed For Sale" value={String(listedCards.length)} />
+          <StatCard label="Listed For Sale" value={String(listedForSaleCount)} />
         </section>
 
         <section className="portfolio-layout">
@@ -215,28 +656,70 @@ export default function PortfolioPage() {
             </section>
 
             {activeTab === "Owned" ? (
-              <section className="card-grid">{ownedCards.map(renderOwnedCard)}</section>
+              shouldShowLivePortfolio ? (
+                isLoadingListings ? (
+                  <EmptyState
+                    title="Loading collection..."
+                    copy="Fetching your live GRAIL listings."
+                  />
+                ) : ownedRealListings.length > 0 ? (
+                  <section className="card-grid">
+                    {ownedRealListings.map(renderRealOwnedCard)}
+                  </section>
+                ) : (
+                  <EmptyState
+                    title="No cards in your collection yet."
+                    copy="List your first card or browse the marketplace to start building your GRAIL collection."
+                    actionHref="/list"
+                    actionLabel="List a Card"
+                    secondaryHref="/browse"
+                    secondaryLabel="Browse Cards"
+                  />
+                )
+              ) : (
+                <section className="card-grid">{ownedCards.map(renderOwnedCard)}</section>
+              )
             ) : null}
 
             {activeTab === "Listed" ? (
-              <section className="list-panel panel">
-                {listedCards.map((card) => (
-                  <article key={card.id} className="list-row">
-                    <CardArt accent={card.accent} />
-                    <div>
-                      <h3>{card.title}</h3>
-                      <p>{card.subtitle}</p>
-                    </div>
-                    <strong>{formatCurrency(card.price ?? card.estimatedValue)}</strong>
-                    <span>{card.watches} watches</span>
-                    <span>{card.views} views</span>
-                    <div className="row-actions">
-                      <button type="button" onClick={() => setStatus("Edit listing mock-only.")}>Edit Listing</button>
-                      <Link href={card.route}>View Listing</Link>
-                    </div>
-                  </article>
-                ))}
-              </section>
+              shouldShowLivePortfolio ? (
+                isLoadingListings ? (
+                  <EmptyState
+                    title="Loading active listings..."
+                    copy="Fetching cards you currently have listed for sale."
+                  />
+                ) : activeRealListings.length > 0 ? (
+                  <section className="list-panel panel">
+                    {activeRealListings.map(renderRealListedRow)}
+                  </section>
+                ) : (
+                  <EmptyState
+                    title="You have no active listings."
+                    copy="Publish a listing from List a Card and it will appear here."
+                    actionHref="/list"
+                    actionLabel="List a Card"
+                  />
+                )
+              ) : (
+                <section className="list-panel panel">
+                  {listedCards.map((card) => (
+                    <article key={card.id} className="list-row">
+                      <CardArt accent={card.accent} />
+                      <div>
+                        <h3>{card.title}</h3>
+                        <p>{card.subtitle}</p>
+                      </div>
+                      <strong>{formatCurrency(card.price ?? card.estimatedValue)}</strong>
+                      <span>{card.watches} watches</span>
+                      <span>{card.views} views</span>
+                      <div className="row-actions">
+                        <button type="button" onClick={() => setStatus("Edit listing mock-only.")}>Edit Listing</button>
+                        <Link href={card.route}>View Listing</Link>
+                      </div>
+                    </article>
+                  ))}
+                </section>
+              )
             ) : null}
 
             {activeTab === "Drafts" ? (
@@ -401,6 +884,13 @@ const pageStyles = `
   .page-heading h1 { margin: 8px 0 0; color: #fff; font-size: 42px; line-height: 46px; font-weight: 900; }
   .page-heading p, .toolbar p, .collection-card p, .list-row p, .side-card p, .status-message { color: #a1a1aa; font-size: 13px; line-height: 18px; font-weight: 800; }
   .status-message { margin: 16px 0 0; border: 1px solid rgba(52,211,153,0.24); border-radius: 10px; background: rgba(52,211,153,0.07); color: #86efac; padding: 10px; font-weight: 900; }
+  .status-message.warning { border-color: rgba(251,113,133,0.22); background: rgba(251,113,133,0.07); color: #fda4af; }
+  .status-message.neutral { border-color: rgba(201,205,211,0.2); background: rgba(201,205,211,0.055); color: #C9CDD3; }
+  .auth-panel { margin-top: 16px; padding: 16px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+  .auth-panel h2 { margin: 0; color: #fff; font-size: 20px; line-height: 25px; font-weight: 900; }
+  .auth-panel p { margin: 6px 0 0; color: #a1a1aa; font-size: 13px; line-height: 18px; font-weight: 800; }
+  .auth-panel a, .empty-actions a { min-height: 38px; border: 1px solid rgba(231,222,208,0.36); border-radius: 10px; background: rgba(231,222,208,0.08); color: #fff; padding: 0 13px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 12px; font-weight: 900; white-space: nowrap; }
+  .auth-panel a:hover, .empty-actions a:hover { border-color: rgba(231,222,208,0.66); background: rgba(231,222,208,0.14); }
   .stats-grid { margin-top: 16px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
   .stat-card, .side-card { padding: 14px; }
   .stat-card span, .value-grid span, .list-row span { color: #85858f; font-size: 11px; line-height: 14px; font-weight: 800; }
@@ -429,7 +919,7 @@ const pageStyles = `
   .negative strong { color: #fb7185; }
   .card-actions, .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .list-panel { padding: 10px; display: grid; gap: 10px; }
-  .list-row { border: 1px solid #202026; border-radius: 10px; background: rgba(8,8,10,0.76); padding: 12px; display: grid; grid-template-columns: 86px 1fr auto auto auto auto; gap: 12px; align-items: center; }
+  .list-row { border: 1px solid #202026; border-radius: 10px; background: rgba(8,8,10,0.76); padding: 12px; display: grid; grid-template-columns: 86px minmax(160px, 1fr) auto auto auto auto auto; gap: 12px; align-items: center; }
   .list-row .art-shell { width: 74px; height: 96px; }
   .list-row .card-art { width: 54px; height: 76px; }
   .list-row > strong { color: #fff; font-size: 18px; }
@@ -441,7 +931,10 @@ const pageStyles = `
   .quick-actions { display: grid; gap: 10px; }
   .empty-drafts { padding: 18px; }
   .empty-drafts h3 { margin: 0; color: #fff; font-size: 18px; line-height: 22px; font-weight: 900; }
+  .empty-drafts p { margin: 8px 0 0; color: #a1a1aa; font-size: 13px; line-height: 18px; font-weight: 800; }
+  .empty-actions { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
   .empty-drafts a { margin-top: 12px; min-height: 36px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055); color: #fff; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 12px; font-weight: 900; }
+  .empty-actions a { margin-top: 0; }
   .draft-modal-backdrop { position: fixed; inset: 0; z-index: 1200; background: rgba(0,0,0,0.72); display: flex; align-items: center; justify-content: center; padding: 22px; backdrop-filter: blur(12px); }
   .draft-modal { width: min(720px, 100%); padding: 18px; box-sizing: border-box; }
   .draft-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
