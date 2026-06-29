@@ -145,6 +145,7 @@ export default function SellerDashboardPage() {
   const estimatedSellerPayout = grossSales;
 
   const pendingOrders = orders.filter((order) => order.status === "pending");
+
   const completedOrders = orders.filter(
     (order) => order.status === "completed"
   );
@@ -383,12 +384,30 @@ export default function SellerDashboardPage() {
                                     ? "text-green-400"
                                     : listing.status === "sold"
                                     ? "text-yellow-300"
+                                    : listing.status === "paused"
+                                    ? "text-blue-300"
                                     : "text-zinc-400"
                                 }`}
                               >
                                 {listing.status || "unknown"}
                               </p>
                             </div>
+                          </div>
+
+                          <div className="mt-5 flex flex-wrap gap-3">
+                            <Link
+                              href={`/cards/${listing.id}`}
+                              className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200"
+                            >
+                              View Card
+                            </Link>
+
+                            <Link
+                              href={`/edit-listing/${listing.id}`}
+                              className="rounded-full border border-zinc-800 px-4 py-2 text-sm font-semibold text-zinc-300 hover:border-zinc-600 hover:text-white"
+                            >
+                              Edit
+                            </Link>
                           </div>
                         </div>
                       ))

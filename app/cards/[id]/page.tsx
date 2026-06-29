@@ -95,24 +95,24 @@ export default function CardPage() {
       }
 
       if (!data) {
-  setListing(null);
-  setLoading(false);
-  return;
-}
+        setListing(null);
+        setLoading(false);
+        return;
+      }
 
-const listingData = data as unknown as Listing;
+      const listingData = data as unknown as Listing;
 
-setListing(listingData);
+      setListing(listingData);
 
-const frontImage =
-  listingData.listing_images?.find((image) => image.image_type === "front")
-    ?.image_url ||
-  listingData.listing_images?.[0]?.image_url ||
-  null;
+      const frontImage =
+        listingData.listing_images?.find((image) => image.image_type === "front")
+          ?.image_url ||
+        listingData.listing_images?.[0]?.image_url ||
+        null;
 
-setSelectedImage(frontImage);
+      setSelectedImage(frontImage);
 
-if (listingData.seller_id) {
+      if (listingData.seller_id) {
         const { data: sellerData } = await supabase
           .from("profiles")
           .select(
@@ -121,7 +121,7 @@ if (listingData.seller_id) {
           .eq("id", listingData.seller_id)
           .maybeSingle();
 
-        setSeller(sellerData);
+        setSeller((sellerData || null) as SellerProfile | null);
       }
 
       setLoading(false);
@@ -171,8 +171,7 @@ if (listingData.seller_id) {
     listing?.listing_images?.find((image) => image.image_type === "back")
       ?.image_url || null;
 
-  const sellerName =
-    seller?.full_name || seller?.username || "GRAIL Seller";
+  const sellerName = seller?.full_name || seller?.username || "GRAIL Seller";
 
   const sellerLevel = seller?.seller_level || "Level 1 Collector";
 
@@ -336,7 +335,9 @@ if (listingData.seller_id) {
                 <div className="mt-6 grid gap-3 sm:grid-cols-2">
                   <button
                     type="button"
-                    onClick={() => goProtected(`/checkout?listingId=${listing.id}`)}
+                    onClick={() =>
+                      goProtected(`/checkout?listingId=${listing.id}`)
+                    }
                     className="rounded-full bg-white px-7 py-4 text-center font-semibold text-black hover:bg-zinc-200"
                   >
                     Buy Now
@@ -344,7 +345,9 @@ if (listingData.seller_id) {
 
                   <button
                     type="button"
-                    onClick={() => goProtected(`/make-offer?listingId=${listing.id}`)}
+                    onClick={() =>
+                      goProtected(`/make-offer?listingId=${listing.id}`)
+                    }
                     className="rounded-full border border-zinc-800 px-7 py-4 text-center font-semibold hover:border-zinc-600"
                   >
                     Make Offer
@@ -370,9 +373,7 @@ if (listingData.seller_id) {
 
                 <div className="rounded-2xl border border-zinc-900 bg-zinc-950 p-4">
                   <p className="text-sm text-zinc-500">Status</p>
-                  <p className="mt-1 text-xl font-semibold">
-                    Active
-                  </p>
+                  <p className="mt-1 text-xl font-semibold">Active</p>
                 </div>
 
                 <div className="rounded-2xl border border-zinc-900 bg-zinc-950 p-4">
@@ -384,17 +385,53 @@ if (listingData.seller_id) {
               </div>
 
               <div className="mt-6 rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="text-xl font-semibold">Seller</h3>
-                    <p className="mt-3 text-lg font-medium">{sellerName}</p>
-                    <p className="text-sm text-zinc-500">{sellerLevel}</p>
-                  </div>
+                <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">
+                  Seller
+                </p>
 
-                  <div className="rounded-full border border-zinc-800 px-4 py-2 text-sm text-zinc-300">
-                    {seller?.verified ? "Verified Seller" : "GRAIL Seller"}
+                {listing.seller_id ? (
+                  <Link
+                    href={`/sellers/${listing.seller_id}`}
+                    className="mt-4 block rounded-2xl border border-zinc-900 bg-black p-5 transition hover:border-zinc-700"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="flex h-14 w-14 items-center justify-center rounded-full border border-zinc-800 bg-zinc-950 text-xl font-semibold">
+                          {sellerName.charAt(0).toUpperCase()}
+                        </div>
+
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-lg font-semibold">
+                              {sellerName}
+                            </p>
+
+                            {seller?.verified && (
+                              <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-300">
+                                Verified
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="mt-1 text-sm text-zinc-500">
+                            {sellerLevel}
+                          </p>
+                        </div>
+                      </div>
+
+                      <span className="rounded-full border border-zinc-800 px-4 py-2 text-sm text-zinc-300">
+                        View Storefront →
+                      </span>
+                    </div>
+                  </Link>
+                ) : (
+                  <div className="mt-4 rounded-2xl border border-zinc-900 bg-black p-5">
+                    <p className="font-semibold">Seller unavailable</p>
+                    <p className="mt-1 text-sm text-zinc-500">
+                      Seller profile could not be loaded.
+                    </p>
                   </div>
-                </div>
+                )}
 
                 <div className="mt-5 grid grid-cols-3 gap-3">
                   <div className="rounded-2xl bg-black p-4">
@@ -417,12 +454,14 @@ if (listingData.seller_id) {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  className="mt-5 w-full rounded-full border border-zinc-800 px-6 py-3 text-sm font-semibold hover:border-zinc-600"
-                >
-                  View Seller Profile
-                </button>
+                {listing.seller_id && (
+                  <Link
+                    href={`/sellers/${listing.seller_id}`}
+                    className="mt-5 block w-full rounded-full border border-zinc-800 px-6 py-3 text-center text-sm font-semibold hover:border-zinc-600"
+                  >
+                    View Seller Profile
+                  </Link>
+                )}
               </div>
 
               <div className="mt-6 rounded-3xl border border-zinc-900 bg-zinc-950 p-6">
