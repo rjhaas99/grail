@@ -24,6 +24,7 @@ const photoViews = [
 type PhotoView = (typeof photoViews)[number];
 type MockCard = MockListing & {
   imageUrls?: Partial<Record<PhotoView, string>>;
+  sellerId?: string | null;
 };
 
 type ListingImageRow = {
@@ -192,6 +193,7 @@ function mapSupabaseCard(
       subtitle: `${category}: ${condition}`,
       meta: `${category}: ${condition}`,
       sellerSlug,
+      sellerId: listing.seller_id,
       sellerName,
       seller: sellerName,
       sellerLevel: "GRAIL Seller",
@@ -380,6 +382,7 @@ export default function CardDetailPage() {
   const [realCard, setRealCard] = useState<MockCard | null>(null);
   const [realSeller, setRealSeller] = useState<DetailSeller | null>(null);
   const [isLoadingRealCard, setIsLoadingRealCard] = useState(!mockCard);
+  const [currentUserId, setCurrentUserId] = useState("");
   const [selectedPhoto, setSelectedPhoto] =
     useState<PhotoView>("Front");
   const [isWatching, setIsWatching] = useState(false);
@@ -389,6 +392,41 @@ export default function CardDetailPage() {
   const [offerError, setOfferError] = useState("");
   const [sentOfferAmount, setSentOfferAmount] = useState<number | null>(null);
   const card = mockCard ?? realCard;
+  const availablePhotoViews: PhotoView[] = card?.imageUrls
+    ? photoViews.filter((view) => Boolean(card.imageUrls?.[view]))
+    : [...photoViews];
+  const visiblePhotoViews: PhotoView[] =
+    availablePhotoViews.length > 0 ? availablePhotoViews : ["Front"];
+  const activePhoto = visiblePhotoViews.includes(selectedPhoto)
+    ? selectedPhoto
+    : visiblePhotoViews[0];
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (isMounted) {
+        setCurrentUserId(session?.user.id || "");
+      }
+    }
+
+    loadSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUserId(session?.user.id || "");
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -488,13 +526,14 @@ export default function CardDetailPage() {
 
   function goToPhoto(direction: "previous" | "next") {
     setSelectedPhoto((current) => {
-      const currentIndex = photoViews.indexOf(current);
+      const currentIndex = Math.max(0, visiblePhotoViews.indexOf(current));
       const nextIndex =
         direction === "next"
-          ? (currentIndex + 1) % photoViews.length
-          : (currentIndex - 1 + photoViews.length) % photoViews.length;
+          ? (currentIndex + 1) % visiblePhotoViews.length
+          : (currentIndex - 1 + visiblePhotoViews.length) %
+            visiblePhotoViews.length;
 
-      return photoViews[nextIndex];
+      return visiblePhotoViews[nextIndex];
     });
   }
 
@@ -560,6 +599,7 @@ export default function CardDetailPage() {
       }
     : realSeller;
   const marketDifference = getMarketDifference(card);
+  const isOwnerListing = Boolean(currentUserId) && card.sellerId === currentUserId;
 
   return (
     <main className="detail-page">
@@ -595,7 +635,7 @@ export default function CardDetailPage() {
                   ‹
                 </button>
 
-                <CardArtwork card={card} view={selectedPhoto} />
+                <CardArtwork card={card} view={activePhoto} />
 
                 <button
                   type="button"
@@ -608,11 +648,11 @@ export default function CardDetailPage() {
               </div>
 
               <div className="thumbnail-row" aria-label="Card photos">
-                {photoViews.map((view) => (
+                {visiblePhotoViews.map((view) => (
                   <button
                     key={view}
                     type="button"
-                    className={selectedPhoto === view ? "active" : ""}
+                    className={activePhoto === view ? "active" : ""}
                     onClick={() => setSelectedPhoto(view)}
                   >
                     <span>{view}</span>
@@ -657,30 +697,49 @@ export default function CardDetailPage() {
                 Investor style price tracking.
               </p>
 
-              <div className="purchase-buttons">
-                <Link className="buy-button" href={`/checkout/${card.id}`}>
-                  Buy Now
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsOfferOpen(true);
-                    setOfferAmount("");
-                    setOfferMessage("");
-                    setOfferError("");
-                    setSentOfferAmount(null);
-                  }}
-                >
-                  Make Offer
-                </button>
-                <Link href="/messages">
-                  Message Seller
-                </Link>
-              </div>
+              {isOwnerListing ? (
+                <>
+                  <p className="owner-note">This is your listing.</p>
+                  <div className="purchase-buttons">
+                    <Link className="buy-button" href={`/edit-listing/${card.id}`}>
+                      Edit Listing
+                    </Link>
+                    <Link href="/seller-dashboard">
+                      View in Seller Dashboard
+                    </Link>
+                    <Link href={`/cards/${card.id}`}>
+                      View Public Listing
+                    </Link>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="purchase-buttons">
+                    <Link className="buy-button" href={`/checkout/${card.id}`}>
+                      Buy Now
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsOfferOpen(true);
+                        setOfferAmount("");
+                        setOfferMessage("");
+                        setOfferError("");
+                        setSentOfferAmount(null);
+                      }}
+                    >
+                      Make Offer
+                    </button>
+                    <Link href="/messages">
+                      Message Seller
+                    </Link>
+                  </div>
 
-              <p className="offer-note">
-                Minimum offer: {formatCurrency(card.minOffer)}
-              </p>
+                  <p className="offer-note">
+                    Minimum offer: {formatCurrency(card.minOffer)}
+                  </p>
+                </>
+              )}
             </section>
 
             <section className="seller-panel panel">
@@ -856,7 +915,7 @@ const pageStyles = `
   }
 
   .detail-shell {
-    width: 1240px;
+    width: min(1240px, calc(100vw - 32px));
     margin: 0 auto;
     padding: 8px 0 38px;
   }
@@ -1417,6 +1476,18 @@ const pageStyles = `
     font-size: 13px;
     line-height: 18px;
     font-weight: 800;
+  }
+
+  .owner-note {
+    margin: 13px 0 0;
+    border: 1px solid rgba(201,205,211,0.18);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.06);
+    color: #C9CDD3;
+    padding: 10px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 900;
   }
 
   .purchase-panel p em {

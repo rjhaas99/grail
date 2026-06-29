@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import Header from "../components/Header";
@@ -9,7 +10,43 @@ import {
   mockWatchedCards,
 } from "../lib/mockData";
 
-type Tab = "Owned" | "Listed" | "Watched" | "Sold";
+type Tab = "Owned" | "Listed" | "Drafts" | "Watched" | "Sold";
+
+type ListingDraft = {
+  id: string;
+  title: string;
+  category: string;
+  subject: string;
+  year: string;
+  brand: string;
+  cardNumber: string;
+  cardType: "Raw" | "Graded";
+  grader: string;
+  grade: string;
+  condition: string;
+  askingPrice: string;
+  minimumOffer: string;
+  marketValue: string;
+  imagePreview: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const draftStorageKey = "grail-listing-drafts";
+
+function readDrafts() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const storedDrafts = window.localStorage.getItem(draftStorageKey);
+    return storedDrafts ? (JSON.parse(storedDrafts) as ListingDraft[]) : [];
+  } catch (error) {
+    console.error("Portfolio draft read error:", error);
+    return [];
+  }
+}
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -35,6 +72,25 @@ function CardArt({ accent }: { accent: string }) {
   );
 }
 
+function DraftArt({ draft }: { draft: ListingDraft }) {
+  if (draft.imagePreview) {
+    return (
+      <div className="art-shell">
+        <Image
+          className="draft-image"
+          src={draft.imagePreview}
+          alt={draft.title}
+          width={140}
+          height={180}
+          unoptimized
+        />
+      </div>
+    );
+  }
+
+  return <CardArt accent={draft.cardType === "Raw" ? "#0f766e" : "#334155"} />;
+}
+
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="stat-card panel">
@@ -48,6 +104,8 @@ export default function PortfolioPage() {
   const [activeTab, setActiveTab] = useState<Tab>("Owned");
   const [status, setStatus] = useState("");
   const [watched, setWatched] = useState(mockWatchedCards);
+  const [drafts, setDrafts] = useState<ListingDraft[]>(() => readDrafts());
+  const [previewDraft, setPreviewDraft] = useState<ListingDraft | null>(null);
 
   const ownedCards = mockPortfolioCards.filter((card) => card.status === "Owned");
   const listedCards = mockPortfolioCards.filter((card) => card.status === "Listed");
@@ -58,12 +116,34 @@ export default function PortfolioPage() {
   const grailCount = mockPortfolioCards.filter((card) => card.tags.includes("Grail")).length;
   const thirtyDayChange = "+8.4%";
 
+  function deleteDraft(draftId: string) {
+    const nextDrafts = drafts.filter((draft) => draft.id !== draftId);
+    setDrafts(nextDrafts);
+    window.localStorage.setItem(draftStorageKey, JSON.stringify(nextDrafts));
+    setStatus("Draft deleted.");
+  }
+
+  function getDraftSubtitle(draft: ListingDraft) {
+    return draft.cardType === "Graded"
+      ? `${draft.category}: ${draft.grader} ${draft.grade}`
+      : `${draft.category}: ${draft.condition}`;
+  }
+
+  function formatDate(value: string) {
+    return new Date(value).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+
   const tabCount = useMemo(() => {
     if (activeTab === "Owned") return ownedCards.length;
     if (activeTab === "Listed") return listedCards.length;
+    if (activeTab === "Drafts") return drafts.length;
     if (activeTab === "Watched") return watched.length;
     return soldCards.length;
-  }, [activeTab, listedCards.length, ownedCards.length, soldCards.length, watched.length]);
+  }, [activeTab, drafts.length, listedCards.length, ownedCards.length, soldCards.length, watched.length]);
 
   function renderOwnedCard(card: PortfolioCard) {
     return (
@@ -121,7 +201,7 @@ export default function PortfolioPage() {
                 <p>{tabCount} cards</p>
               </div>
               <div className="tabs">
-                {(["Owned", "Listed", "Watched", "Sold"] as Tab[]).map((tab) => (
+                {(["Owned", "Listed", "Drafts", "Watched", "Sold"] as Tab[]).map((tab) => (
                   <button
                     key={tab}
                     type="button"
@@ -157,6 +237,42 @@ export default function PortfolioPage() {
                   </article>
                 ))}
               </section>
+            ) : null}
+
+            {activeTab === "Drafts" ? (
+              drafts.length > 0 ? (
+                <section className="card-grid">
+                  {drafts.map((draft) => (
+                    <article key={draft.id} className="collection-card">
+                      <DraftArt draft={draft} />
+                      <div className="badge-row">
+                        <span>Draft</span>
+                        <span>{draft.cardType}</span>
+                      </div>
+                      <h3>{draft.title || "Untitled Draft"}</h3>
+                      <p>{getDraftSubtitle(draft)}</p>
+                      <div className="value-grid">
+                        <span>Asking <strong>{formatCurrency(Number(draft.askingPrice || 0))}</strong></span>
+                        <span>Status <strong>Draft</strong></span>
+                        <span>Updated <strong>{formatDate(draft.updatedAt)}</strong></span>
+                      </div>
+                      <div className="card-actions">
+                        <Link href={`/list?draft=${draft.id}`}>Continue Editing</Link>
+                        <button type="button" onClick={() => deleteDraft(draft.id)}>Delete Draft</button>
+                        <button type="button" onClick={() => setPreviewDraft(draft)}>Preview</button>
+                      </div>
+                    </article>
+                  ))}
+                </section>
+              ) : (
+                <section className="list-panel panel">
+                  <article className="empty-drafts">
+                    <h3>No drafts saved.</h3>
+                    <p>Save a draft from List a Card and it will appear here.</p>
+                    <Link href="/list">List a Card</Link>
+                  </article>
+                </section>
+              )
             ) : null}
 
             {activeTab === "Watched" ? (
@@ -227,13 +343,58 @@ export default function PortfolioPage() {
           </aside>
         </section>
       </div>
+
+      {previewDraft ? (
+        <div className="draft-modal-backdrop" role="presentation">
+          <section
+            className="panel draft-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Draft preview"
+          >
+            <div className="draft-modal-header">
+              <div>
+                <span>Draft Preview</span>
+                <h2>{previewDraft.title || "Untitled Draft"}</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close draft preview"
+                onClick={() => setPreviewDraft(null)}
+              >
+                x
+              </button>
+            </div>
+            <div className="draft-modal-body">
+              <DraftArt draft={previewDraft} />
+              <div>
+                <div className="badge-row">
+                  <span>Draft</span>
+                  <span>{previewDraft.cardType}</span>
+                </div>
+                <h3>{previewDraft.title || "Untitled Draft"}</h3>
+                <p>{getDraftSubtitle(previewDraft)}</p>
+                <div className="value-grid">
+                  <span>Asking <strong>{formatCurrency(Number(previewDraft.askingPrice || 0))}</strong></span>
+                  <span>Minimum Offer <strong>{previewDraft.minimumOffer ? formatCurrency(Number(previewDraft.minimumOffer)) : "Not set"}</strong></span>
+                  <span>Updated <strong>{formatDate(previewDraft.updatedAt)}</strong></span>
+                </div>
+                <div className="card-actions modal-actions">
+                  <Link href={`/list?draft=${previewDraft.id}`}>Continue Editing</Link>
+                  <button type="button" onClick={() => setPreviewDraft(null)}>Close</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
 
 const pageStyles = `
   .portfolio-page { min-height: 100vh; background: radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%), linear-gradient(180deg, #000 0%, #030304 58%, #000 100%); color: #fafafa; font-family: Arial, Helvetica, sans-serif; }
-  .portfolio-shell { width: 1240px; margin: 0 auto; padding: 8px 0 38px; }
+  .portfolio-shell { width: min(1240px, calc(100vw - 32px)); margin: 0 auto; padding: 8px 0 38px; }
   .panel { border: 1px solid #1d1d22; border-radius: 12px; background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)), rgba(5,5,6,0.92); box-shadow: 0 18px 44px rgba(0,0,0,0.28); }
   .page-heading { margin-top: 18px; }
   .page-heading span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -255,6 +416,7 @@ const pageStyles = `
   .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   .collection-card { border: 1px solid #202026; border-radius: 12px; background: #070708; padding: 14px; display: grid; gap: 10px; }
   .art-shell { width: 100%; height: 166px; border: 1px solid rgba(201,205,211,0.14); border-radius: 10px; background: #030304; display: flex; align-items: center; justify-content: center; }
+  .draft-image { max-width: 136px; max-height: 148px; width: auto; height: auto; border-radius: 9px; object-fit: contain; box-shadow: 0 18px 34px rgba(0,0,0,0.62); }
   .card-art { width: 92px; height: 128px; border: 1px solid rgba(244,244,245,0.48); border-radius: 8px; position: relative; overflow: hidden; }
   .card-art span { position: absolute; left: 23px; top: 28px; width: 44px; height: 44px; border: 1px solid rgba(255,255,255,0.22); border-radius: 50%; }
   .card-art strong { position: absolute; left: 39px; top: 38px; width: 24px; height: 54px; border-radius: 999px 999px 9px 9px; background: rgba(255,255,255,0.72); }
@@ -277,5 +439,18 @@ const pageStyles = `
   .mini-chart { width: 100%; height: 96px; margin-top: 10px; }
   .mini-chart path { fill: none; stroke: #C9CDD3; stroke-width: 4; stroke-linecap: round; filter: drop-shadow(0 0 8px rgba(201,205,211,0.18)); }
   .quick-actions { display: grid; gap: 10px; }
-  @media (max-width: 1100px) { .portfolio-shell { width: calc(100vw - 32px); } .stats-grid, .portfolio-layout, .card-grid, .list-row { grid-template-columns: 1fr; } .toolbar { display: grid; } }
+  .empty-drafts { padding: 18px; }
+  .empty-drafts h3 { margin: 0; color: #fff; font-size: 18px; line-height: 22px; font-weight: 900; }
+  .empty-drafts a { margin-top: 12px; min-height: 36px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055); color: #fff; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 12px; font-weight: 900; }
+  .draft-modal-backdrop { position: fixed; inset: 0; z-index: 1200; background: rgba(0,0,0,0.72); display: flex; align-items: center; justify-content: center; padding: 22px; backdrop-filter: blur(12px); }
+  .draft-modal { width: min(720px, 100%); padding: 18px; box-sizing: border-box; }
+  .draft-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+  .draft-modal-header span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+  .draft-modal-header h2 { margin: 6px 0 0; color: #fff; font-size: 24px; line-height: 29px; font-weight: 900; }
+  .draft-modal-header button { width: 34px; height: 34px; border: 1px solid rgba(231,222,208,0.28); border-radius: 999px; background: rgba(231,222,208,0.055); color: #fff; cursor: pointer; font-weight: 900; }
+  .draft-modal-body { margin-top: 16px; display: grid; grid-template-columns: 230px 1fr; gap: 18px; align-items: start; }
+  .draft-modal-body h3 { margin: 13px 0 0; color: #fff; font-size: 24px; line-height: 29px; font-weight: 900; }
+  .modal-actions { margin-top: 14px; }
+  @media (max-width: 1100px) { .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .portfolio-layout, .card-grid, .list-row, .draft-modal-body { grid-template-columns: 1fr; } .toolbar { display: grid; } }
+  @media (max-width: 640px) { .stats-grid { grid-template-columns: 1fr; } .page-heading h1 { font-size: 34px; line-height: 38px; } }
 `;

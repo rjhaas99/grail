@@ -31,6 +31,7 @@ type ProfileRow = {
 
 type CheckoutCard = {
   id: string;
+  sellerId?: string | null;
   title: string;
   category: string;
   condition: string;
@@ -119,8 +120,24 @@ export default function CheckoutPage() {
   const id = String(params.id || "");
   const mockCard = getMockListingById(id);
   const [realCard, setRealCard] = useState<CheckoutCard | null>(null);
+  const [currentUserId, setCurrentUserId] = useState("");
+  const mockCheckoutCard: CheckoutCard | null = mockCard
+    ? {
+        id: mockCard.id,
+        sellerId: null,
+        title: mockCard.title,
+        category: mockCard.category,
+        condition: mockCard.condition,
+        seller: mockCard.seller,
+        sellerHref: mockCard.sellerHref,
+        price: mockCard.price,
+        marketValue: mockCard.marketValue,
+        accent: mockCard.accent,
+      }
+    : null;
   const fallbackCard: CheckoutCard = {
     id,
+    sellerId: null,
     title: `Listing ${id || "live"}`,
     category: "Live Listing",
     condition: "Supabase listing",
@@ -130,9 +147,36 @@ export default function CheckoutPage() {
     marketValue: 0,
     accent: "#334155",
   };
-  const card = mockCard ?? realCard ?? fallbackCard;
+  const card = mockCheckoutCard ?? realCard ?? fallbackCard;
   const isLiveFallback = !mockCard;
   const [isPlaced, setIsPlaced] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (isMounted) {
+        setCurrentUserId(session?.user.id || "");
+      }
+    }
+
+    loadSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUserId(session?.user.id || "");
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -193,6 +237,7 @@ export default function CheckoutPage() {
         if (isMounted) {
           setRealCard({
             id: listing.id,
+            sellerId: listing.seller_id,
             title: buildListingTitle(listing),
             category: getCategory(listing),
             condition: getCondition(listing),
@@ -219,6 +264,27 @@ export default function CheckoutPage() {
   const shipping = 14;
   const estimatedTax = Math.round(card.price * 0.07);
   const total = card.price + platformFee + shipping + estimatedTax;
+  const isOwnerCheckout = Boolean(currentUserId) && card.sellerId === currentUserId;
+
+  if (isOwnerCheckout) {
+    return (
+      <main className="checkout-page">
+        <style>{pageStyles}</style>
+        <div className="checkout-shell">
+          <Header />
+
+          <section className="not-found panel">
+            <p>Owner Checkout Blocked</p>
+            <h1>You cannot buy your own listing.</h1>
+            <div className="owner-block-actions">
+              <Link href={`/cards/${card.id}`}>View Listing</Link>
+              <Link href="/seller-dashboard">Seller Dashboard</Link>
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="checkout-page">
@@ -335,7 +401,7 @@ const pageStyles = `
   }
 
   .checkout-shell {
-    width: 1240px;
+    width: min(1240px, calc(100vw - 32px));
     margin: 0 auto;
     padding: 8px 0 38px;
   }
@@ -388,7 +454,8 @@ const pageStyles = `
   .text-link,
   .payment-row button,
   .place-order,
-  .confirmation-box a {
+  .confirmation-box a,
+  .owner-block-actions a {
     border: 1px solid rgba(231,222,208,0.28);
     border-radius: 10px;
     background: rgba(231,222,208,0.055);
@@ -616,6 +683,14 @@ const pageStyles = `
   .not-found h1 {
     color: #fff;
     font-size: 36px;
+  }
+
+  .owner-block-actions {
+    margin-top: 18px;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
   }
 
   @media (max-width: 1100px) {

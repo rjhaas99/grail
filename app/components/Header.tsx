@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { FormEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
@@ -41,6 +42,7 @@ export default function Header() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const accountName =
     profile?.full_name ||
@@ -136,6 +138,20 @@ export default function Header() {
     router.refresh();
   }
 
+  function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = searchQuery.trim();
+
+    closeMenus();
+
+    if (!query) {
+      router.push("/browse");
+      return;
+    }
+
+    router.push(`/browse?search=${encodeURIComponent(query)}`);
+  }
+
   useEffect(() => {
     let active = true;
 
@@ -208,16 +224,53 @@ export default function Header() {
             background: rgba(248, 113, 113, 0.085) !important;
             border-color: rgba(248, 113, 113, 0.24) !important;
           }
+
+          .grail-header-search-input::placeholder {
+            color: #7b7b85;
+          }
+
+          @media (max-width: 900px) {
+            .grail-header {
+              height: auto !important;
+              grid-template-columns: 1fr !important;
+              gap: 10px !important;
+              padding: 10px 0 !important;
+            }
+
+            .grail-header-brand,
+            .grail-header-account {
+              width: 100% !important;
+            }
+
+            .grail-header-account {
+              justify-content: flex-start !important;
+              flex-wrap: wrap !important;
+            }
+
+            .grail-header-search {
+              width: 100% !important;
+              justify-self: stretch !important;
+              order: 3;
+            }
+          }
+
+          @media (max-width: 520px) {
+            .grail-header-auth-link {
+              min-width: auto !important;
+              padding: 0 14px !important;
+            }
+          }
         `}
       </style>
 
       <header
+      className="grail-header"
       style={{
         height: "54px",
-        width: "1240px",
+        width: "min(1240px, calc(100vw - 32px))",
         margin: "0 auto",
         display: "grid",
-        gridTemplateColumns: "230px 1fr 300px",
+        gridTemplateColumns: "230px minmax(220px, 1fr) 300px",
         alignItems: "center",
         borderBottom: "1px solid #17171c",
         background: "#000",
@@ -227,7 +280,10 @@ export default function Header() {
         zIndex: 1000,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+      <div
+        className="grail-header-brand"
+        style={{ display: "flex", alignItems: "center", gap: "16px" }}
+      >
         <div
           ref={menuRef}
           onMouseEnter={openMenuFromHover}
@@ -332,9 +388,11 @@ export default function Header() {
         </Link>
       </div>
 
-      <div
+      <form
+        className="grail-header-search"
+        onSubmit={handleSearchSubmit}
         style={{
-          width: "590px",
+          width: "min(590px, 100%)",
           height: "34px",
           justifySelf: "center",
           border: "1px solid #17171c",
@@ -349,8 +407,9 @@ export default function Header() {
           boxSizing: "border-box",
         }}
       >
-        <span
-          aria-hidden="true"
+        <button
+          type="submit"
+          aria-label="Search"
           style={{
             width: "12px",
             height: "12px",
@@ -358,12 +417,35 @@ export default function Header() {
             borderRadius: "999px",
             display: "inline-block",
             boxSizing: "border-box",
+            background: "transparent",
+            padding: 0,
+            cursor: "pointer",
+            flex: "0 0 auto",
           }}
         />
-        Search cards, sellers, collections...
-      </div>
+        <input
+          className="grail-header-search-input"
+          type="search"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search cards, sellers, collections..."
+          aria-label="Search cards, sellers, collections"
+          style={{
+            width: "100%",
+            minWidth: 0,
+            border: 0,
+            outline: 0,
+            background: "transparent",
+            color: "#f4f4f5",
+            font: "inherit",
+            fontSize: "13px",
+            fontWeight: 800,
+          }}
+        />
+      </form>
 
       <nav
+        className="grail-header-account"
         aria-label="Account navigation"
         style={{
           display: "flex",
@@ -377,6 +459,7 @@ export default function Header() {
             <Link
               href="/login"
               onClick={closeMenus}
+              className="grail-header-auth-link"
               style={{
                 height: "38px",
                 minWidth: "86px",
@@ -398,6 +481,7 @@ export default function Header() {
             <Link
               href="/signup"
               onClick={closeMenus}
+              className="grail-header-auth-link"
               style={{
                 height: "38px",
                 minWidth: "132px",

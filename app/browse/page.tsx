@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
 import {
@@ -15,6 +16,7 @@ import {
 
 type BrowseListing = MockListing & {
   imageUrl?: string | null;
+  sellerId?: string | null;
   source: "supabase" | "mock";
 };
 
@@ -240,6 +242,7 @@ function mapSupabaseListing(
     subtitle: `${category}: ${condition}`,
     meta: `${category}: ${condition}`,
     sellerSlug,
+    sellerId: listing.seller_id,
     sellerName,
     seller: sellerName,
     sellerLevel: "GRAIL Seller",
@@ -497,19 +500,51 @@ function MarketIndexChart() {
 }
 
 export default function BrowsePage() {
+  const searchParams = useSearchParams();
+  const urlSearchQuery = searchParams.get("search") || "";
   const [listings, setListings] = useState<BrowseListing[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fallbackNote, setFallbackNote] = useState("");
+  const [currentUserId, setCurrentUserId] = useState("");
   const [openGraders, setOpenGraders] = useState<string[]>(["PSA"]);
   const [isSellerLevelsOpen, setIsSellerLevelsOpen] = useState(false);
   const [sortMode, setSortMode] = useState<"newest" | "hot">("newest");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [localSearchQuery, setLocalSearchQuery] = useState("");
+  const [hasLocalSearch, setHasLocalSearch] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "compact">("grid");
   const [offerListing, setOfferListing] = useState<BrowseListing | null>(null);
   const [offerAmount, setOfferAmount] = useState("");
   const [offerMessage, setOfferMessage] = useState("");
   const [offerError, setOfferError] = useState("");
   const [sentOfferAmount, setSentOfferAmount] = useState<number | null>(null);
+  const searchQuery = hasLocalSearch ? localSearchQuery : urlSearchQuery;
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (isMounted) {
+        setCurrentUserId(session?.user.id || "");
+      }
+    }
+
+    loadSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUserId(session?.user.id || "");
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -723,11 +758,11 @@ export default function BrowsePage() {
               linear-gradient(180deg, #000 0%, #030304 56%, #000 100%);
             color: #fafafa;
             font-family: Arial, Helvetica, sans-serif;
-            overflow-x: auto;
+            overflow-x: hidden;
           }
 
           .browse-shell {
-            width: 1240px;
+            width: min(1240px, calc(100vw - 32px));
             margin: 0 auto;
             padding: 8px 0 34px;
           }
@@ -1604,6 +1639,22 @@ export default function BrowsePage() {
             flex: 0 0 auto;
           }
 
+          .owner-note {
+            margin: 0;
+            border: 1px solid rgba(201,205,211,0.18);
+            border-radius: 999px;
+            background: rgba(201,205,211,0.06);
+            color: #C9CDD3;
+            min-height: 34px;
+            padding: 0 11px;
+            display: inline-flex;
+            align-items: center;
+            font-size: 11px;
+            line-height: 14px;
+            font-weight: 900;
+            white-space: nowrap;
+          }
+
           .action-button {
             width: 46px;
             height: 46px;
@@ -2040,7 +2091,10 @@ export default function BrowsePage() {
             <input
               type="search"
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
+              onChange={(event) => {
+                setHasLocalSearch(true);
+                setLocalSearchQuery(event.target.value);
+              }}
               placeholder="Search by player, card, set, seller..."
               aria-label="Search listings"
             />
@@ -2117,6 +2171,8 @@ export default function BrowsePage() {
               <div className={`listing-grid ${viewMode}-view`}>
                 {visibleListings.map((listing) => {
                   const tag = getListingTag(listing);
+                  const isOwnerListing =
+                    Boolean(currentUserId) && listing.sellerId === currentUserId;
 
                   return (
                     <article key={listing.href} className="listing-card">
@@ -2160,41 +2216,45 @@ export default function BrowsePage() {
                           {listing.priceDisplay}
                         </strong>
                         <div className="listing-actions">
-                          <div className="action-circles">
-                            <Link
-                              href={`/checkout/${listing.id}`}
-                              className="action-button"
-                              aria-label={`Buy ${listing.title}`}
-                              title="Buy"
-                            >
-                              <span
-                                className="action-icon cart-icon"
-                                aria-hidden="true"
-                              />
-                            </Link>
-                            <Link
-                              href="/messages"
-                              className="action-button"
-                              aria-label={`Message ${listing.seller}`}
-                              title="Message"
-                            >
-                              <span
-                                className="action-icon message-icon"
-                                aria-hidden="true"
-                              />
-                            </Link>
-                            <button
-                              type="button"
-                              className="action-button"
-                              aria-label={`Make offer on ${listing.title}`}
-                              title="Make Offer"
-                              onClick={() => openOfferModal(listing)}
-                            >
-                              <span className="action-icon" aria-hidden="true">
-                                $
-                              </span>
-                            </button>
-                          </div>
+                          {isOwnerListing ? (
+                            <p className="owner-note">This is your listing.</p>
+                          ) : (
+                            <div className="action-circles">
+                              <Link
+                                href={`/checkout/${listing.id}`}
+                                className="action-button"
+                                aria-label={`Buy ${listing.title}`}
+                                title="Buy"
+                              >
+                                <span
+                                  className="action-icon cart-icon"
+                                  aria-hidden="true"
+                                />
+                              </Link>
+                              <Link
+                                href="/messages"
+                                className="action-button"
+                                aria-label={`Message ${listing.seller}`}
+                                title="Message"
+                              >
+                                <span
+                                  className="action-icon message-icon"
+                                  aria-hidden="true"
+                                />
+                              </Link>
+                              <button
+                                type="button"
+                                className="action-button"
+                                aria-label={`Make offer on ${listing.title}`}
+                                title="Make Offer"
+                                onClick={() => openOfferModal(listing)}
+                              >
+                                <span className="action-icon" aria-hidden="true">
+                                  $
+                                </span>
+                              </button>
+                            </div>
+                          )}
 
                           <Link className="view-card" href={listing.href}>
                             View Card
