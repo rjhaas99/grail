@@ -472,8 +472,8 @@ export default function CheckoutPage() {
 
             {isStripeSuccess ? (
               <div className="confirmation-box">
-                <strong>Payment successful in Stripe test mode.</strong>
-                <p>Order recording coming next.</p>
+                <strong>Payment successful.</strong>
+                <p>Order will appear in Orders once the webhook finishes.</p>
                 <Link href="/orders">View Orders</Link>
                 <Link href="/browse">Continue Browsing</Link>
               </div>

@@ -119,6 +119,7 @@ export async function POST(request: Request) {
     const accessToken = authHeader.startsWith("Bearer ")
       ? authHeader.slice("Bearer ".length).trim()
       : "";
+    let buyerId = "";
 
     if (accessToken) {
       const {
@@ -136,6 +137,8 @@ export async function POST(request: Request) {
           { status: 403 },
         );
       }
+
+      buyerId = user?.id || "";
     }
 
     const stripe = new Stripe(stripeSecretKey);
@@ -156,11 +159,13 @@ export async function POST(request: Request) {
           quantity: 1,
         },
       ],
+      client_reference_id: buyerId || undefined,
       success_url: `${siteUrl}/checkout/${listing.id}?success=true&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteUrl}/checkout/${listing.id}?canceled=true`,
       metadata: {
         listingId: listing.id,
         sellerId: listing.seller_id || "",
+        buyerId,
         source: "grail",
       },
     });
