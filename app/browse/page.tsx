@@ -20,6 +20,20 @@ type BrowseListing = MockListing & {
   source: "supabase" | "mock";
 };
 
+type LocalMockOffer = {
+  id: string;
+  listing_id: string;
+  cardTitle: string;
+  buyerName: string;
+  sellerName: string;
+  amount: number;
+  askingPrice: number;
+  message: string;
+  status: "pending";
+  createdAt: string;
+  cardRoute: string;
+};
+
 type ListingImageRow = {
   image_url: string | null;
   image_type: string | null;
@@ -56,6 +70,7 @@ const fallbackListings: BrowseListing[] = mockListings.map((listing) => ({
   ...listing,
   source: "mock",
 }));
+const mockOfferStorageKey = "grail-mock-offers";
 
 const realListingAccents = [
   "#8f1d2c",
@@ -154,6 +169,25 @@ function formatCurrency(value: number) {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function readLocalMockOffers() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const storedOffers = window.localStorage.getItem(mockOfferStorageKey);
+    return storedOffers ? (JSON.parse(storedOffers) as LocalMockOffer[]) : [];
+  } catch (error) {
+    console.error("Mock offer read error:", error);
+    return [];
+  }
+}
+
+function saveLocalMockOffer(offer: LocalMockOffer) {
+  const offers = readLocalMockOffers();
+  window.localStorage.setItem(mockOfferStorageKey, JSON.stringify([offer, ...offers]));
 }
 
 function formatListedDate(value: string | null) {
@@ -534,6 +568,7 @@ export default function BrowsePage() {
   const [offerMessage, setOfferMessage] = useState("");
   const [offerError, setOfferError] = useState("");
   const [sentOfferAmount, setSentOfferAmount] = useState<number | null>(null);
+  const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
   const searchQuery = hasLocalSearch ? localSearchQuery : urlSearchQuery;
 
   useEffect(() => {
@@ -749,7 +784,7 @@ export default function BrowsePage() {
     setSentOfferAmount(null);
   }
 
-  function submitOffer() {
+  async function submitOffer() {
     if (!offerListing) {
       return;
     }
@@ -762,8 +797,77 @@ export default function BrowsePage() {
       return;
     }
 
+    if (offerListing.source === "mock") {
+      saveLocalMockOffer({
+        id: `mock-offer-${Date.now()}`,
+        listing_id: offerListing.id,
+        cardTitle: offerListing.title,
+        buyerName: "You",
+        sellerName: offerListing.seller,
+        amount,
+        askingPrice: offerListing.askingPrice || offerListing.price || 0,
+        message: offerMessage.trim(),
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        cardRoute: offerListing.href,
+      });
+      setOfferError("");
+      setSentOfferAmount(amount);
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.user.id) {
+      setOfferError("Sign in to make an offer.");
+      setSentOfferAmount(null);
+      return;
+    }
+
+    if (offerListing.sellerId === session.user.id) {
+      setOfferError("You cannot make an offer on your own listing.");
+      setSentOfferAmount(null);
+      return;
+    }
+
+    if (!offerListing.sellerId) {
+      console.warn("Supabase offers table not available; using mock offer flow.", {
+        reason: "Missing seller_id on listing.",
+        listingId: offerListing.id,
+      });
+      setOfferError("");
+      setSentOfferAmount(amount);
+      return;
+    }
+
+    setIsSubmittingOffer(true);
     setOfferError("");
-    setSentOfferAmount(amount);
+
+    try {
+      const { error } = await supabase.from("offers").insert({
+        listing_id: offerListing.id,
+        buyer_id: session.user.id,
+        seller_id: offerListing.sellerId,
+        amount,
+        message: offerMessage.trim() || null,
+        status: "pending",
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setSentOfferAmount(amount);
+    } catch (error) {
+      console.error("Browse offer insert error:", error);
+      console.warn("Supabase offers table not available; using mock offer flow.", error);
+      setOfferError("Offer could not be sent.");
+      setSentOfferAmount(null);
+    } finally {
+      setIsSubmittingOffer(false);
+    }
   }
 
   return (
@@ -2457,8 +2561,13 @@ export default function BrowsePage() {
 
             {!sentOfferAmount ? (
               <div className="offer-modal-actions">
-                <button type="button" className="submit-offer" onClick={submitOffer}>
-                  Submit Offer
+                <button
+                  type="button"
+                  className="submit-offer"
+                  disabled={isSubmittingOffer}
+                  onClick={submitOffer}
+                >
+                  {isSubmittingOffer ? "Sending..." : "Submit Offer"}
                 </button>
                 <button type="button" onClick={closeOfferModal}>
                   Cancel

@@ -27,6 +27,20 @@ type MockCard = MockListing & {
   sellerId?: string | null;
 };
 
+type LocalMockOffer = {
+  id: string;
+  listing_id: string;
+  cardTitle: string;
+  buyerName: string;
+  sellerName: string;
+  amount: number;
+  askingPrice: number;
+  message: string;
+  status: "pending";
+  createdAt: string;
+  cardRoute: string;
+};
+
 type ListingImageRow = {
   image_url: string | null;
   image_type: string | null;
@@ -69,6 +83,7 @@ type DetailSeller = {
 };
 
 const realListingAccent = "#334155";
+const mockOfferStorageKey = "grail-mock-offers";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -76,6 +91,25 @@ function formatCurrency(value: number) {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function readLocalMockOffers() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const storedOffers = window.localStorage.getItem(mockOfferStorageKey);
+    return storedOffers ? (JSON.parse(storedOffers) as LocalMockOffer[]) : [];
+  } catch (error) {
+    console.error("Mock offer read error:", error);
+    return [];
+  }
+}
+
+function saveLocalMockOffer(offer: LocalMockOffer) {
+  const offers = readLocalMockOffers();
+  window.localStorage.setItem(mockOfferStorageKey, JSON.stringify([offer, ...offers]));
 }
 
 function formatListedDate(value: string | null) {
@@ -391,6 +425,7 @@ export default function CardDetailPage() {
   const [offerMessage, setOfferMessage] = useState("");
   const [offerError, setOfferError] = useState("");
   const [sentOfferAmount, setSentOfferAmount] = useState<number | null>(null);
+  const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
   const card = mockCard ?? realCard;
   const availablePhotoViews: PhotoView[] = card?.imageUrls
     ? photoViews.filter((view) => Boolean(card.imageUrls?.[view]))
@@ -537,7 +572,7 @@ export default function CardDetailPage() {
     });
   }
 
-  function submitOffer() {
+  async function submitOffer() {
     if (!card) {
       return;
     }
@@ -550,8 +585,77 @@ export default function CardDetailPage() {
       return;
     }
 
+    if (mockCard) {
+      saveLocalMockOffer({
+        id: `mock-offer-${Date.now()}`,
+        listing_id: card.id,
+        cardTitle: card.title,
+        buyerName: "You",
+        sellerName: card.seller,
+        amount,
+        askingPrice: card.askingPrice || card.price || 0,
+        message: offerMessage.trim(),
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        cardRoute: card.href,
+      });
+      setOfferError("");
+      setSentOfferAmount(amount);
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.user.id) {
+      setOfferError("Sign in to make an offer.");
+      setSentOfferAmount(null);
+      return;
+    }
+
+    if (card.sellerId === session.user.id) {
+      setOfferError("You cannot make an offer on your own listing.");
+      setSentOfferAmount(null);
+      return;
+    }
+
+    if (!card.sellerId) {
+      console.warn("Supabase offers table not available; using mock offer flow.", {
+        reason: "Missing seller_id on listing.",
+        listingId: card.id,
+      });
+      setOfferError("");
+      setSentOfferAmount(amount);
+      return;
+    }
+
+    setIsSubmittingOffer(true);
     setOfferError("");
-    setSentOfferAmount(amount);
+
+    try {
+      const { error } = await supabase.from("offers").insert({
+        listing_id: card.id,
+        buyer_id: session.user.id,
+        seller_id: card.sellerId,
+        amount,
+        message: offerMessage.trim() || null,
+        status: "pending",
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setSentOfferAmount(amount);
+    } catch (error) {
+      console.error("Card detail offer insert error:", error);
+      console.warn("Supabase offers table not available; using mock offer flow.", error);
+      setOfferError("Offer could not be sent.");
+      setSentOfferAmount(null);
+    } finally {
+      setIsSubmittingOffer(false);
+    }
   }
 
   if (isLoadingRealCard) {
@@ -889,8 +993,13 @@ export default function CardDetailPage() {
 
             {!sentOfferAmount ? (
               <div className="offer-modal-actions">
-                <button type="button" className="buy-button" onClick={submitOffer}>
-                  Submit Offer
+                <button
+                  type="button"
+                  className="buy-button"
+                  disabled={isSubmittingOffer}
+                  onClick={submitOffer}
+                >
+                  {isSubmittingOffer ? "Sending..." : "Submit Offer"}
                 </button>
                 <button type="button" onClick={() => setIsOfferOpen(false)}>
                   Cancel
