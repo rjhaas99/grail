@@ -395,9 +395,7 @@ function mapSupabaseListing(
     sellerHref: `/collections/${sellerSlug}`,
     price: displayPrice,
     priceDisplay: isCollectionOnly
-      ? status === "inactive"
-        ? "Not Listed"
-        : "In Collection"
+      ? "Open to Offers"
       : price
         ? formatCurrency(price)
         : "Price not listed",
@@ -747,7 +745,16 @@ export default function BrowsePage() {
           throw error;
         }
 
-        const rows = (data || []) as SupabaseListingRow[];
+        const rows = ((data || []) as SupabaseListingRow[]).filter((listing) => {
+          const status = listing.status?.toLowerCase();
+          return (
+            status === "active" ||
+            status === "collection" ||
+            (Boolean(listing.is_public_collection) &&
+              status !== "inactive" &&
+              status !== "deleted")
+          );
+        });
 
         if (rows.length === 0) {
           if (!isMounted) {
@@ -2577,7 +2584,7 @@ export default function BrowsePage() {
                   const isOwnerListing =
                     Boolean(currentUserId) && listing.sellerId === currentUserId;
                   const isCollectionOnly = tag === "Collection" || listing.isCollectionOnly;
-                  const canUseBuyerActions = !isOwnerListing && !isCollectionOnly;
+                  const canUseBuyerActions = !isOwnerListing;
 
                   return (
                     <article key={listing.href} className="listing-card">
@@ -2625,17 +2632,19 @@ export default function BrowsePage() {
                             <p className="owner-note">This is your listing.</p>
                           ) : canUseBuyerActions ? (
                             <div className="action-circles">
-                              <Link
-                                href={`/checkout/${listing.id}`}
-                                className="action-button"
-                                aria-label={`Buy ${listing.title}`}
-                                title="Buy"
-                              >
-                                <span
-                                  className="action-icon cart-icon"
-                                  aria-hidden="true"
-                                />
-                              </Link>
+                              {!isCollectionOnly ? (
+                                <Link
+                                  href={`/checkout/${listing.id}`}
+                                  className="action-button"
+                                  aria-label={`Buy ${listing.title}`}
+                                  title="Buy"
+                                >
+                                  <span
+                                    className="action-icon cart-icon"
+                                    aria-hidden="true"
+                                  />
+                                </Link>
+                              ) : null}
                               <button
                                 type="button"
                                 className="action-button"
@@ -2660,22 +2669,7 @@ export default function BrowsePage() {
                                 </span>
                               </button>
                             </div>
-                          ) : (
-                            <div className="action-circles collection-actions">
-                              <button
-                                type="button"
-                                className="action-button"
-                                aria-label={`Message ${listing.seller}`}
-                                title="Message"
-                                onClick={() => openMessageModal(listing)}
-                              >
-                                <span
-                                  className="action-icon message-icon"
-                                  aria-hidden="true"
-                                />
-                              </button>
-                            </div>
-                          )}
+                          ) : null}
 
                           <Link className="view-card" href={listing.href}>
                             View Card
@@ -2783,7 +2777,7 @@ export default function BrowsePage() {
 
             <div className="offer-summary-grid">
               <div className="offer-summary-item">
-                <span>Asking Price</span>
+                <span>{offerListing.isCollectionOnly ? "Sale Status" : "Asking Price"}</span>
                 <strong>{offerListing.priceDisplay}</strong>
               </div>
               <div className="offer-summary-item">
@@ -2796,7 +2790,11 @@ export default function BrowsePage() {
               </div>
               <div className="offer-summary-item">
                 <span>Minimum Offer</span>
-                <strong>{formatCurrency(offerListing.minOffer)}</strong>
+                <strong>
+                  {offerListing.minOffer > 0
+                    ? formatCurrency(offerListing.minOffer)
+                    : "Any offer"}
+                </strong>
               </div>
             </div>
 

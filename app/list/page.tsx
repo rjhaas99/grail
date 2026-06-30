@@ -232,10 +232,10 @@ function fileToDataUrl(file: File) {
   });
 }
 
-function ActionCircles() {
+function ActionCircles({ showBuy = true }: { showBuy?: boolean }) {
   return (
     <div className="action-circles" aria-hidden="true">
-      <span className="cart-icon" />
+      {showBuy ? <span className="cart-icon" /> : null}
       <span className="message-icon" />
       <span>$</span>
     </div>
@@ -638,12 +638,11 @@ export default function ListCardPage() {
       return "Asking price must be a positive number.";
     }
 
-    if (
-      !isCollectionMode &&
-      minimumOffer.trim() &&
-      (!Number.isFinite(minimumOfferNumber) ||
-        minimumOfferNumber > priceNumber)
-    ) {
+    if (minimumOffer.trim() && (!Number.isFinite(minimumOfferNumber) || minimumOfferNumber <= 0)) {
+      return "Minimum offer must be a positive number.";
+    }
+
+    if (!isCollectionMode && minimumOffer.trim() && minimumOfferNumber > priceNumber) {
       return "Minimum offer must be less than or equal to asking price.";
     }
 
@@ -1199,7 +1198,7 @@ export default function ListCardPage() {
                     value={askingPrice}
                     inputMode="decimal"
                     disabled={isCollectionMode}
-                    placeholder={isCollectionMode ? "Not listed for sale" : undefined}
+                    placeholder={isCollectionMode ? "In Collection" : undefined}
                     onChange={(event) => setAskingPrice(event.target.value)}
                   />
                 </label>
@@ -1208,8 +1207,7 @@ export default function ListCardPage() {
                   <input
                     value={minimumOffer}
                     inputMode="decimal"
-                    disabled={isCollectionMode}
-                    placeholder={isCollectionMode ? "Not available for collection cards" : undefined}
+                    placeholder={isCollectionMode ? "Optional minimum offer" : undefined}
                     onChange={(event) => setMinimumOffer(event.target.value)}
                   />
                 </label>
@@ -1228,7 +1226,10 @@ export default function ListCardPage() {
                 minimum offer.
               </p>
               {isCollectionMode ? (
-                <p>This card will appear in your public collection without Buy or Make Offer actions.</p>
+                <p>
+                  This card will appear in your public collection without Buy
+                  Now. Buyers can still message you and make offers.
+                </p>
               ) : null}
             </section>
 
@@ -1304,7 +1305,7 @@ export default function ListCardPage() {
               <p>{subtitle}</p>
               <p>Seller: {session?.user.email || "GRAIL Seller"}</p>
               <strong>{isCollectionMode ? "In Collection" : formatCurrency(askingPrice)}</strong>
-              <ActionCircles />
+              <ActionCircles showBuy={!isCollectionMode} />
               <button
                 type="button"
                 className="view-card"
@@ -1418,8 +1419,8 @@ export default function ListCardPage() {
                 <h3>{previewTitle}</h3>
                 <p>{subtitle}</p>
                 <div className="preview-detail-grid">
-                  <span>Asking Price <strong>{isCollectionMode ? "In Collection" : formatCurrency(askingPrice)}</strong></span>
-                  <span>Minimum Offer <strong>{isCollectionMode ? "Not available" : minimumOffer ? formatCurrency(minimumOffer) : "Not set"}</strong></span>
+                  <span>{isCollectionMode ? "Status" : "Asking Price"} <strong>{isCollectionMode ? "In Collection" : formatCurrency(askingPrice)}</strong></span>
+                  <span>Minimum Offer <strong>{minimumOffer ? formatCurrency(minimumOffer) : "Not set"}</strong></span>
                   <span>Card Type <strong>{cardType}</strong></span>
                   <span>
                     {cardType === "Graded" ? "Grade" : "Condition"}{" "}
@@ -1427,7 +1428,7 @@ export default function ListCardPage() {
                   </span>
                   <span>Seller <strong>{session?.user.email || "GRAIL Seller"}</strong></span>
                 </div>
-                <ActionCircles />
+                <ActionCircles showBuy={!isCollectionMode} />
                 <button type="button" className="view-card" disabled>
                   View Card Preview
                 </button>

@@ -27,6 +27,20 @@ type ListingImageRow = {
   image_type: string | null;
 };
 
+type LocalMockOffer = {
+  id: string;
+  listing_id: string;
+  cardTitle: string;
+  buyerName: string;
+  sellerName: string;
+  amount: number;
+  askingPrice: number;
+  message: string;
+  status: "pending";
+  createdAt: string;
+  cardRoute: string;
+};
+
 type SupabaseListingRow = {
   id: string;
   seller_id: string | null;
@@ -57,6 +71,7 @@ type ProfileRow = {
 const sellers = mockSellers;
 const buildSellerListings = buildMockSellerListings;
 const mockConversationStorageKey = "grail-mock-conversations";
+const mockOfferStorageKey = "grail-mock-offers";
 
 const filterModes: FilterMode[] = ["All", "Grail", "Hot", "Graded", "Raw"];
 
@@ -66,6 +81,25 @@ function formatCurrency(value: number) {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function readLocalMockOffers() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const storedOffers = window.localStorage.getItem(mockOfferStorageKey);
+    return storedOffers ? (JSON.parse(storedOffers) as LocalMockOffer[]) : [];
+  } catch (error) {
+    console.error("Mock offer read error:", error);
+    return [];
+  }
+}
+
+function saveLocalMockOffer(offer: LocalMockOffer) {
+  const offers = readLocalMockOffers();
+  window.localStorage.setItem(mockOfferStorageKey, JSON.stringify([offer, ...offers]));
 }
 
 function formatListedDate(value: string | null) {
@@ -318,9 +352,7 @@ function mapSupabaseListing(
     sellerHref: seller.route,
     price: displayPrice,
     priceDisplay: isCollectionOnly
-      ? status === "inactive"
-        ? "Not Listed"
-        : "In Collection"
+      ? "Open to Offers"
       : price
         ? formatCurrency(price)
         : "Price not listed",
@@ -471,6 +503,12 @@ export default function SellerCollectionPage() {
   const [messageError, setMessageError] = useState("");
   const [messageSuccessHref, setMessageSuccessHref] = useState("");
   const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [offerListing, setOfferListing] = useState<Listing | null>(null);
+  const [offerAmount, setOfferAmount] = useState("");
+  const [offerMessage, setOfferMessage] = useState("");
+  const [offerError, setOfferError] = useState("");
+  const [sentOfferAmount, setSentOfferAmount] = useState<number | null>(null);
+  const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
   const seller = mockSeller ?? realSeller;
   const allListings = useMemo(() => {
     if (mockSeller) {
@@ -561,7 +599,16 @@ export default function SellerCollectionPage() {
           throw listingError;
         }
 
-        const rows = (listingData || []) as SupabaseListingRow[];
+        const rows = ((listingData || []) as SupabaseListingRow[]).filter((listing) => {
+          const status = listing.status?.toLowerCase();
+          return (
+            status === "active" ||
+            status === "collection" ||
+            (Boolean(listing.is_public_collection) &&
+              status !== "inactive" &&
+              status !== "deleted")
+          );
+        });
         const mappedSeller = buildRealSeller(profile, rows);
         const mappedListings = rows.map((listing, index) =>
           mapSupabaseListing(listing, mappedSeller, index, rows.length),
@@ -682,6 +729,104 @@ export default function SellerCollectionPage() {
     setMessageError("");
     setMessageSuccessHref("");
     setIsSendingMessage(false);
+  }
+
+  function openOfferModal(listing: Listing) {
+    setOfferListing(listing);
+    setOfferAmount("");
+    setOfferMessage("");
+    setOfferError("");
+    setSentOfferAmount(null);
+  }
+
+  function closeOfferModal() {
+    setOfferListing(null);
+    setOfferAmount("");
+    setOfferMessage("");
+    setOfferError("");
+    setSentOfferAmount(null);
+    setIsSubmittingOffer(false);
+  }
+
+  async function submitOffer() {
+    if (!offerListing) {
+      return;
+    }
+
+    const amount = Number(offerAmount);
+
+    if (!amount || amount < offerListing.minOffer) {
+      setOfferError("Offer is below the seller's minimum.");
+      setSentOfferAmount(null);
+      return;
+    }
+
+    if (offerListing.source !== "supabase") {
+      saveLocalMockOffer({
+        id: `mock-offer-${Date.now()}`,
+        listing_id: offerListing.id,
+        cardTitle: offerListing.title,
+        buyerName: "You",
+        sellerName: offerListing.seller,
+        amount,
+        askingPrice: offerListing.askingPrice || offerListing.price || 0,
+        message: offerMessage.trim(),
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        cardRoute: offerListing.href,
+      });
+      setOfferError("");
+      setSentOfferAmount(amount);
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.user.id) {
+      setOfferError("Sign in to make an offer.");
+      setSentOfferAmount(null);
+      return;
+    }
+
+    if (offerListing.sellerId === session.user.id) {
+      setOfferError("You cannot make an offer on your own listing.");
+      setSentOfferAmount(null);
+      return;
+    }
+
+    if (!offerListing.sellerId) {
+      setOfferError("Offer could not be sent.");
+      setSentOfferAmount(null);
+      return;
+    }
+
+    setIsSubmittingOffer(true);
+    setOfferError("");
+
+    try {
+      const { error } = await supabase.from("offers").insert({
+        listing_id: offerListing.id,
+        buyer_id: session.user.id,
+        seller_id: offerListing.sellerId,
+        amount,
+        message: offerMessage.trim() || null,
+        status: "pending",
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setSentOfferAmount(amount);
+    } catch (error) {
+      console.error("Collection offer insert error:", error);
+      setOfferError("Offer could not be sent.");
+      setSentOfferAmount(null);
+    } finally {
+      setIsSubmittingOffer(false);
+    }
   }
 
   async function submitMessage() {
@@ -840,7 +985,7 @@ export default function SellerCollectionPage() {
 
           <div className="seller-hero-stats">
             <Metric label="Completed Sales" value={String(seller.completedSales)} />
-            <Metric label="Active Listings" value={String(allListings.length)} />
+            <Metric label="Public Cards" value={String(allListings.length)} />
             <Metric label="Response Time" value={seller.responseTime} />
             <Metric label="Ship Speed" value={seller.shipSpeed} />
             <Metric label="Rating" value={seller.rating} />
@@ -854,10 +999,10 @@ export default function SellerCollectionPage() {
             <section className="collection-header panel">
               <div>
                 <h2>Seller Collection</h2>
-                <p>Browse active listings from this seller.</p>
+                <p>Browse public cards from this seller.</p>
               </div>
               <div className="collection-stats">
-                <Metric label="Active Listings" value={String(allListings.length)} />
+                <Metric label="Public Cards" value={String(allListings.length)} />
                 <Metric label="Total Value" value={formatCurrency(totalValue)} />
                 <Metric label="Avg Price" value={formatCurrency(averagePrice)} />
                 <Metric label="Seller Level" value={seller.level} />
@@ -931,6 +1076,14 @@ export default function SellerCollectionPage() {
                           >
                             <span className="message-icon" aria-hidden="true" />
                           </button>
+                          <button
+                            type="button"
+                            aria-label={`Make offer on ${listing.title}`}
+                            title="Make Offer"
+                            onClick={() => openOfferModal(listing)}
+                          >
+                            $
+                          </button>
                         </div>
                       ) : (
                         <div className="action-circles">
@@ -949,6 +1102,7 @@ export default function SellerCollectionPage() {
                             type="button"
                             aria-label={`Make offer on ${listing.title}`}
                             title="Make Offer"
+                            onClick={() => openOfferModal(listing)}
                           >
                             <span aria-hidden="true">$</span>
                           </button>
@@ -965,12 +1119,12 @@ export default function SellerCollectionPage() {
               <section className="empty-state panel">
                 <h2>
                   {allListings.length === 0
-                    ? "No active listings yet."
+                    ? "No public cards yet."
                     : "No cards found."}
                 </h2>
                 <p>
                   {allListings.length === 0
-                    ? "This seller collection is live, but there are no active listings right now."
+                    ? "This seller collection is live, but there are no public cards right now."
                     : "Try a different search or filter."}
                 </p>
               </section>
@@ -1005,7 +1159,7 @@ export default function SellerCollectionPage() {
                 <Metric label="Total Market Value" value={formatCurrency(totalValue)} />
                 <Metric
                   label="Highest Value Card"
-                  value={highestValueCard?.title ?? "No active listings"}
+                  value={highestValueCard?.title ?? "No public cards"}
                 />
                 <Metric label="Grail Cards" value={String(grailCount)} />
                 <Metric label="Hot Cards" value={String(hotCount)} />
@@ -1026,6 +1180,92 @@ export default function SellerCollectionPage() {
           </aside>
         </section>
       </div>
+
+      {offerListing ? (
+        <div className="message-modal-backdrop" role="presentation">
+          <section
+            className="message-modal panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Make offer"
+          >
+            <div className="message-modal-header">
+              <div>
+                <span>Make Offer</span>
+                <h2>{offerListing.title}</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close offer modal"
+                onClick={closeOfferModal}
+              >
+                x
+              </button>
+            </div>
+
+            <div className="message-modal-preview">
+              <CardArtwork listing={offerListing} />
+              <div>
+                <span>
+                  {offerListing.isCollectionOnly ? "Sale Status" : "Asking Price"}
+                </span>
+                <strong>{offerListing.priceDisplay}</strong>
+                <p>Minimum offer: {offerListing.minOffer > 0 ? formatCurrency(offerListing.minOffer) : "Any offer"}</p>
+              </div>
+            </div>
+
+            {!sentOfferAmount ? (
+              <>
+                <label className="message-field">
+                  <span>Your offer</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={offerAmount}
+                    onChange={(event) => setOfferAmount(event.target.value)}
+                    placeholder="Enter offer amount"
+                  />
+                </label>
+
+                <label className="message-field">
+                  <span>Add a message to seller</span>
+                  <textarea
+                    value={offerMessage}
+                    onChange={(event) => setOfferMessage(event.target.value)}
+                    placeholder="Optional message"
+                  />
+                </label>
+              </>
+            ) : null}
+
+            {offerError ? <p className="message-error">{offerError}</p> : null}
+
+            {sentOfferAmount ? (
+              <div className="message-confirmation">
+                <strong>Offer sent to seller.</strong>
+                <p>Offer amount: {formatCurrency(sentOfferAmount)}</p>
+                <p>Status: Pending. Seller has 24 hours to respond.</p>
+              </div>
+            ) : null}
+
+            {!sentOfferAmount ? (
+              <div className="message-modal-actions">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={isSubmittingOffer}
+                  onClick={submitOffer}
+                >
+                  {isSubmittingOffer ? "Sending..." : "Submit Offer"}
+                </button>
+                <button type="button" onClick={closeOfferModal}>
+                  Cancel
+                </button>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
 
       {messageListing ? (
         <div className="message-modal-backdrop" role="presentation">
@@ -1449,9 +1689,9 @@ const pageStyles = `
     gap: 7px;
   }
 
+  .message-field input,
   .message-field textarea {
     width: 100%;
-    min-height: 96px;
     border: 1px solid #24242a;
     border-radius: 10px;
     background: #08080a;
@@ -1462,6 +1702,14 @@ const pageStyles = `
     font-size: 13px;
     font-weight: 800;
     outline: none;
+  }
+
+  .message-field input {
+    height: 44px;
+  }
+
+  .message-field textarea {
+    min-height: 96px;
     resize: vertical;
   }
 

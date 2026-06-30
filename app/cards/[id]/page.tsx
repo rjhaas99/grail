@@ -62,6 +62,8 @@ type SupabaseListingRow = {
   condition: string | null;
   price: number | null;
   status: string | null;
+  is_collection_card?: boolean | null;
+  is_public_collection?: boolean | null;
   created_at: string | null;
   listing_images: ListingImageRow[] | null;
 };
@@ -296,11 +298,19 @@ function mapSupabaseCard(
   const category = getCategory(listing);
   const condition = getConditionDisplay(listing);
   const price = Number(listing.price || 0);
+  const status = listing.status?.toLowerCase() || "";
+  const isCollectionOnly =
+    status !== "active" &&
+    (status === "collection" ||
+      Boolean(listing.is_collection_card) ||
+      Boolean(listing.is_public_collection));
+  const displayPrice = isCollectionOnly ? 0 : price;
+  const offerBasis = price;
   const sellerSlug = getSellerSlug(profile, listing.seller_id);
   const sellerName = profile?.full_name || profile?.username || "GRAIL Seller";
   const isGraded = Boolean(listing.grader && listing.grade) ||
     listing.card_type?.toLowerCase() === "graded";
-  const tag = isGraded ? "Graded" : "Raw";
+  const tag = isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw";
   const route = `/cards/${listing.id}`;
   const title =
     listing.title ||
@@ -335,12 +345,16 @@ function mapSupabaseCard(
       sellerLevel: "GRAIL Seller",
       sellerRoute: `/collections/${sellerSlug}`,
       sellerHref: `/collections/${sellerSlug}`,
-      price,
-      priceDisplay: price ? formatCurrency(price) : "Price not listed",
-      askingPrice: price,
+      price: displayPrice,
+      priceDisplay: isCollectionOnly
+        ? "Open to Offers"
+        : price
+          ? formatCurrency(price)
+          : "Price not listed",
+      askingPrice: displayPrice,
       marketValue: 0,
-      minimumOffer: price ? Math.round(price * 0.85) : 0,
-      minOffer: price ? Math.round(price * 0.85) : 0,
+      minimumOffer: offerBasis ? Math.round(offerBasis * 0.85) : 0,
+      minOffer: offerBasis ? Math.round(offerBasis * 0.85) : 0,
       watchCount: 0,
       views: 0,
       viewCount: 0,
@@ -352,6 +366,8 @@ function mapSupabaseCard(
       isRaw: !isGraded,
       isHot: false,
       isGrail: false,
+      isCollectionOnly,
+      listingStatus: listing.status,
       accent: realListingAccent,
       artworkTone: "live listing",
       imageUrls: getImageUrls(listing.listing_images),
@@ -403,7 +419,7 @@ function CardArtwork({
   card: MockCard;
   view: (typeof photoViews)[number];
 }) {
-  const isRaw = card.tag === "Raw";
+  const isRaw = card.isRaw || card.tag === "Raw";
   const isBack = view === "Back";
   const isTopCorners = view === "Top Corners";
   const isBottomCorners = view === "Bottom Corners";
@@ -533,6 +549,7 @@ export default function CardDetailPage() {
   const [messageError, setMessageError] = useState("");
   const [messageSuccessHref, setMessageSuccessHref] = useState("");
   const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [ownerActionStatus, setOwnerActionStatus] = useState("");
   const card = mockCard ?? realCard;
   const availablePhotoViews: PhotoView[] = card?.imageUrls
     ? photoViews.filter((view) => Boolean(card.imageUrls?.[view]))
@@ -600,6 +617,8 @@ export default function CardDetailPage() {
               condition,
               price,
               status,
+              is_collection_card,
+              is_public_collection,
               created_at,
               listing_images (
                 image_url,
@@ -623,6 +642,16 @@ export default function CardDetailPage() {
         }
 
         const listing = data as SupabaseListingRow;
+        const listingStatus = listing.status?.toLowerCase();
+
+        if (listingStatus === "deleted" || listingStatus === "inactive") {
+          if (isMounted) {
+            setRealCard(null);
+            setRealSeller(null);
+          }
+          return;
+        }
+
         let profile: ProfileRow | null = null;
 
         if (listing.seller_id) {
@@ -885,6 +914,47 @@ export default function CardDetailPage() {
     }
   }
 
+  async function deleteCardFromCollection() {
+    if (!card || mockCard) {
+      setOwnerActionStatus("Collection management is mock-only for demo cards.");
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      "Delete this card from your collection?\nThis removes it from Browse and your public collection.",
+    );
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.user.id || card.sellerId !== session.user.id) {
+      setOwnerActionStatus("You do not have permission to update this card.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("listings")
+      .update({
+        status: "deleted",
+        is_public_collection: false,
+      })
+      .eq("id", card.id)
+      .eq("seller_id", session.user.id);
+
+    if (error) {
+      console.error("Card detail delete from collection error:", error);
+      setOwnerActionStatus("Card could not be deleted from collection.");
+      return;
+    }
+
+    setOwnerActionStatus("Card deleted from collection.");
+  }
+
   if (isLoadingRealCard) {
     return (
       <main className="detail-page">
@@ -931,6 +1001,17 @@ export default function CardDetailPage() {
     : realSeller;
   const marketDifference = getMarketDifference(card);
   const isOwnerListing = Boolean(currentUserId) && card.sellerId === currentUserId;
+  const isCollectionOnly = Boolean(
+    card.isCollectionOnly ||
+      card.tag === "Collection" ||
+      card.listingStatus?.toLowerCase() === "collection",
+  );
+  const salePriceDisplay = isCollectionOnly
+    ? "Open to Offers"
+    : formatCurrency(card.askingPrice);
+  const minimumOfferDisplay = card.minOffer > 0
+    ? formatCurrency(card.minOffer)
+    : "Any offer";
 
   return (
     <main className="detail-page">
@@ -1006,7 +1087,10 @@ export default function CardDetailPage() {
 
               <div className="stat-grid">
                 <DetailRow label="Market Value" value={formatCurrency(card.marketValue)} />
-                <DetailRow label="Asking Price" value={formatCurrency(card.askingPrice)} />
+                <DetailRow
+                  label={isCollectionOnly ? "Collection Status" : "Asking Price"}
+                  value={isCollectionOnly ? "In Collection" : salePriceDisplay}
+                />
                 <DetailRow label="Watch Count" value={String(card.watchCount)} />
                 <DetailRow label="View Count" value={String(card.viewCount)} />
                 <DetailRow label="Listed Date" value={card.listedDate} />
@@ -1017,12 +1101,19 @@ export default function CardDetailPage() {
 
           <aside className="right-column">
             <section className="purchase-panel panel">
-              <span>Asking Price</span>
-              <strong>{formatCurrency(card.askingPrice)}</strong>
-              <p>
-                Market value {formatCurrency(card.marketValue)} ·{" "}
-                <em>{marketDifference}</em>
-              </p>
+              <span>{isCollectionOnly ? "In Collection" : "Asking Price"}</span>
+              <strong>{salePriceDisplay}</strong>
+              {isCollectionOnly ? (
+                <p>
+                  This card is in the seller&apos;s collection. The seller is
+                  open to offers and messages.
+                </p>
+              ) : (
+                <p>
+                  Market value {formatCurrency(card.marketValue)} ·{" "}
+                  <em>{marketDifference}</em>
+                </p>
+              )}
               <p className="market-data-note">
                 Market data integration planned: Card Ladder / Sports Card
                 Investor style price tracking.
@@ -1032,23 +1123,39 @@ export default function CardDetailPage() {
                 <>
                   <p className="owner-note">This is your listing.</p>
                   <div className="purchase-buttons">
-                    <Link className="buy-button" href={`/edit-listing/${card.id}`}>
-                      Edit Listing
+                    <Link className="buy-button" href={`/list?edit=${card.id}`}>
+                      {isCollectionOnly ? "Edit Card" : "Edit Listing"}
                     </Link>
-                    <Link href="/seller-dashboard">
-                      View in Seller Dashboard
-                    </Link>
-                    <Link href={`/cards/${card.id}`}>
-                      View Public Listing
-                    </Link>
+                    {isCollectionOnly ? (
+                      <>
+                        <Link href={`/list?edit=${card.id}`}>List For Sale</Link>
+                        <button type="button" onClick={deleteCardFromCollection}>
+                          Delete From Collection
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <Link href="/seller-dashboard">
+                          View in Seller Dashboard
+                        </Link>
+                        <Link href={`/cards/${card.id}`}>
+                          View Public Listing
+                        </Link>
+                      </>
+                    )}
                   </div>
+                  {ownerActionStatus ? (
+                    <p className="owner-note">{ownerActionStatus}</p>
+                  ) : null}
                 </>
               ) : (
                 <>
                   <div className="purchase-buttons">
-                    <Link className="buy-button" href={`/checkout/${card.id}`}>
-                      Buy Now
-                    </Link>
+                    {!isCollectionOnly ? (
+                      <Link className="buy-button" href={`/checkout/${card.id}`}>
+                        Buy Now
+                      </Link>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => {
@@ -1067,7 +1174,7 @@ export default function CardDetailPage() {
                   </div>
 
                   <p className="offer-note">
-                    Minimum offer: {formatCurrency(card.minOffer)}
+                    Minimum offer: {minimumOfferDisplay}
                   </p>
                 </>
               )}
@@ -1178,9 +1285,9 @@ export default function CardDetailPage() {
             </div>
 
             <div className="offer-summary-grid">
-              <DetailRow label="Asking Price" value={formatCurrency(card.askingPrice)} />
+              <DetailRow label="Sale Status" value={salePriceDisplay} />
               <DetailRow label="Market Value" value={formatCurrency(card.marketValue)} />
-              <DetailRow label="Minimum Offer" value={formatCurrency(card.minOffer)} />
+              <DetailRow label="Minimum Offer" value={minimumOfferDisplay} />
             </div>
 
             <label className="offer-field">
