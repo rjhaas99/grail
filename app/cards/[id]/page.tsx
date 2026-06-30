@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
 import {
+  type MockConversation,
   type MockListing,
   getMockListingById,
   getMockSellerBySlug,
@@ -84,6 +85,7 @@ type DetailSeller = {
 
 const realListingAccent = "#334155";
 const mockOfferStorageKey = "grail-mock-offers";
+const mockConversationStorageKey = "grail-mock-conversations";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -110,6 +112,106 @@ function readLocalMockOffers() {
 function saveLocalMockOffer(offer: LocalMockOffer) {
   const offers = readLocalMockOffers();
   window.localStorage.setItem(mockOfferStorageKey, JSON.stringify([offer, ...offers]));
+}
+
+function readLocalMockConversations() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const storedConversations = window.localStorage.getItem(
+      mockConversationStorageKey,
+    );
+
+    return storedConversations
+      ? (JSON.parse(storedConversations) as MockConversation[])
+      : [];
+  } catch (error) {
+    console.error("Mock conversation read error:", error);
+    return [];
+  }
+}
+
+function saveLocalMockConversation(conversation: MockConversation) {
+  const conversations = readLocalMockConversations();
+  window.localStorage.setItem(
+    mockConversationStorageKey,
+    JSON.stringify([conversation, ...conversations]),
+  );
+}
+
+function createLocalMockConversation(
+  card: MockCard,
+  message: string,
+): MockConversation {
+  const now = Date.now();
+
+  return {
+    id: `mock-conversation-${now}`,
+    participantName: card.seller,
+    participantRole: card.sellerLevel || "Seller",
+    person: card.seller,
+    badge: card.sellerLevel || "Seller",
+    cardId: card.id,
+    cardTitle: card.title,
+    cardRoute: card.href,
+    cardHref: card.href,
+    price: card.askingPrice || card.price || 0,
+    snippet: message,
+    lastSnippet: message,
+    timestamp: "now",
+    sortRank: now,
+    unread: false,
+    isActive: true,
+    accent: card.accent,
+    messages: [
+      {
+        id: `mock-message-${now}`,
+        sender: "buyer",
+        body: message,
+        time: "Now",
+      },
+    ],
+  };
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message || "");
+  }
+
+  return String(error);
+}
+
+function logMessageSupabaseError({
+  step,
+  listingId,
+  sellerId,
+  buyerId,
+  payload,
+  error,
+}: {
+  step: string;
+  listingId?: string | null;
+  sellerId?: string | null;
+  buyerId?: string | null;
+  payload?: unknown;
+  error: unknown;
+}) {
+  console.error("GRAIL message Supabase error:", {
+    step,
+    listingId,
+    sellerId,
+    buyerId,
+    payload,
+    error,
+    message: getErrorMessage(error),
+  });
 }
 
 function formatListedDate(value: string | null) {
@@ -426,6 +528,11 @@ export default function CardDetailPage() {
   const [offerError, setOfferError] = useState("");
   const [sentOfferAmount, setSentOfferAmount] = useState<number | null>(null);
   const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
+  const [isMessageOpen, setIsMessageOpen] = useState(false);
+  const [messageBody, setMessageBody] = useState("");
+  const [messageError, setMessageError] = useState("");
+  const [messageSuccessHref, setMessageSuccessHref] = useState("");
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
   const card = mockCard ?? realCard;
   const availablePhotoViews: PhotoView[] = card?.imageUrls
     ? photoViews.filter((view) => Boolean(card.imageUrls?.[view]))
@@ -658,6 +765,126 @@ export default function CardDetailPage() {
     }
   }
 
+  function openMessageModal() {
+    setIsMessageOpen(true);
+    setMessageBody("");
+    setMessageError("");
+    setMessageSuccessHref("");
+  }
+
+  function closeMessageModal() {
+    setIsMessageOpen(false);
+    setMessageBody("");
+    setMessageError("");
+    setMessageSuccessHref("");
+    setIsSendingMessage(false);
+  }
+
+  async function submitMessage() {
+    if (!card) {
+      return;
+    }
+
+    const body = messageBody.trim();
+
+    if (!body) {
+      setMessageError("Write a message before sending.");
+      return;
+    }
+
+    if (mockCard) {
+      const conversation = createLocalMockConversation(card, body);
+      saveLocalMockConversation(conversation);
+      setMessageError("");
+      setMessageSuccessHref(`/messages?mockConversation=${conversation.id}`);
+      return;
+    }
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      logMessageSupabaseError({
+        step: "card detail message auth session",
+        listingId: card.id,
+        sellerId: card.sellerId,
+        buyerId: null,
+        error: sessionError,
+      });
+      setMessageError("Message could not be sent. Check console for Supabase error.");
+      return;
+    }
+
+    if (!session?.user.id) {
+      setMessageError("Sign in to message seller.");
+      return;
+    }
+
+    if (card.sellerId === session.user.id) {
+      setMessageError("You cannot message yourself about your own listing.");
+      return;
+    }
+
+    if (!card.sellerId) {
+      setMessageError("Message could not be sent. Check console for Supabase error.");
+      console.error("Card detail message setup error:", {
+        step: "card detail message missing seller id",
+        reason: "Missing seller_id on listing.",
+        listingId: card.id,
+        sellerId: card.sellerId,
+        buyerId: session.user.id,
+      });
+      return;
+    }
+
+    setIsSendingMessage(true);
+    setMessageError("");
+
+    try {
+      const messagePayload = {
+        sender_id: session.user.id,
+        receiver_id: card.sellerId,
+        listing_id: card.id,
+        body,
+      };
+      const { error: messageInsertError } = await supabase
+        .from("messages")
+        .insert(messagePayload);
+
+      if (messageInsertError) {
+        logMessageSupabaseError({
+          step: "card detail message insert",
+          listingId: card.id,
+          sellerId: card.sellerId,
+          buyerId: session.user.id,
+          payload: messagePayload,
+          error: messageInsertError,
+        });
+        throw messageInsertError;
+      }
+
+      setMessageSuccessHref(
+        `/messages?listing=${encodeURIComponent(card.id)}&seller=${encodeURIComponent(
+          card.sellerId,
+        )}`,
+      );
+    } catch (error) {
+      logMessageSupabaseError({
+        step: "card detail message flow catch",
+        listingId: card.id,
+        sellerId: card.sellerId,
+        buyerId: session.user.id,
+        error,
+      });
+      setMessageError("Message could not be sent. Check console for Supabase error.");
+      setMessageSuccessHref("");
+    } finally {
+      setIsSendingMessage(false);
+    }
+  }
+
   if (isLoadingRealCard) {
     return (
       <main className="detail-page">
@@ -834,9 +1061,9 @@ export default function CardDetailPage() {
                     >
                       Make Offer
                     </button>
-                    <Link href="/messages">
+                    <button type="button" onClick={openMessageModal}>
                       Message Seller
-                    </Link>
+                    </button>
                   </div>
 
                   <p className="offer-note">
@@ -1006,6 +1233,82 @@ export default function CardDetailPage() {
                 </button>
               </div>
             ) : null}
+          </section>
+        </div>
+      ) : null}
+
+      {isMessageOpen ? (
+        <div className="offer-modal-backdrop" role="presentation">
+          <section
+            className="offer-modal panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Message seller"
+          >
+            <div className="offer-modal-header">
+              <div>
+                <span>Message Seller</span>
+                <h2>{card.title}</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close message modal"
+                onClick={closeMessageModal}
+              >
+                x
+              </button>
+            </div>
+
+            <div className="message-modal-preview">
+              <CardArtwork card={card} view={activePhoto} />
+              <div>
+                <span>Seller</span>
+                <strong>{card.seller}</strong>
+                <p>{card.meta}</p>
+              </div>
+            </div>
+
+            {!messageSuccessHref ? (
+              <label className="offer-field">
+                <span>Write a message...</span>
+                <textarea
+                  value={messageBody}
+                  onChange={(event) => setMessageBody(event.target.value)}
+                  placeholder="Ask about condition, shipping, or availability."
+                />
+              </label>
+            ) : null}
+
+            {messageError ? <p className="offer-error">{messageError}</p> : null}
+
+            {messageSuccessHref ? (
+              <div className="offer-confirmation">
+                <strong>Message sent.</strong>
+                <p>Your conversation is ready.</p>
+              </div>
+            ) : null}
+
+            {messageSuccessHref ? (
+              <div className="offer-modal-actions single-action">
+                <Link className="buy-button" href={messageSuccessHref}>
+                  Open Conversation
+                </Link>
+              </div>
+            ) : (
+              <div className="offer-modal-actions">
+                <button
+                  type="button"
+                  className="buy-button"
+                  disabled={isSendingMessage}
+                  onClick={submitMessage}
+                >
+                  {isSendingMessage ? "Sending..." : "Send Message"}
+                </button>
+                <button type="button" onClick={closeMessageModal}>
+                  Cancel
+                </button>
+              </div>
+            )}
           </section>
         </div>
       ) : null}
@@ -1624,7 +1927,8 @@ const pageStyles = `
 
   .purchase-buttons button,
   .purchase-buttons a,
-  .offer-modal-actions button {
+  .offer-modal-actions button,
+  .offer-modal-actions a {
     height: 44px;
     border: 1px solid rgba(231,222,208,0.28);
     border-radius: 10px;
@@ -1722,6 +2026,63 @@ const pageStyles = `
     gap: 10px;
   }
 
+  .message-modal-preview {
+    margin-top: 16px;
+    border: 1px solid #202026;
+    border-radius: 12px;
+    background: rgba(8,8,10,0.76);
+    padding: 12px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .message-modal-preview .card-stage {
+    width: 80px;
+    height: 112px;
+    border-radius: 10px;
+  }
+
+  .message-modal-preview .large-card {
+    width: 58px;
+    height: 88px;
+    border-radius: 8px;
+    padding: 4px;
+  }
+
+  .message-modal-preview .real-card-image {
+    max-width: calc(100% - 10px);
+    max-height: calc(100% - 10px);
+    border-radius: 7px;
+  }
+
+  .message-modal-preview span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .message-modal-preview strong {
+    display: block;
+    margin-top: 5px;
+    color: #fff;
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 900;
+  }
+
+  .message-modal-preview p {
+    margin: 4px 0 0;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 800;
+  }
+
   .offer-field {
     margin-top: 14px;
     display: grid;
@@ -1789,6 +2150,10 @@ const pageStyles = `
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
+  }
+
+  .offer-modal-actions.single-action {
+    grid-template-columns: 1fr;
   }
 
   .offer-modal-actions .buy-button {

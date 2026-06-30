@@ -8,6 +8,7 @@ import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
 import {
   type ListingTag,
+  type MockConversation,
   type MockListing,
   type MockSeller,
   buildMockSellerListings,
@@ -18,6 +19,7 @@ type FilterMode = "All" | ListingTag;
 type Listing = MockListing & {
   imageUrl?: string | null;
   source?: "mock" | "supabase";
+  sellerId?: string | null;
 };
 
 type ListingImageRow = {
@@ -54,6 +56,7 @@ type ProfileRow = {
 
 const sellers = mockSellers;
 const buildSellerListings = buildMockSellerListings;
+const mockConversationStorageKey = "grail-mock-conversations";
 
 const filterModes: FilterMode[] = ["All", "Grail", "Hot", "Graded", "Raw"];
 
@@ -100,6 +103,106 @@ function getInitials(name: string) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || "GS";
+}
+
+function readLocalMockConversations() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const storedConversations = window.localStorage.getItem(
+      mockConversationStorageKey,
+    );
+
+    return storedConversations
+      ? (JSON.parse(storedConversations) as MockConversation[])
+      : [];
+  } catch (error) {
+    console.error("Mock conversation read error:", error);
+    return [];
+  }
+}
+
+function saveLocalMockConversation(conversation: MockConversation) {
+  const conversations = readLocalMockConversations();
+  window.localStorage.setItem(
+    mockConversationStorageKey,
+    JSON.stringify([conversation, ...conversations]),
+  );
+}
+
+function createLocalMockConversation(
+  listing: Listing,
+  message: string,
+): MockConversation {
+  const now = Date.now();
+
+  return {
+    id: `mock-conversation-${now}`,
+    participantName: listing.seller,
+    participantRole: listing.sellerLevel || "Seller",
+    person: listing.seller,
+    badge: listing.sellerLevel || "Seller",
+    cardId: listing.id,
+    cardTitle: listing.title,
+    cardRoute: listing.href,
+    cardHref: listing.href,
+    price: listing.askingPrice || listing.price || 0,
+    snippet: message,
+    lastSnippet: message,
+    timestamp: "now",
+    sortRank: now,
+    unread: false,
+    isActive: true,
+    accent: listing.accent,
+    messages: [
+      {
+        id: `mock-message-${now}`,
+        sender: "buyer",
+        body: message,
+        time: "Now",
+      },
+    ],
+  };
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message || "");
+  }
+
+  return String(error);
+}
+
+function logMessageSupabaseError({
+  step,
+  listingId,
+  sellerId,
+  buyerId,
+  payload,
+  error,
+}: {
+  step: string;
+  listingId?: string | null;
+  sellerId?: string | null;
+  buyerId?: string | null;
+  payload?: unknown;
+  error: unknown;
+}) {
+  console.error("GRAIL message Supabase error:", {
+    step,
+    listingId,
+    sellerId,
+    buyerId,
+    payload,
+    error,
+    message: getErrorMessage(error),
+  });
 }
 
 function getImageUrl(listing: SupabaseListingRow) {
@@ -207,6 +310,7 @@ function mapSupabaseListing(
     subtitle: `${category}: ${condition}`,
     meta: `${category}: ${condition}`,
     sellerSlug: seller.slug,
+    sellerId: listing.seller_id,
     sellerName: seller.name,
     seller: seller.name,
     sellerLevel: seller.level,
@@ -362,6 +466,11 @@ export default function SellerCollectionPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isFollowing, setIsFollowing] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [messageListing, setMessageListing] = useState<Listing | null>(null);
+  const [messageBody, setMessageBody] = useState("");
+  const [messageError, setMessageError] = useState("");
+  const [messageSuccessHref, setMessageSuccessHref] = useState("");
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
   const seller = mockSeller ?? realSeller;
   const allListings = useMemo(() => {
     if (mockSeller) {
@@ -560,6 +669,126 @@ export default function SellerCollectionPage() {
   const grailCount = allListings.filter((listing) => listing.tag === "Grail").length;
   const hotCount = allListings.filter((listing) => listing.tag === "Hot").length;
 
+  function openMessageModal(listing: Listing) {
+    setMessageListing(listing);
+    setMessageBody("");
+    setMessageError("");
+    setMessageSuccessHref("");
+  }
+
+  function closeMessageModal() {
+    setMessageListing(null);
+    setMessageBody("");
+    setMessageError("");
+    setMessageSuccessHref("");
+    setIsSendingMessage(false);
+  }
+
+  async function submitMessage() {
+    if (!messageListing) {
+      return;
+    }
+
+    const body = messageBody.trim();
+
+    if (!body) {
+      setMessageError("Write a message before sending.");
+      return;
+    }
+
+    if (messageListing.source !== "supabase") {
+      const conversation = createLocalMockConversation(messageListing, body);
+      saveLocalMockConversation(conversation);
+      setMessageError("");
+      setMessageSuccessHref(`/messages?mockConversation=${conversation.id}`);
+      return;
+    }
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      logMessageSupabaseError({
+        step: "collection message auth session",
+        listingId: messageListing.id,
+        sellerId: messageListing.sellerId,
+        buyerId: null,
+        error: sessionError,
+      });
+      setMessageError("Message could not be sent. Check console for Supabase error.");
+      return;
+    }
+
+    if (!session?.user.id) {
+      setMessageError("Sign in to message seller.");
+      return;
+    }
+
+    if (messageListing.sellerId === session.user.id) {
+      setMessageError("You cannot message yourself about your own listing.");
+      return;
+    }
+
+    if (!messageListing.sellerId) {
+      setMessageError("Message could not be sent. Check console for Supabase error.");
+      console.error("Collection message setup error:", {
+        step: "collection message missing seller id",
+        reason: "Missing seller_id on listing.",
+        listingId: messageListing.id,
+        sellerId: messageListing.sellerId,
+        buyerId: session.user.id,
+      });
+      return;
+    }
+
+    setIsSendingMessage(true);
+    setMessageError("");
+
+    try {
+      const messagePayload = {
+        sender_id: session.user.id,
+        receiver_id: messageListing.sellerId,
+        listing_id: messageListing.id,
+        body,
+      };
+      const { error: messageInsertError } = await supabase
+        .from("messages")
+        .insert(messagePayload);
+
+      if (messageInsertError) {
+        logMessageSupabaseError({
+          step: "collection message insert",
+          listingId: messageListing.id,
+          sellerId: messageListing.sellerId,
+          buyerId: session.user.id,
+          payload: messagePayload,
+          error: messageInsertError,
+        });
+        throw messageInsertError;
+      }
+
+      setMessageSuccessHref(
+        `/messages?listing=${encodeURIComponent(
+          messageListing.id,
+        )}&seller=${encodeURIComponent(messageListing.sellerId)}`,
+      );
+    } catch (error) {
+      logMessageSupabaseError({
+        step: "collection message flow catch",
+        listingId: messageListing.id,
+        sellerId: messageListing.sellerId,
+        buyerId: session.user.id,
+        error,
+      });
+      setMessageError("Message could not be sent. Check console for Supabase error.");
+      setMessageSuccessHref("");
+    } finally {
+      setIsSendingMessage(false);
+    }
+  }
+
   return (
     <main className="collection-page">
       <style>{pageStyles}</style>
@@ -698,6 +927,7 @@ export default function SellerCollectionPage() {
                             type="button"
                             aria-label={`Message ${seller.name}`}
                             title="Message"
+                            onClick={() => openMessageModal(listing)}
                           >
                             <span className="message-icon" aria-hidden="true" />
                           </button>
@@ -711,6 +941,7 @@ export default function SellerCollectionPage() {
                             type="button"
                             aria-label={`Message ${seller.name}`}
                             title="Message"
+                            onClick={() => openMessageModal(listing)}
                           >
                             <span className="message-icon" aria-hidden="true" />
                           </button>
@@ -795,6 +1026,84 @@ export default function SellerCollectionPage() {
           </aside>
         </section>
       </div>
+
+      {messageListing ? (
+        <div className="message-modal-backdrop" role="presentation">
+          <section
+            className="message-modal panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Message seller"
+          >
+            <div className="message-modal-header">
+              <div>
+                <span>Message Seller</span>
+                <h2>{messageListing.title}</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close message modal"
+                onClick={closeMessageModal}
+              >
+                x
+              </button>
+            </div>
+
+            <div className="message-modal-preview">
+              <CardArtwork listing={messageListing} />
+              <div>
+                <span>Seller</span>
+                <strong>{messageListing.seller}</strong>
+                <p>
+                  {messageListing.category}: {messageListing.condition}
+                </p>
+              </div>
+            </div>
+
+            {!messageSuccessHref ? (
+              <label className="message-field">
+                <span>Write a message...</span>
+                <textarea
+                  value={messageBody}
+                  onChange={(event) => setMessageBody(event.target.value)}
+                  placeholder="Ask about condition, shipping, or availability."
+                />
+              </label>
+            ) : null}
+
+            {messageError ? <p className="message-error">{messageError}</p> : null}
+
+            {messageSuccessHref ? (
+              <div className="message-confirmation">
+                <strong>Message sent.</strong>
+                <p>Your conversation is ready.</p>
+              </div>
+            ) : null}
+
+            {messageSuccessHref ? (
+              <div className="message-modal-actions single-action">
+                <Link className="primary" href={messageSuccessHref}>
+                  Open Conversation
+                </Link>
+              </div>
+            ) : (
+              <div className="message-modal-actions">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={isSendingMessage}
+                  onClick={submitMessage}
+                >
+                  {isSendingMessage ? "Sending..." : "Send Message"}
+                </button>
+                <button type="button" onClick={closeMessageModal}>
+                  Cancel
+                </button>
+              </div>
+            )}
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -933,12 +1242,14 @@ const pageStyles = `
 
   .hero-actions button,
   .collection-toolbar button,
-  .listing-actions button {
+  .listing-actions button,
+  .listing-actions a {
     border: 1px solid rgba(231,222,208,0.28);
     background: rgba(231,222,208,0.055);
     color: #fff;
     cursor: pointer;
     font-weight: 900;
+    text-decoration: none;
   }
 
   .hero-actions button {
@@ -1025,6 +1336,186 @@ const pageStyles = `
   .collection-toolbar,
   .sidebar-panel {
     padding: 14px;
+  }
+
+  .message-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0,0,0,0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 22px;
+    backdrop-filter: blur(12px);
+  }
+
+  .message-modal {
+    width: min(520px, 100%);
+    padding: 18px;
+    border-radius: 14px;
+    box-sizing: border-box;
+  }
+
+  .message-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+  }
+
+  .message-modal-header span,
+  .message-modal-preview span,
+  .message-field span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .message-modal-header h2 {
+    margin: 6px 0 0;
+    color: #fff;
+    font-size: 22px;
+    line-height: 27px;
+    font-weight: 900;
+  }
+
+  .message-modal-header button {
+    width: 34px;
+    height: 34px;
+    border: 1px solid rgba(231,222,208,0.24);
+    border-radius: 999px;
+    background: rgba(8,8,10,0.82);
+    color: #E7DED0;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 900;
+  }
+
+  .message-modal-preview {
+    margin-top: 16px;
+    border: 1px solid #202026;
+    border-radius: 12px;
+    background: rgba(8,8,10,0.76);
+    padding: 12px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .message-modal-preview .art-shell {
+    width: 74px;
+    height: 96px;
+  }
+
+  .message-modal-preview .mock-card {
+    width: 52px;
+    height: 74px;
+    border-radius: 8px;
+    padding: 4px;
+  }
+
+  .message-modal-preview .uploaded-card-image {
+    max-width: 58px;
+    max-height: 78px;
+  }
+
+  .message-modal-preview strong {
+    display: block;
+    margin-top: 5px;
+    color: #fff;
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 900;
+  }
+
+  .message-modal-preview p,
+  .message-error,
+  .message-confirmation p {
+    margin: 4px 0 0;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 800;
+  }
+
+  .message-field {
+    margin-top: 14px;
+    display: grid;
+    gap: 7px;
+  }
+
+  .message-field textarea {
+    width: 100%;
+    min-height: 96px;
+    border: 1px solid #24242a;
+    border-radius: 10px;
+    background: #08080a;
+    color: #fff;
+    padding: 12px;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    outline: none;
+    resize: vertical;
+  }
+
+  .message-error {
+    margin-top: 10px;
+    color: #fb7185;
+  }
+
+  .message-confirmation {
+    margin-top: 14px;
+    border: 1px solid rgba(52,211,153,0.24);
+    border-radius: 10px;
+    background: rgba(52,211,153,0.07);
+    padding: 12px;
+  }
+
+  .message-confirmation strong {
+    color: #86efac;
+    font-size: 13px;
+    line-height: 17px;
+    font-weight: 900;
+  }
+
+  .message-modal-actions {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .message-modal-actions.single-action {
+    grid-template-columns: 1fr;
+  }
+
+  .message-modal-actions button,
+  .message-modal-actions a {
+    min-height: 40px;
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    color: #fff;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+  }
+
+  .message-modal-actions .primary {
+    background: #E7DED0;
+    color: #111;
   }
 
   .collection-header h2,
@@ -1388,7 +1879,8 @@ const pageStyles = `
     flex: 0 0 auto;
   }
 
-  .action-circles button {
+  .action-circles button,
+  .action-circles a {
     width: 38px;
     height: 38px;
     position: relative;
@@ -1409,7 +1901,8 @@ const pageStyles = `
       0 12px 24px rgba(0,0,0,0.3);
   }
 
-  .action-circles button:hover {
+  .action-circles button:hover,
+  .action-circles a:hover {
     border-color: rgba(231,222,208,0.68);
     box-shadow: 0 0 22px rgba(201,205,211,0.2);
     transform: translateY(-1px);

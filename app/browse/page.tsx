@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
 import {
+  type MockConversation,
   type MockListing,
   getListingTag,
   mockFeaturedSellers as featuredSellers,
@@ -71,6 +72,7 @@ const fallbackListings: BrowseListing[] = mockListings.map((listing) => ({
   source: "mock",
 }));
 const mockOfferStorageKey = "grail-mock-offers";
+const mockConversationStorageKey = "grail-mock-conversations";
 
 const realListingAccents = [
   "#8f1d2c",
@@ -188,6 +190,106 @@ function readLocalMockOffers() {
 function saveLocalMockOffer(offer: LocalMockOffer) {
   const offers = readLocalMockOffers();
   window.localStorage.setItem(mockOfferStorageKey, JSON.stringify([offer, ...offers]));
+}
+
+function readLocalMockConversations() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const storedConversations = window.localStorage.getItem(
+      mockConversationStorageKey,
+    );
+
+    return storedConversations
+      ? (JSON.parse(storedConversations) as MockConversation[])
+      : [];
+  } catch (error) {
+    console.error("Mock conversation read error:", error);
+    return [];
+  }
+}
+
+function saveLocalMockConversation(conversation: MockConversation) {
+  const conversations = readLocalMockConversations();
+  window.localStorage.setItem(
+    mockConversationStorageKey,
+    JSON.stringify([conversation, ...conversations]),
+  );
+}
+
+function createLocalMockConversation(
+  listing: BrowseListing,
+  message: string,
+): MockConversation {
+  const now = Date.now();
+
+  return {
+    id: `mock-conversation-${now}`,
+    participantName: listing.seller,
+    participantRole: listing.sellerLevel || "Seller",
+    person: listing.seller,
+    badge: listing.sellerLevel || "Seller",
+    cardId: listing.id,
+    cardTitle: listing.title,
+    cardRoute: listing.href,
+    cardHref: listing.href,
+    price: listing.askingPrice || listing.price || 0,
+    snippet: message,
+    lastSnippet: message,
+    timestamp: "now",
+    sortRank: now,
+    unread: false,
+    isActive: true,
+    accent: listing.accent,
+    messages: [
+      {
+        id: `mock-message-${now}`,
+        sender: "buyer",
+        body: message,
+        time: "Now",
+      },
+    ],
+  };
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message || "");
+  }
+
+  return String(error);
+}
+
+function logMessageSupabaseError({
+  step,
+  listingId,
+  sellerId,
+  buyerId,
+  payload,
+  error,
+}: {
+  step: string;
+  listingId?: string | null;
+  sellerId?: string | null;
+  buyerId?: string | null;
+  payload?: unknown;
+  error: unknown;
+}) {
+  console.error("GRAIL message Supabase error:", {
+    step,
+    listingId,
+    sellerId,
+    buyerId,
+    payload,
+    error,
+    message: getErrorMessage(error),
+  });
 }
 
 function formatListedDate(value: string | null) {
@@ -569,6 +671,11 @@ export default function BrowsePage() {
   const [offerError, setOfferError] = useState("");
   const [sentOfferAmount, setSentOfferAmount] = useState<number | null>(null);
   const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
+  const [messageListing, setMessageListing] = useState<BrowseListing | null>(null);
+  const [messageBody, setMessageBody] = useState("");
+  const [messageError, setMessageError] = useState("");
+  const [messageSuccessHref, setMessageSuccessHref] = useState("");
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
   const searchQuery = hasLocalSearch ? localSearchQuery : urlSearchQuery;
 
   useEffect(() => {
@@ -782,6 +889,126 @@ export default function BrowsePage() {
     setOfferMessage("");
     setOfferError("");
     setSentOfferAmount(null);
+  }
+
+  function openMessageModal(listing: BrowseListing) {
+    setMessageListing(listing);
+    setMessageBody("");
+    setMessageError("");
+    setMessageSuccessHref("");
+  }
+
+  function closeMessageModal() {
+    setMessageListing(null);
+    setMessageBody("");
+    setMessageError("");
+    setMessageSuccessHref("");
+    setIsSendingMessage(false);
+  }
+
+  async function submitMessage() {
+    if (!messageListing) {
+      return;
+    }
+
+    const body = messageBody.trim();
+
+    if (!body) {
+      setMessageError("Write a message before sending.");
+      return;
+    }
+
+    if (messageListing.source === "mock") {
+      const conversation = createLocalMockConversation(messageListing, body);
+      saveLocalMockConversation(conversation);
+      setMessageError("");
+      setMessageSuccessHref(`/messages?mockConversation=${conversation.id}`);
+      return;
+    }
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      logMessageSupabaseError({
+        step: "browse message auth session",
+        listingId: messageListing.id,
+        sellerId: messageListing.sellerId,
+        buyerId: null,
+        error: sessionError,
+      });
+      setMessageError("Message could not be sent. Check console for Supabase error.");
+      return;
+    }
+
+    if (!session?.user.id) {
+      setMessageError("Sign in to message seller.");
+      return;
+    }
+
+    if (messageListing.sellerId === session.user.id) {
+      setMessageError("You cannot message yourself about your own listing.");
+      return;
+    }
+
+    if (!messageListing.sellerId) {
+      setMessageError("Message could not be sent. Check console for Supabase error.");
+      console.error("Browse message setup error:", {
+        step: "browse message missing seller id",
+        reason: "Missing seller_id on listing.",
+        listingId: messageListing.id,
+        sellerId: messageListing.sellerId,
+        buyerId: session.user.id,
+      });
+      return;
+    }
+
+    setIsSendingMessage(true);
+    setMessageError("");
+
+    try {
+      const messagePayload = {
+        sender_id: session.user.id,
+        receiver_id: messageListing.sellerId,
+        listing_id: messageListing.id,
+        body,
+      };
+      const { error: messageInsertError } = await supabase
+        .from("messages")
+        .insert(messagePayload);
+
+      if (messageInsertError) {
+        logMessageSupabaseError({
+          step: "browse message insert",
+          listingId: messageListing.id,
+          sellerId: messageListing.sellerId,
+          buyerId: session.user.id,
+          payload: messagePayload,
+          error: messageInsertError,
+        });
+        throw messageInsertError;
+      }
+
+      setMessageSuccessHref(
+        `/messages?listing=${encodeURIComponent(
+          messageListing.id,
+        )}&seller=${encodeURIComponent(messageListing.sellerId)}`,
+      );
+    } catch (error) {
+      logMessageSupabaseError({
+        step: "browse message flow catch",
+        listingId: messageListing.id,
+        sellerId: messageListing.sellerId,
+        buyerId: session.user.id,
+        error,
+      });
+      setMessageError("Message could not be sent. Check console for Supabase error.");
+      setMessageSuccessHref("");
+    } finally {
+      setIsSendingMessage(false);
+    }
   }
 
   async function submitOffer() {
@@ -1132,6 +1359,44 @@ export default function BrowsePage() {
             gap: 7px;
           }
 
+          .message-modal-preview {
+            margin-top: 16px;
+            border: 1px solid #202026;
+            border-radius: 12px;
+            background: rgba(8,8,10,0.76);
+            padding: 12px;
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 12px;
+            align-items: center;
+          }
+
+          .message-modal-preview span {
+            color: #C9CDD3;
+            font-size: 11px;
+            line-height: 14px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+          }
+
+          .message-modal-preview strong {
+            display: block;
+            margin-top: 5px;
+            color: #fff;
+            font-size: 15px;
+            line-height: 20px;
+            font-weight: 900;
+          }
+
+          .message-modal-preview p {
+            margin: 4px 0 0;
+            color: #a1a1aa;
+            font-size: 12px;
+            line-height: 16px;
+            font-weight: 800;
+          }
+
           .offer-field input,
           .offer-field textarea {
             width: 100%;
@@ -1188,7 +1453,8 @@ export default function BrowsePage() {
             gap: 10px;
           }
 
-          .offer-modal-actions button {
+          .offer-modal-actions button,
+          .offer-modal-actions a {
             min-height: 40px;
             border: 1px solid rgba(231,222,208,0.28);
             border-radius: 10px;
@@ -1198,11 +1464,19 @@ export default function BrowsePage() {
             font-size: 12px;
             font-weight: 900;
             cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
           }
 
           .offer-modal-actions .submit-offer {
             background: #E7DED0;
             color: #111;
+          }
+
+          .offer-modal-actions.single-action {
+            grid-template-columns: 1fr;
           }
 
           .filters {
@@ -2362,17 +2636,18 @@ export default function BrowsePage() {
                                   aria-hidden="true"
                                 />
                               </Link>
-                              <Link
-                                href="/messages"
+                              <button
+                                type="button"
                                 className="action-button"
                                 aria-label={`Message ${listing.seller}`}
                                 title="Message"
+                                onClick={() => openMessageModal(listing)}
                               >
                                 <span
                                   className="action-icon message-icon"
                                   aria-hidden="true"
                                 />
-                              </Link>
+                              </button>
                               <button
                                 type="button"
                                 className="action-button"
@@ -2387,17 +2662,18 @@ export default function BrowsePage() {
                             </div>
                           ) : (
                             <div className="action-circles collection-actions">
-                              <Link
-                                href="/messages"
+                              <button
+                                type="button"
                                 className="action-button"
                                 aria-label={`Message ${listing.seller}`}
                                 title="Message"
+                                onClick={() => openMessageModal(listing)}
                               >
                                 <span
                                   className="action-icon message-icon"
                                   aria-hidden="true"
                                 />
-                              </Link>
+                              </button>
                             </div>
                           )}
 
@@ -2574,6 +2850,88 @@ export default function BrowsePage() {
                 </button>
               </div>
             ) : null}
+          </section>
+        </div>
+      ) : null}
+
+      {messageListing ? (
+        <div className="offer-modal-backdrop" role="presentation">
+          <section
+            className="offer-modal panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Message seller"
+          >
+            <div className="offer-modal-header">
+              <div>
+                <span>Message Seller</span>
+                <h2>{messageListing.title}</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close message modal"
+                onClick={closeMessageModal}
+              >
+                x
+              </button>
+            </div>
+
+            <div className="message-modal-preview">
+              <CardArtwork
+                accent={messageListing.accent}
+                category={messageListing.category}
+                condition={messageListing.condition}
+                imageUrl={messageListing.imageUrl}
+                title={messageListing.title}
+              />
+              <div>
+                <span>Seller</span>
+                <strong>{messageListing.seller}</strong>
+                <p>{messageListing.meta}</p>
+              </div>
+            </div>
+
+            {!messageSuccessHref ? (
+              <label className="offer-field">
+                <span>Write a message...</span>
+                <textarea
+                  value={messageBody}
+                  onChange={(event) => setMessageBody(event.target.value)}
+                  placeholder="Ask about condition, shipping, or availability."
+                />
+              </label>
+            ) : null}
+
+            {messageError ? <p className="offer-error">{messageError}</p> : null}
+
+            {messageSuccessHref ? (
+              <div className="offer-confirmation">
+                <strong>Message sent.</strong>
+                <p>Your conversation is ready.</p>
+              </div>
+            ) : null}
+
+            {messageSuccessHref ? (
+              <div className="offer-modal-actions single-action">
+                <Link className="submit-offer" href={messageSuccessHref}>
+                  Open Conversation
+                </Link>
+              </div>
+            ) : (
+              <div className="offer-modal-actions">
+                <button
+                  type="button"
+                  className="submit-offer"
+                  disabled={isSendingMessage}
+                  onClick={submitMessage}
+                >
+                  {isSendingMessage ? "Sending..." : "Send Message"}
+                </button>
+                <button type="button" onClick={closeMessageModal}>
+                  Cancel
+                </button>
+              </div>
+            )}
           </section>
         </div>
       ) : null}
