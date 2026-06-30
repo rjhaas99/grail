@@ -39,11 +39,11 @@ type SupabaseOfferRow = {
   listing_id: string | null;
   buyer_id: string | null;
   seller_id: string | null;
+  offer_amount: number | null;
   amount: number | null;
   message: string | null;
   status: string | null;
   created_at: string | null;
-  updated_at: string | null;
 };
 
 type ListingRow = {
@@ -183,7 +183,7 @@ export default function OffersPage() {
       try {
         const { data, error } = await supabase
           .from("offers")
-          .select("id, listing_id, buyer_id, seller_id, amount, message, status, created_at, updated_at")
+          .select("id, listing_id, buyer_id, seller_id, offer_amount, amount, message, status, created_at")
           .or(`buyer_id.eq.${session.user.id},seller_id.eq.${session.user.id}`)
           .order("created_at", { ascending: false });
 
@@ -257,6 +257,7 @@ export default function OffersPage() {
             : undefined;
           const cardTitle = listing?.title || "GRAIL Listing";
           const cardRoute = `/cards/${offer.listing_id || ""}`;
+          const displayAmount = Number(offer.offer_amount ?? offer.amount ?? 0);
 
           return {
             id: offer.id,
@@ -281,8 +282,8 @@ export default function OffersPage() {
               offer.buyer_id ? profilesById.get(offer.buyer_id) : undefined,
               "GRAIL Buyer",
             ),
-            offerAmount: Number(offer.amount || 0),
-            amount: Number(offer.amount || 0),
+            offerAmount: displayAmount,
+            amount: displayAmount,
             askingPrice: Number(listing?.price || 0),
             status: formatOfferStatus(offer.status),
             timeLeft: getOfferDate(offer.created_at),
