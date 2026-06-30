@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
@@ -650,7 +650,59 @@ function MarketIndexChart() {
   );
 }
 
+function BrowseFallback() {
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        background:
+          "radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%), linear-gradient(180deg, #000 0%, #030304 56%, #000 100%)",
+        color: "#fafafa",
+        fontFamily: "Arial, Helvetica, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          width: "min(1240px, calc(100vw - 32px))",
+          margin: "0 auto",
+          padding: "8px 0 34px",
+        }}
+      >
+        <Header />
+        <section
+          style={{
+            marginTop: 18,
+            border: "1px solid #1d1d22",
+            borderRadius: 12,
+            background: "rgba(5,5,6,0.92)",
+            padding: 18,
+          }}
+        >
+          <p
+            style={{
+              margin: 0,
+              color: "#C9CDD3",
+              fontSize: 13,
+              fontWeight: 900,
+            }}
+          >
+            Loading cards...
+          </p>
+        </section>
+      </div>
+    </main>
+  );
+}
+
 export default function BrowsePage() {
+  return (
+    <Suspense fallback={<BrowseFallback />}>
+      <BrowseContent />
+    </Suspense>
+  );
+}
+
+function BrowseContent() {
   const searchParams = useSearchParams();
   const urlSearchQuery = searchParams.get("search") || "";
   const [listings, setListings] = useState<BrowseListing[]>([]);

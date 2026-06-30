@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
@@ -166,7 +166,42 @@ function CardArtwork({ accent }: { accent: string }) {
   );
 }
 
+function MessagesFallback() {
+  return (
+    <main className="messages-page">
+      <style>{pageStyles}</style>
+      <div className="messages-shell">
+        <Header />
+        <section className="page-heading">
+          <span>Messages</span>
+          <h1>Messages</h1>
+          <p>Loading messages...</p>
+        </section>
+        <section className="messages-layout">
+          <div className="conversation-list panel">
+            <p className="empty-copy">Loading messages...</p>
+          </div>
+          <div className="thread-panel panel">
+            <div className="empty-thread">
+              <h2>Loading messages...</h2>
+              <p>Preparing your conversations.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
 export default function MessagesPage() {
+  return (
+    <Suspense fallback={<MessagesFallback />}>
+      <MessagesContent />
+    </Suspense>
+  );
+}
+
+function MessagesContent() {
   const searchParams = useSearchParams();
   const requestedListingId = searchParams.get("listing");
   const requestedSellerId = searchParams.get("seller");
