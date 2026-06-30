@@ -21,6 +21,7 @@ type SupabaseCheckoutListing = {
   grade: string | null;
   condition: string | null;
   price: number | null;
+  status: string | null;
 };
 
 type ProfileRow = {
@@ -40,6 +41,8 @@ type CheckoutCard = {
   price: number;
   marketValue: number;
   accent: string;
+  status: string | null;
+  source: "mock" | "supabase" | "fallback";
 };
 
 function formatCurrency(value: number) {
@@ -133,6 +136,8 @@ export default function CheckoutPage() {
         price: mockCard.price,
         marketValue: mockCard.marketValue,
         accent: mockCard.accent,
+        status: "active",
+        source: "mock",
       }
     : null;
   const fallbackCard: CheckoutCard = {
@@ -146,10 +151,28 @@ export default function CheckoutPage() {
     price: 0,
     marketValue: 0,
     accent: "#334155",
+    status: null,
+    source: "fallback",
   };
   const card = mockCheckoutCard ?? realCard ?? fallbackCard;
-  const isLiveFallback = !mockCard;
   const [isPlaced, setIsPlaced] = useState(false);
+  const [isStripeSuccess] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return new URLSearchParams(window.location.search).get("success") === "true";
+  });
+  const [isStripeCanceled] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return new URLSearchParams(window.location.search).get("canceled") === "true";
+  });
+  const [isStartingStripeCheckout, setIsStartingStripeCheckout] = useState(false);
+  const [stripeError, setStripeError] = useState("");
+  const [stripeNotice, setStripeNotice] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -203,7 +226,8 @@ export default function CheckoutPage() {
               grader,
               grade,
               condition,
-              price
+              price,
+              status
             `,
           )
           .eq("id", id)
@@ -246,6 +270,8 @@ export default function CheckoutPage() {
             price: Number(listing.price || 0),
             marketValue: 0,
             accent: "#334155",
+            status: listing.status,
+            source: "supabase",
           });
         }
       } catch (error) {
@@ -260,11 +286,81 @@ export default function CheckoutPage() {
     };
   }, [id, mockCard]);
 
+  async function startStripeCheckout() {
+    setStripeError("");
+    setStripeNotice("");
+
+    if (card.source !== "supabase") {
+      setStripeError("Stripe test checkout is available for live listings only.");
+      return;
+    }
+
+    if (card.status !== "active") {
+      setStripeError("This card is open to offers, not Buy Now.");
+      return;
+    }
+
+    if (!card.price || card.price <= 0) {
+      setStripeError("This listing does not have a valid Buy Now price.");
+      return;
+    }
+
+    setIsStartingStripeCheckout(true);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
+        body: JSON.stringify({ listingId: card.id }),
+      });
+      const payload = (await response.json()) as {
+        url?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.url) {
+        throw new Error(payload.error || "Stripe checkout could not be started.");
+      }
+
+      window.location.href = payload.url;
+    } catch (error) {
+      console.error("Start Stripe checkout error:", error);
+      setStripeError(
+        error instanceof Error
+          ? error.message
+          : "Stripe checkout could not be started.",
+      );
+      setStripeNotice("You can still use mock checkout for now.");
+    } finally {
+      setIsStartingStripeCheckout(false);
+    }
+  }
+
   const platformFee = Math.round(card.price * 0.035);
   const shipping = 14;
   const estimatedTax = Math.round(card.price * 0.07);
   const total = card.price + platformFee + shipping + estimatedTax;
   const isOwnerCheckout = Boolean(currentUserId) && card.sellerId === currentUserId;
+  const isCollectionCheckout = card.status === "collection";
+  const showStripeCheckoutButton =
+    card.source === "supabase" && card.status === "active" && card.price > 0;
+  const isStripePublicConfigured = Boolean(
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+  );
+  const canAttemptStripeCheckout =
+    showStripeCheckoutButton && isStripePublicConfigured;
+  const showMockCheckoutButton =
+    card.source !== "supabase" ||
+    Boolean(stripeError) ||
+    (showStripeCheckoutButton && !isStripePublicConfigured);
 
   if (isOwnerCheckout) {
     return (
@@ -317,7 +413,7 @@ export default function CheckoutPage() {
                   <SummaryRow label="Asking Price" value={formatCurrency(card.price)} />
                   <SummaryRow label="Market Value" value={formatCurrency(card.marketValue)} />
                 </div>
-                {isLiveFallback ? (
+                {card.source === "fallback" ? (
                   <p className="live-fallback-note">
                     Live listing checkout mock. Full checkout data will be
                     connected later.
@@ -346,7 +442,10 @@ export default function CheckoutPage() {
                 <span>Card ending in 4242</span>
                 <button type="button">Add payment method</button>
               </div>
-              <p>Mock checkout only - no payment will be processed.</p>
+              <p>
+                Stripe test checkout is available for active live listings. Mock
+                checkout remains available when Stripe is not configured.
+              </p>
             </section>
 
             <section className="panel protection-panel">
@@ -371,6 +470,42 @@ export default function CheckoutPage() {
               <strong>{formatCurrency(total)}</strong>
             </div>
 
+            {isStripeSuccess ? (
+              <div className="confirmation-box">
+                <strong>Payment successful in Stripe test mode.</strong>
+                <p>Order recording coming next.</p>
+                <Link href="/orders">View Orders</Link>
+                <Link href="/browse">Continue Browsing</Link>
+              </div>
+            ) : null}
+
+            {isStripeCanceled ? (
+              <div className="stripe-status-box">
+                <strong>Checkout canceled.</strong>
+                <p>You can try again when you are ready.</p>
+              </div>
+            ) : null}
+
+            {isCollectionCheckout ? (
+              <div className="stripe-status-box">
+                <strong>This card is open to offers, not Buy Now.</strong>
+                <p>Return to the card detail page to make an offer or message the seller.</p>
+                <Link href={`/cards/${card.id}`}>View Card</Link>
+              </div>
+            ) : null}
+
+            {!isStripePublicConfigured && showStripeCheckoutButton ? (
+              <div className="stripe-status-box">
+                <strong>Stripe test checkout is not configured yet.</strong>
+                <p>Add the Stripe environment variables to enable hosted checkout.</p>
+              </div>
+            ) : null}
+
+            {stripeNotice ? (
+              <p className="stripe-note">{stripeNotice}</p>
+            ) : null}
+            {stripeError ? <p className="stripe-error">{stripeError}</p> : null}
+
             {isPlaced ? (
               <div className="confirmation-box">
                 <strong>Order placed.</strong>
@@ -378,11 +513,30 @@ export default function CheckoutPage() {
                 <Link href="/orders">View Orders</Link>
                 <Link href="/browse">Continue Browsing</Link>
               </div>
-            ) : (
-              <button type="button" className="place-order" onClick={() => setIsPlaced(true)}>
-                Place Order
+            ) : null}
+
+            {!isStripeSuccess && !isCollectionCheckout && canAttemptStripeCheckout ? (
+              <button
+                type="button"
+                className="place-order"
+                disabled={isStartingStripeCheckout}
+                onClick={startStripeCheckout}
+              >
+                {isStartingStripeCheckout
+                  ? "Starting Checkout..."
+                  : "Continue to Secure Checkout"}
               </button>
-            )}
+            ) : null}
+
+            {!isStripeSuccess && !isCollectionCheckout && showMockCheckoutButton ? (
+              <button
+                type="button"
+                className="mock-order-button"
+                onClick={() => setIsPlaced(true)}
+              >
+                Place Mock Order
+              </button>
+            ) : null}
           </aside>
         </section>
       </div>
@@ -454,7 +608,9 @@ const pageStyles = `
   .text-link,
   .payment-row button,
   .place-order,
+  .mock-order-button,
   .confirmation-box a,
+  .stripe-status-box a,
   .owner-block-actions a {
     border: 1px solid rgba(231,222,208,0.28);
     border-radius: 10px;
@@ -653,6 +809,15 @@ const pageStyles = `
     color: #111;
   }
 
+  .place-order:disabled {
+    opacity: 0.62;
+    cursor: wait;
+  }
+
+  .mock-order-button {
+    min-height: 42px;
+  }
+
   .confirmation-box {
     border: 1px solid rgba(52,211,153,0.24);
     border-radius: 10px;
@@ -665,6 +830,42 @@ const pageStyles = `
   .confirmation-box strong {
     color: #86efac;
     font-size: 16px;
+    font-weight: 900;
+  }
+
+  .stripe-status-box {
+    border: 1px solid rgba(201,205,211,0.2);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.055);
+    padding: 12px;
+    display: grid;
+    gap: 9px;
+  }
+
+  .stripe-status-box strong {
+    color: #E7DED0;
+    font-size: 14px;
+    font-weight: 900;
+  }
+
+  .stripe-status-box p,
+  .stripe-note {
+    margin: 0;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 17px;
+    font-weight: 800;
+  }
+
+  .stripe-error {
+    margin: 0;
+    border: 1px solid rgba(248,113,113,0.22);
+    border-radius: 10px;
+    background: rgba(248,113,113,0.08);
+    color: #fecaca;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 17px;
     font-weight: 900;
   }
 
