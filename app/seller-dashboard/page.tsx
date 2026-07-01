@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
 import { mockSellerDashboardData } from "../lib/mockData";
@@ -35,6 +35,15 @@ type ProfileRow = {
   id: string;
   full_name: string | null;
   username: string | null;
+};
+type PayoutStatus = {
+  connected: boolean;
+  maskedAccountId?: string;
+  onboardingStatus?: "complete" | "pending" | "incomplete" | string;
+  detailsSubmitted?: boolean;
+  payoutsEnabled?: boolean;
+  requirementsCount?: number;
+  disabledReason?: string | null;
 };
 
 const listings = mockSellerDashboardData.activeListings;
@@ -89,6 +98,10 @@ function StatCard({ label, value }: { label: string; value: string }) {
 export default function SellerDashboardPage() {
   const [offers, setOffers] = useState(initialOffers);
   const [orders, setOrders] = useState<DashboardOrder[]>(initialOrders);
+  const [payoutStatus, setPayoutStatus] = useState<PayoutStatus | null>(null);
+  const [isLoadingPayoutStatus, setIsLoadingPayoutStatus] = useState(true);
+  const [isStartingPayouts, setIsStartingPayouts] = useState(false);
+  const [payoutMessage, setPayoutMessage] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -215,11 +228,159 @@ export default function SellerDashboardPage() {
     };
   }, []);
 
+  const getAccessToken = useCallback(async () => {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error) {
+      console.error("Seller dashboard payout auth error:", error);
+    }
+
+    return session?.access_token || "";
+  }, []);
+
+  const loadPayoutStatus = useCallback(async (statusMessage?: string) => {
+    setIsLoadingPayoutStatus(true);
+
+    if (statusMessage) {
+      setPayoutMessage(statusMessage);
+    }
+
+    try {
+      const accessToken = await getAccessToken();
+
+      if (!accessToken) {
+        setPayoutStatus({ connected: false });
+        setPayoutMessage("Sign in to set up seller payouts.");
+        return;
+      }
+
+      const response = await fetch("/api/stripe/connect/status", {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+        },
+      });
+      const payload = (await response.json()) as PayoutStatus & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Payout status could not be loaded.");
+      }
+
+      setPayoutStatus(payload);
+
+      if (payload.connected && payload.onboardingStatus === "complete") {
+        setPayoutMessage("Stripe Express payout setup is complete.");
+      } else if (payload.connected && payload.onboardingStatus === "pending") {
+        setPayoutMessage("Stripe is reviewing your payout setup.");
+      } else if (!statusMessage) {
+        setPayoutMessage("");
+      }
+    } catch (error) {
+      console.error("Seller dashboard payout status error:", error);
+      setPayoutMessage("Payout setup status could not be loaded.");
+      setPayoutStatus({ connected: false });
+    } finally {
+      setIsLoadingPayoutStatus(false);
+    }
+  }, [getAccessToken]);
+
+  useEffect(() => {
+    const stripeReturnState =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("stripe")
+        : null;
+    const message = stripeReturnState === "return"
+      ? "Checking Stripe payout setup..."
+      : stripeReturnState === "refresh"
+        ? "Stripe onboarding link expired. Continue setup when ready."
+        : undefined;
+
+    const timer = window.setTimeout(() => {
+      void loadPayoutStatus(message);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [loadPayoutStatus]);
+
+  async function startPayoutOnboarding() {
+    setIsStartingPayouts(true);
+    setPayoutMessage("");
+
+    try {
+      const accessToken = await getAccessToken();
+
+      if (!accessToken) {
+        setPayoutMessage("Sign in to set up seller payouts.");
+        return;
+      }
+
+      const response = await fetch("/api/stripe/connect/onboard", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+        },
+      });
+      const payload = (await response.json()) as {
+        url?: string;
+        error?: string;
+        detail?: string;
+      };
+
+      if (!response.ok || !payload.url) {
+        throw new Error(
+          payload.detail ||
+            payload.error ||
+            "Stripe onboarding could not be started.",
+        );
+      }
+
+      window.location.href = payload.url;
+    } catch (error) {
+      console.error("Seller dashboard payout onboarding error:", error);
+      setPayoutMessage(
+        error instanceof Error
+          ? error.message
+          : "Stripe payout onboarding could not be started.",
+      );
+    } finally {
+      setIsStartingPayouts(false);
+    }
+  }
+
   function updateOffer(id: string, status: OfferStatus) {
     setOffers((items) =>
       items.map((offer) => (offer.id === id ? { ...offer, status } : offer)),
     );
   }
+
+  const payoutConnected = Boolean(payoutStatus?.connected);
+  const payoutComplete = payoutStatus?.onboardingStatus === "complete";
+  const payoutPending = payoutStatus?.onboardingStatus === "pending";
+  const payoutIncomplete = payoutConnected && !payoutComplete && !payoutPending;
+  const payoutTitle = isLoadingPayoutStatus
+    ? "Payout Setup"
+    : !payoutConnected
+      ? "Payout Setup"
+      : payoutComplete
+        ? "Payouts Enabled"
+        : payoutPending
+          ? "Payout Verification Pending"
+          : "Payout Setup Incomplete";
+  const payoutCopy = isLoadingPayoutStatus
+    ? "Loading Stripe Express payout status..."
+    : !payoutConnected
+      ? "Connect Stripe Express to receive seller payouts after orders are fulfilled."
+      : payoutComplete
+        ? "Stripe Express account connected."
+        : payoutPending
+          ? "Stripe is reviewing your payout setup."
+          : "Finish Stripe Express onboarding to enable seller payouts.";
+  const shouldShowPayoutButton = !isLoadingPayoutStatus && (!payoutConnected || payoutIncomplete);
+  const payoutButtonLabel = payoutConnected ? "Continue Payout Setup" : "Set Up Payouts";
 
   return (
     <main className="dashboard-page">
@@ -335,6 +496,43 @@ export default function SellerDashboardPage() {
           </div>
 
           <aside className="sidebar">
+            <section className="panel sidebar-panel payout-panel">
+              <h2>{payoutTitle}</h2>
+              <p>{payoutCopy}</p>
+              {payoutStatus?.maskedAccountId ? (
+                <p className="stripe-account-id">
+                  Stripe account: <strong>{payoutStatus.maskedAccountId}</strong>
+                </p>
+              ) : null}
+              {typeof payoutStatus?.requirementsCount === "number" &&
+              payoutStatus.requirementsCount > 0 ? (
+                <p className="payout-warning">
+                  {payoutStatus.requirementsCount} requirement
+                  {payoutStatus.requirementsCount === 1 ? "" : "s"} due.
+                </p>
+              ) : null}
+              {payoutStatus?.disabledReason ? (
+                <p className="payout-warning">{payoutStatus.disabledReason}</p>
+              ) : null}
+              {payoutComplete ? (
+                <div className="payout-badges">
+                  <span>Details submitted</span>
+                  <span>Payouts enabled</span>
+                </div>
+              ) : null}
+              {shouldShowPayoutButton ? (
+                <button
+                  type="button"
+                  className="payout-button"
+                  disabled={isStartingPayouts}
+                  onClick={startPayoutOnboarding}
+                >
+                  {isStartingPayouts ? "Opening Stripe..." : payoutButtonLabel}
+                </button>
+              ) : null}
+              {payoutMessage ? <p className="payout-message">{payoutMessage}</p> : null}
+            </section>
+
             <section className="panel sidebar-panel">
               <h2>Seller Rewards</h2>
               <p>Current level: {mockSellerDashboardData.rewards.currentLevel}</p>
@@ -443,7 +641,8 @@ const pageStyles = `
   .section-heading a,
   .row-actions a,
   .row-actions button,
-  .quick-actions a {
+  .quick-actions a,
+  .payout-button {
     border: 1px solid rgba(231,222,208,0.28);
     border-radius: 10px;
     background: rgba(231,222,208,0.055);
@@ -463,10 +662,16 @@ const pageStyles = `
   .section-heading a:hover,
   .row-actions a:hover,
   .row-actions button:hover,
-  .quick-actions a:hover {
+  .quick-actions a:hover,
+  .payout-button:hover:not(:disabled) {
     border-color: rgba(231,222,208,0.62);
     background: rgba(231,222,208,0.11);
     box-shadow: 0 0 18px rgba(201,205,211,0.13);
+  }
+
+  .payout-button:disabled {
+    cursor: wait;
+    opacity: 0.62;
   }
 
   .stats-grid {
@@ -652,6 +857,48 @@ const pageStyles = `
   .sidebar-panel {
     display: grid;
     gap: 10px;
+  }
+
+  .stripe-account-id {
+    border: 1px solid rgba(201,205,211,0.16);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.045);
+    padding: 10px;
+  }
+
+  .stripe-account-id strong {
+    color: #fff;
+  }
+
+  .payout-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .payout-badges span {
+    border: 1px solid rgba(52,211,153,0.24);
+    border-radius: 999px;
+    background: rgba(52,211,153,0.08);
+    color: #86efac;
+    padding: 5px 9px;
+    font-size: 10px;
+    line-height: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .payout-warning {
+    border: 1px solid rgba(251,113,133,0.22);
+    border-radius: 10px;
+    background: rgba(251,113,133,0.07);
+    color: #fda4af !important;
+    padding: 9px 10px;
+  }
+
+  .payout-message {
+    color: #C9CDD3 !important;
+    font-size: 12px !important;
   }
 
   .sidebar-panel ul {
