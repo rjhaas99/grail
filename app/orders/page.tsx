@@ -15,11 +15,21 @@ type SupabaseOrderRow = {
   card_price?: number | null;
   status?: string | null;
   created_at?: string | null;
+  fulfillment_status?: string | null;
+  dispute_status?: string | null;
+  transfer_status?: string | null;
+  inspection_ends_at?: string | null;
 };
 
 type ListingRow = {
   id: string;
   title: string | null;
+};
+
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  username: string | null;
 };
 
 type OrderView = {
@@ -30,6 +40,11 @@ type OrderView = {
   status: string;
   date: string;
   href: string;
+  isBuyer?: boolean;
+  fulfillmentStatus?: string;
+  disputeStatus?: string;
+  transferStatus?: string;
+  inspectionEndsAt?: string | null;
 };
 
 const mockOrderViews: OrderView[] = mockOrders.map((order) => ({
@@ -40,6 +55,10 @@ const mockOrderViews: OrderView[] = mockOrders.map((order) => ({
   status: order.status,
   date: order.date,
   href: order.href,
+  isBuyer: true,
+  fulfillmentStatus: "processing",
+  disputeStatus: "none",
+  transferStatus: "not_ready",
 }));
 
 function formatCurrency(value: number, currency = "usd") {
@@ -66,10 +85,19 @@ function shortId(value?: string | null) {
   return value ? value.slice(0, 8) : "Unknown";
 }
 
+function getProfileName(profile?: ProfileRow, fallbackId?: string | null) {
+  return profile?.full_name || profile?.username || shortId(fallbackId);
+}
+
+function isInspectionActive(value?: string | null) {
+  return value ? new Date(value).getTime() > Date.now() : false;
+}
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderView[]>(mockOrderViews);
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("Demo orders");
+  const [updatingOrderId, setUpdatingOrderId] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -115,6 +143,14 @@ export default function OrdersPage() {
           ),
         );
         const listingsById = new Map<string, ListingRow>();
+        const participantIds = Array.from(
+          new Set(
+            orderRows
+              .flatMap((order) => [order.buyer_id, order.seller_id])
+              .filter((profileId): profileId is string => Boolean(profileId)),
+          ),
+        );
+        const profilesById = new Map<string, ProfileRow>();
 
         if (listingIds.length > 0) {
           const { data: listingData, error: listingError } = await supabase
@@ -127,6 +163,21 @@ export default function OrdersPage() {
           } else {
             ((listingData || []) as ListingRow[]).forEach((listing) => {
               listingsById.set(listing.id, listing);
+            });
+          }
+        }
+
+        if (participantIds.length > 0) {
+          const { data: profileData, error: profileError } = await supabase
+            .from("profiles")
+            .select("id, full_name, username")
+            .in("id", participantIds);
+
+          if (profileError) {
+            console.error("Orders profile fetch error:", profileError);
+          } else {
+            ((profileData || []) as ProfileRow[]).forEach((profile) => {
+              profilesById.set(profile.id, profile);
             });
           }
         }
@@ -149,17 +200,29 @@ export default function OrdersPage() {
               : undefined;
             const totalAmount = Number(order.total_amount || order.card_price || 0);
             const isSeller = order.seller_id === session.user.id;
+            const isBuyer = order.buyer_id === session.user.id;
 
             return {
               id: order.id,
               cardTitle: listing?.title || "GRAIL Card",
               participantLabel: isSeller
-                ? `Buyer: ${shortId(order.buyer_id)}`
-                : `Seller: ${shortId(order.seller_id)}`,
+                ? `Buyer: ${getProfileName(
+                    order.buyer_id ? profilesById.get(order.buyer_id) : undefined,
+                    order.buyer_id,
+                  )}`
+                : `Seller: ${getProfileName(
+                    order.seller_id ? profilesById.get(order.seller_id) : undefined,
+                    order.seller_id,
+                  )}`,
               totalDisplay: formatCurrency(totalAmount),
               status: order.status || "paid",
               date: formatDate(order.created_at),
               href: order.listing_id ? `/cards/${order.listing_id}` : "/orders",
+              isBuyer,
+              fulfillmentStatus: order.fulfillment_status || "pending",
+              disputeStatus: order.dispute_status || "none",
+              transferStatus: order.transfer_status || "not_ready",
+              inspectionEndsAt: order.inspection_ends_at,
             };
           }),
         );
@@ -184,6 +247,55 @@ export default function OrdersPage() {
       isMounted = false;
     };
   }, []);
+
+  async function openDispute(order: OrderView) {
+    setUpdatingOrderId(order.id);
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      console.error("Orders dispute auth error:", sessionError);
+    }
+
+    if (!session?.user.id) {
+      setNotice("Sign in to open a dispute.");
+      setUpdatingOrderId("");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("orders")
+      .update({
+        dispute_status: "opened",
+        transfer_status: "blocked",
+      })
+      .eq("id", order.id)
+      .eq("buyer_id", session.user.id);
+
+    if (error) {
+      console.error("Orders dispute update error:", {
+        error,
+        errorMessage: error.message,
+        orderId: order.id,
+      });
+      setNotice("Dispute could not be opened. Check RLS policies and order columns.");
+      setUpdatingOrderId("");
+      return;
+    }
+
+    setOrders((items) =>
+      items.map((item) =>
+        item.id === order.id
+          ? { ...item, disputeStatus: "opened", transferStatus: "blocked" }
+          : item,
+      ),
+    );
+    setNotice("Dispute opened. GRAIL review workflow coming next.");
+    setUpdatingOrderId("");
+  }
 
   return (
     <main className="orders-page">
@@ -212,21 +324,44 @@ export default function OrdersPage() {
             </article>
           ) : null}
 
-          {!isLoading ? orders.map((order) => (
-            <article key={order.id} className="order-row">
-              <div>
-                <span>{order.id}</span>
-                <h2>{order.cardTitle}</h2>
-                <p>{order.participantLabel}</p>
-                <p>{order.date}</p>
-              </div>
-              <strong className={`status status-${order.status.toLowerCase()}`}>
-                {order.status}
-              </strong>
-              <strong>{order.totalDisplay}</strong>
-              <Link href={order.href}>View Card</Link>
-            </article>
-          )) : null}
+          {!isLoading ? orders.map((order) => {
+            const canOpenDispute =
+              order.isBuyer &&
+              order.fulfillmentStatus === "delivered" &&
+              order.disputeStatus === "none" &&
+              isInspectionActive(order.inspectionEndsAt);
+
+            return (
+              <article key={order.id} className="order-row">
+                <div>
+                  <span>{order.id}</span>
+                  <h2>{order.cardTitle}</h2>
+                  <p>{order.participantLabel}</p>
+                  <p>{order.date}</p>
+                </div>
+                <div className="order-status-stack">
+                  <strong className={`status status-${order.status.toLowerCase()}`}>
+                    {order.status}
+                  </strong>
+                  <span>{order.fulfillmentStatus}</span>
+                  <span>Dispute: {order.disputeStatus}</span>
+                </div>
+                <strong>{order.totalDisplay}</strong>
+                <div className="order-actions">
+                  <Link href={order.href}>View Card</Link>
+                  {canOpenDispute ? (
+                    <button
+                      type="button"
+                      disabled={updatingOrderId === order.id}
+                      onClick={() => openDispute(order)}
+                    >
+                      Open Dispute
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            );
+          }) : null}
         </section>
       </div>
     </main>
@@ -303,7 +438,8 @@ const pageStyles = `
   }
 
   .page-heading a,
-  .order-row a {
+  .order-row a,
+  .order-actions button {
     border: 1px solid rgba(231,222,208,0.28);
     border-radius: 10px;
     background: rgba(231,222,208,0.055);
@@ -316,6 +452,7 @@ const pageStyles = `
     text-decoration: none;
     font-size: 12px;
     font-weight: 900;
+    cursor: pointer;
   }
 
   .orders-list {
@@ -348,6 +485,22 @@ const pageStyles = `
     color: #fff;
     font-size: 16px;
     font-weight: 900;
+  }
+
+  .order-status-stack,
+  .order-actions {
+    display: grid;
+    gap: 7px;
+    justify-items: start;
+  }
+
+  .order-status-stack span {
+    letter-spacing: 0;
+  }
+
+  .order-actions button:disabled {
+    cursor: wait;
+    opacity: 0.6;
   }
 
   .status {

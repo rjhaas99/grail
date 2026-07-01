@@ -13,8 +13,16 @@ type DashboardOrder = {
   card: string;
   buyer: string;
   total: string;
+  payoutDisplay: string;
   status: OrderStatus;
-  shipBy: string;
+  orderDate: string;
+  fulfillmentStatus: string;
+  transferStatus: string;
+  disputeStatus: string;
+  trackingNumber: string;
+  carrier: string;
+  inspectionEndsAt?: string | null;
+  sellerPayoutAmount: number;
   href?: string;
 };
 type SupabaseOrderRow = {
@@ -26,6 +34,20 @@ type SupabaseOrderRow = {
   card_price?: number | null;
   status?: string | null;
   created_at?: string | null;
+  buyer_fee?: number | null;
+  fulfillment_status?: string | null;
+  tracking_number?: string | null;
+  carrier?: string | null;
+  shipped_at?: string | null;
+  delivered_at?: string | null;
+  inspection_ends_at?: string | null;
+  dispute_status?: string | null;
+  seller_payout_amount?: number | null;
+  platform_fee?: number | null;
+  processing_fee?: number | null;
+  transfer_status?: string | null;
+  stripe_transfer_id?: string | null;
+  payout_released_at?: string | null;
 };
 type ListingRow = {
   id: string;
@@ -54,6 +76,14 @@ const initialOffers = mockSellerDashboardData.incomingOffers.map((offer) => ({
 const initialOrders = mockSellerDashboardData.recentOrders.map((order) => ({
   ...order,
   status: order.status as OrderStatus,
+  payoutDisplay: order.total,
+  orderDate: order.shipBy,
+  fulfillmentStatus: "pending",
+  transferStatus: "not_ready",
+  disputeStatus: "none",
+  trackingNumber: "",
+  carrier: "",
+  sellerPayoutAmount: 0,
 }));
 
 function formatCurrency(value: number) {
@@ -86,6 +116,30 @@ function normalizeOrderStatus(status?: string | null): OrderStatus {
   return "Paid";
 }
 
+function roundCurrency(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function calculatePayout(order: SupabaseOrderRow) {
+  const cardPrice = Number(order.card_price || order.total_amount || 0);
+  const platformFee = roundCurrency(cardPrice * 0.075);
+  const processingFee = roundCurrency(Number(order.buyer_fee || 0));
+
+  return Math.max(roundCurrency(cardPrice - platformFee - processingFee), 0);
+}
+
+function formatDate(value?: string | null) {
+  if (!value) {
+    return "Not set";
+  }
+
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="stat-card panel">
@@ -102,6 +156,11 @@ export default function SellerDashboardPage() {
   const [isLoadingPayoutStatus, setIsLoadingPayoutStatus] = useState(true);
   const [isStartingPayouts, setIsStartingPayouts] = useState(false);
   const [payoutMessage, setPayoutMessage] = useState("");
+  const [dashboardMessage, setDashboardMessage] = useState("");
+  const [trackingOrderId, setTrackingOrderId] = useState("");
+  const [trackingCarrier, setTrackingCarrier] = useState("");
+  const [trackingNumber, setTrackingNumber] = useState("");
+  const [updatingOrderId, setUpdatingOrderId] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -195,6 +254,7 @@ export default function SellerDashboardPage() {
               ? listingsById.get(order.listing_id)
               : undefined;
             const total = Number(order.total_amount || order.card_price || 0);
+            const sellerPayoutAmount = Number(order.seller_payout_amount || calculatePayout(order));
 
             return {
               id: order.id,
@@ -204,14 +264,16 @@ export default function SellerDashboardPage() {
                 order.buyer_id,
               ),
               total: formatCurrency(total),
+              payoutDisplay: formatCurrency(sellerPayoutAmount),
               status: normalizeOrderStatus(order.status),
-              shipBy: order.created_at
-                ? new Date(order.created_at).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })
-                : "Recorded",
+              orderDate: formatDate(order.created_at),
+              fulfillmentStatus: order.fulfillment_status || "pending",
+              transferStatus: order.transfer_status || "not_ready",
+              disputeStatus: order.dispute_status || "none",
+              trackingNumber: order.tracking_number || "",
+              carrier: order.carrier || "",
+              inspectionEndsAt: order.inspection_ends_at,
+              sellerPayoutAmount,
               href: order.listing_id ? `/cards/${order.listing_id}` : "/orders",
             };
           }),
@@ -351,6 +413,202 @@ export default function SellerDashboardPage() {
     }
   }
 
+  function updateLocalOrder(orderId: string, patch: Partial<DashboardOrder>) {
+    setOrders((items) =>
+      items.map((order) => (order.id === orderId ? { ...order, ...patch } : order)),
+    );
+  }
+
+  async function updateOrderFields(orderId: string, fields: Record<string, unknown>) {
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      console.error("Seller dashboard fulfillment auth error:", sessionError);
+    }
+
+    if (!session?.user.id) {
+      setDashboardMessage("Sign in to manage fulfillment.");
+      return false;
+    }
+
+    const { error } = await supabase
+      .from("orders")
+      .update(fields)
+      .eq("id", orderId)
+      .eq("seller_id", session.user.id);
+
+    if (error) {
+      console.error("Seller dashboard fulfillment update error:", {
+        error,
+        errorMessage: error.message,
+        orderId,
+        fields,
+      });
+      setDashboardMessage("Order could not be updated. Check RLS policies and order columns.");
+      return false;
+    }
+
+    return true;
+  }
+
+  function openTrackingModal(order: DashboardOrder) {
+    setTrackingOrderId(order.id);
+    setTrackingCarrier(order.carrier);
+    setTrackingNumber(order.trackingNumber);
+    setDashboardMessage("");
+  }
+
+  async function saveTracking() {
+    if (!trackingOrderId) {
+      return;
+    }
+
+    if (!trackingCarrier.trim() || !trackingNumber.trim()) {
+      setDashboardMessage("Carrier and tracking number are required.");
+      return;
+    }
+
+    setUpdatingOrderId(trackingOrderId);
+
+    const success = await updateOrderFields(trackingOrderId, {
+      carrier: trackingCarrier.trim(),
+      tracking_number: trackingNumber.trim(),
+    });
+
+    if (success) {
+      updateLocalOrder(trackingOrderId, {
+        carrier: trackingCarrier.trim(),
+        trackingNumber: trackingNumber.trim(),
+      });
+      setTrackingOrderId("");
+      setTrackingCarrier("");
+      setTrackingNumber("");
+      setDashboardMessage("Tracking saved.");
+    }
+
+    setUpdatingOrderId("");
+  }
+
+  async function markShipped(order: DashboardOrder) {
+    setUpdatingOrderId(order.id);
+
+    const now = new Date().toISOString();
+    const success = await updateOrderFields(order.id, {
+      fulfillment_status: "shipped",
+      shipped_at: now,
+      transfer_status: "not_ready",
+    });
+
+    if (success) {
+      updateLocalOrder(order.id, {
+        fulfillmentStatus: "shipped",
+        transferStatus: "not_ready",
+      });
+      setDashboardMessage("Order marked shipped.");
+    }
+
+    setUpdatingOrderId("");
+  }
+
+  async function markDelivered(order: DashboardOrder) {
+    setUpdatingOrderId(order.id);
+
+    const deliveredAt = new Date();
+    const inspectionEndsAt = new Date(deliveredAt.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const success = await updateOrderFields(order.id, {
+      fulfillment_status: "delivered",
+      delivered_at: deliveredAt.toISOString(),
+      inspection_ends_at: inspectionEndsAt.toISOString(),
+      transfer_status: "not_ready",
+      dispute_status: order.disputeStatus || "none",
+      seller_payout_amount: order.sellerPayoutAmount,
+    });
+
+    if (success) {
+      updateLocalOrder(order.id, {
+        fulfillmentStatus: "delivered",
+        transferStatus: "not_ready",
+        disputeStatus: order.disputeStatus || "none",
+        inspectionEndsAt: inspectionEndsAt.toISOString(),
+      });
+      setDashboardMessage("Order marked delivered. Payout waits for the inspection window.");
+    }
+
+    setUpdatingOrderId("");
+  }
+
+  async function markInspectionComplete(order: DashboardOrder) {
+    if (order.disputeStatus !== "none") {
+      setDashboardMessage("Payout cannot become ready while a dispute is open.");
+      return;
+    }
+
+    setUpdatingOrderId(order.id);
+
+    const success = await updateOrderFields(order.id, {
+      transfer_status: "ready",
+      seller_payout_amount: order.sellerPayoutAmount,
+    });
+
+    if (success) {
+      updateLocalOrder(order.id, { transferStatus: "ready" });
+      setDashboardMessage("Inspection marked complete. Payout is ready.");
+    }
+
+    setUpdatingOrderId("");
+  }
+
+  async function releasePayout(order: DashboardOrder) {
+    setUpdatingOrderId(order.id);
+
+    try {
+      const accessToken = await getAccessToken();
+
+      if (!accessToken) {
+        setDashboardMessage("Sign in to release payouts.");
+        return;
+      }
+
+      const response = await fetch("/api/stripe/payouts/release", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const payload = (await response.json()) as { error?: string; detail?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          payload.detail || payload.error || "Payout could not be released.",
+        );
+      }
+
+      updateLocalOrder(order.id, { transferStatus: "paid" });
+      setDashboardMessage("Payout released.");
+    } catch (error) {
+      console.error("Seller dashboard payout release error:", error);
+      setDashboardMessage(
+        error instanceof Error ? error.message : "Payout could not be released.",
+      );
+    } finally {
+      setUpdatingOrderId("");
+    }
+  }
+
+  function getPayoutBlockReason(order: DashboardOrder) {
+    if (order.transferStatus === "paid") return "Payout released";
+    if (!payoutStatus?.payoutsEnabled) return "Payout setup incomplete";
+    if (order.disputeStatus === "opened") return "Dispute opened";
+    if (order.fulfillmentStatus !== "delivered") return "Waiting for delivery";
+    if (order.transferStatus !== "ready") return "Inspection window active";
+    return "";
+  }
+
   function updateOffer(id: string, status: OfferStatus) {
     setOffers((items) =>
       items.map((offer) => (offer.id === id ? { ...offer, status } : offer)),
@@ -381,6 +639,7 @@ export default function SellerDashboardPage() {
           : "Finish Stripe Express onboarding to enable seller payouts.";
   const shouldShowPayoutButton = !isLoadingPayoutStatus && (!payoutConnected || payoutIncomplete);
   const payoutButtonLabel = payoutConnected ? "Continue Payout Setup" : "Set Up Payouts";
+  const isDevToolsEnabled = process.env.NODE_ENV !== "production";
 
   return (
     <main className="dashboard-page">
@@ -405,6 +664,8 @@ export default function SellerDashboardPage() {
           <StatCard label="Seller Level" value={mockSellerDashboardData.stats.sellerLevel} />
           <StatCard label="Response Rate" value={mockSellerDashboardData.stats.responseRate} />
         </section>
+
+        {dashboardMessage ? <p className="dashboard-message">{dashboardMessage}</p> : null}
 
         <section className="dashboard-layout">
           <div className="main-column">
@@ -474,23 +735,86 @@ export default function SellerDashboardPage() {
                 <Link href="/orders">View Orders</Link>
               </div>
               <div className="table-list">
-                {orders.map((order) => (
-                  <article key={order.id} className="table-row order-row">
-                    <div>
-                      <strong>{order.id}</strong>
-                      <span>{order.card}</span>
-                    </div>
-                    <span>{order.buyer}</span>
-                    <span>{order.total}</span>
-                    <span className={`status status-${order.status.toLowerCase()}`}>
-                      {order.status}
-                    </span>
-                    <span>Date {order.shipBy}</span>
-                    <div className="row-actions">
-                      {order.href ? <Link href={order.href}>View</Link> : null}
-                    </div>
-                  </article>
-                ))}
+                {orders.map((order) => {
+                  const blockReason = getPayoutBlockReason(order);
+                  const canReleasePayout =
+                    payoutStatus?.payoutsEnabled &&
+                    order.transferStatus === "ready" &&
+                    order.disputeStatus === "none" &&
+                    order.fulfillmentStatus === "delivered";
+
+                  return (
+                    <article key={order.id} className="table-row order-row payout-order-row">
+                      <div>
+                        <strong>{order.card}</strong>
+                        <span>Order {order.id}</span>
+                        <span>Buyer {order.buyer}</span>
+                      </div>
+                      <div>
+                        <strong>{order.total}</strong>
+                        <span>Sold price</span>
+                        <span>Payout {order.payoutDisplay}</span>
+                      </div>
+                      <div>
+                        <span className={`status status-${order.fulfillmentStatus}`}>
+                          {order.fulfillmentStatus}
+                        </span>
+                        <span className={`status status-${order.transferStatus}`}>
+                          {order.transferStatus}
+                        </span>
+                      </div>
+                      <div>
+                        <span>Tracking {order.trackingNumber || "Not added"}</span>
+                        <span>{order.carrier || "Carrier pending"}</span>
+                        <span>Inspection {formatDate(order.inspectionEndsAt)}</span>
+                      </div>
+                      <div className="row-actions">
+                        {order.href ? <Link href={order.href}>View Card</Link> : null}
+                        <button
+                          type="button"
+                          disabled={updatingOrderId === order.id}
+                          onClick={() => openTrackingModal(order)}
+                        >
+                          Add Tracking
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updatingOrderId === order.id}
+                          onClick={() => markShipped(order)}
+                        >
+                          Mark Shipped
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updatingOrderId === order.id}
+                          onClick={() => markDelivered(order)}
+                        >
+                          Mark Delivered
+                        </button>
+                        {isDevToolsEnabled ? (
+                          <button
+                            type="button"
+                            disabled={updatingOrderId === order.id}
+                            onClick={() => markInspectionComplete(order)}
+                          >
+                            Mark Inspection Complete
+                          </button>
+                        ) : null}
+                        {canReleasePayout ? (
+                          <button
+                            type="button"
+                            disabled={updatingOrderId === order.id}
+                            onClick={() => releasePayout(order)}
+                          >
+                            Release Payout
+                          </button>
+                        ) : (
+                          <span className="payout-reason">{blockReason}</span>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             </section>
           </div>
@@ -574,6 +898,46 @@ export default function SellerDashboardPage() {
           </aside>
         </section>
       </div>
+      {trackingOrderId ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="panel tracking-modal" role="dialog" aria-modal="true">
+            <div className="section-heading">
+              <h2>Add Tracking</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setTrackingOrderId("");
+                  setTrackingCarrier("");
+                  setTrackingNumber("");
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <label>
+              <span>Carrier</span>
+              <input
+                value={trackingCarrier}
+                onChange={(event) => setTrackingCarrier(event.target.value)}
+                placeholder="USPS, UPS, FedEx..."
+              />
+            </label>
+            <label>
+              <span>Tracking number</span>
+              <input
+                value={trackingNumber}
+                onChange={(event) => setTrackingNumber(event.target.value)}
+                placeholder="Tracking number"
+              />
+            </label>
+            <div className="row-actions">
+              <button type="button" disabled={Boolean(updatingOrderId)} onClick={saveTracking}>
+                Save Tracking
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -681,6 +1045,18 @@ const pageStyles = `
     gap: 12px;
   }
 
+  .dashboard-message {
+    margin: 14px 0 0;
+    border: 1px solid rgba(201,205,211,0.18);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.055);
+    color: #C9CDD3;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 900;
+  }
+
   .stat-card {
     min-height: 82px;
     padding: 14px;
@@ -770,6 +1146,10 @@ const pageStyles = `
     grid-template-columns: 1.2fr 100px 90px 100px 100px auto;
   }
 
+  .payout-order-row {
+    grid-template-columns: minmax(180px, 1.2fr) 110px 120px 150px minmax(220px, auto);
+  }
+
   .table-row strong {
     display: block;
     color: #fff;
@@ -792,6 +1172,13 @@ const pageStyles = `
     justify-content: flex-end;
   }
 
+  .payout-reason {
+    border: 1px solid rgba(201,205,211,0.16);
+    border-radius: 999px;
+    background: rgba(201,205,211,0.045);
+    padding: 7px 9px;
+  }
+
   .status {
     border: 1px solid rgba(201,205,211,0.28);
     border-radius: 999px;
@@ -804,10 +1191,18 @@ const pageStyles = `
 
   .status-accepted,
   .status-shipped,
-  .status-paid {
+  .status-paid,
+  .status-delivered,
+  .status-ready {
     color: #86efac !important;
     background: rgba(52,211,153,0.08);
     border-color: rgba(52,211,153,0.24);
+  }
+
+  .status-pending,
+  .status-not_ready {
+    color: #C9CDD3 !important;
+    background: rgba(201,205,211,0.08);
   }
 
   .status-declined {
@@ -820,6 +1215,13 @@ const pageStyles = `
     color: #c4b5fd !important;
     background: rgba(167,139,250,0.08);
     border-color: rgba(167,139,250,0.24);
+  }
+
+  .status-blocked,
+  .status-failed {
+    color: #fb7185 !important;
+    background: rgba(244,63,94,0.08);
+    border-color: rgba(244,63,94,0.24);
   }
 
   .progress-block {
@@ -899,6 +1301,48 @@ const pageStyles = `
   .payout-message {
     color: #C9CDD3 !important;
     font-size: 12px !important;
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(0,0,0,0.72);
+    display: grid;
+    place-items: center;
+    padding: 18px;
+  }
+
+  .tracking-modal {
+    width: min(430px, 100%);
+    padding: 16px;
+    display: grid;
+    gap: 12px;
+  }
+
+  .tracking-modal label {
+    display: grid;
+    gap: 7px;
+  }
+
+  .tracking-modal label span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .tracking-modal input {
+    border: 1px solid #202026;
+    border-radius: 10px;
+    background: rgba(8,8,10,0.84);
+    color: #fff;
+    min-height: 40px;
+    padding: 0 11px;
+    font-size: 13px;
+    font-weight: 800;
+    outline: none;
   }
 
   .sidebar-panel ul {
