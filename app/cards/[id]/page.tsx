@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
@@ -26,6 +26,7 @@ type PhotoView = (typeof photoViews)[number];
 type MockCard = MockListing & {
   imageUrls?: Partial<Record<PhotoView, string>>;
   sellerId?: string | null;
+  soldPrice?: number;
 };
 
 type LocalMockOffer = {
@@ -72,6 +73,11 @@ type ProfileRow = {
   id: string;
   full_name: string | null;
   username: string | null;
+};
+
+type SupabaseOrderRow = {
+  total_amount?: number | null;
+  card_price?: number | null;
 };
 
 type DetailSeller = {
@@ -294,23 +300,29 @@ function getImageUrls(images: ListingImageRow[] | null) {
 function mapSupabaseCard(
   listing: SupabaseListingRow,
   profile: ProfileRow | null,
+  order: SupabaseOrderRow | null = null,
 ): { card: MockCard; seller: DetailSeller } {
   const category = getCategory(listing);
   const condition = getConditionDisplay(listing);
   const price = Number(listing.price || 0);
   const status = listing.status?.toLowerCase() || "";
+  const isSold = status === "sold";
+  const soldPrice = isSold
+    ? Number(order?.card_price || order?.total_amount || listing.price || 0)
+    : 0;
   const isCollectionOnly =
+    !isSold &&
     status !== "active" &&
     (status === "collection" ||
       Boolean(listing.is_collection_card) ||
       Boolean(listing.is_public_collection));
-  const displayPrice = isCollectionOnly ? 0 : price;
+  const displayPrice = isCollectionOnly ? 0 : isSold ? soldPrice : price;
   const offerBasis = price;
   const sellerSlug = getSellerSlug(profile, listing.seller_id);
   const sellerName = profile?.full_name || profile?.username || "GRAIL Seller";
   const isGraded = Boolean(listing.grader && listing.grade) ||
     listing.card_type?.toLowerCase() === "graded";
-  const tag = isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw";
+  const tag = isSold ? "Sold" : isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw";
   const route = `/cards/${listing.id}`;
   const title =
     listing.title ||
@@ -346,7 +358,11 @@ function mapSupabaseCard(
       sellerRoute: `/collections/${sellerSlug}`,
       sellerHref: `/collections/${sellerSlug}`,
       price: displayPrice,
-      priceDisplay: isCollectionOnly
+      priceDisplay: isSold
+        ? soldPrice
+          ? `Sold · ${formatCurrency(soldPrice)}`
+          : "Sold"
+        : isCollectionOnly
         ? "Open to Offers"
         : price
           ? formatCurrency(price)
@@ -368,6 +384,7 @@ function mapSupabaseCard(
       isGrail: false,
       isCollectionOnly,
       listingStatus: listing.status,
+      soldPrice,
       accent: realListingAccent,
       artworkTone: "live listing",
       imageUrls: getImageUrls(listing.listing_images),
@@ -529,6 +546,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 export default function CardDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const cardId = String(params.id || "");
   const mockCard = getMockListingById(cardId) as MockCard | undefined;
   const [realCard, setRealCard] = useState<MockCard | null>(null);
@@ -559,6 +577,15 @@ export default function CardDetailPage() {
   const activePhoto = visiblePhotoViews.includes(selectedPhoto)
     ? selectedPhoto
     : visiblePhotoViews[0];
+
+  function goBack() {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+      return;
+    }
+
+    router.push("/browse");
+  }
 
   useEffect(() => {
     let isMounted = true;
@@ -653,6 +680,7 @@ export default function CardDetailPage() {
         }
 
         let profile: ProfileRow | null = null;
+        let order: SupabaseOrderRow | null = null;
 
         if (listing.seller_id) {
           const { data: profileData, error: profileError } = await supabase
@@ -668,7 +696,23 @@ export default function CardDetailPage() {
           }
         }
 
-        const mapped = mapSupabaseCard(listing, profile);
+        if (listingStatus === "sold") {
+          const { data: orderData, error: orderError } = await supabase
+            .from("orders")
+            .select("total_amount, card_price")
+            .eq("listing_id", listing.id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (orderError) {
+            console.error("Card detail sold order fetch error:", orderError);
+          } else {
+            order = orderData as SupabaseOrderRow | null;
+          }
+        }
+
+        const mapped = mapSupabaseCard(listing, profile, order);
 
         if (isMounted) {
           setRealCard(mapped.card);
@@ -1006,7 +1050,14 @@ export default function CardDetailPage() {
       card.tag === "Collection" ||
       card.listingStatus?.toLowerCase() === "collection",
   );
-  const salePriceDisplay = isCollectionOnly
+  const isSold = card.tag === "Sold" || card.listingStatus?.toLowerCase() === "sold";
+  const soldPrice = card.soldPrice || card.askingPrice || card.price;
+  const soldPriceDisplay = soldPrice > 0
+    ? `Sold · ${formatCurrency(soldPrice)}`
+    : "Sold";
+  const salePriceDisplay = isSold
+    ? soldPriceDisplay
+    : isCollectionOnly
     ? "Open to Offers"
     : formatCurrency(card.askingPrice);
   const minimumOfferDisplay = card.minOffer > 0
@@ -1020,7 +1071,7 @@ export default function CardDetailPage() {
         <Header />
 
         <div className="top-link-row">
-          <Link href="/browse">← Back to Browse</Link>
+          <button type="button" onClick={goBack}>← Back</button>
         </div>
 
         <section className="detail-layout">
@@ -1088,8 +1139,8 @@ export default function CardDetailPage() {
               <div className="stat-grid">
                 <DetailRow label="Market Value" value={formatCurrency(card.marketValue)} />
                 <DetailRow
-                  label={isCollectionOnly ? "Collection Status" : "Asking Price"}
-                  value={isCollectionOnly ? "In Collection" : salePriceDisplay}
+                  label={isSold ? "Sale Status" : isCollectionOnly ? "Collection Status" : "Asking Price"}
+                  value={isSold ? salePriceDisplay : isCollectionOnly ? "In Collection" : salePriceDisplay}
                 />
                 <DetailRow label="Watch Count" value={String(card.watchCount)} />
                 <DetailRow label="View Count" value={String(card.viewCount)} />
@@ -1101,9 +1152,11 @@ export default function CardDetailPage() {
 
           <aside className="right-column">
             <section className="purchase-panel panel">
-              <span>{isCollectionOnly ? "In Collection" : "Asking Price"}</span>
+              <span>{isSold ? "Sold" : isCollectionOnly ? "In Collection" : "Asking Price"}</span>
               <strong>{salePriceDisplay}</strong>
-              {isCollectionOnly ? (
+              {isSold ? (
+                <p>This card has sold. Card details and images remain available for reference.</p>
+              ) : isCollectionOnly ? (
                 <p>
                   This card is in the seller&apos;s collection. The seller is
                   open to offers and messages.
@@ -1123,11 +1176,15 @@ export default function CardDetailPage() {
                 <>
                   <p className="owner-note">This is your listing.</p>
                   <div className="purchase-buttons">
-                    <Link className="buy-button" href={`/list?edit=${card.id}`}>
-                      {isCollectionOnly ? "Edit Card" : "Edit Listing"}
-                    </Link>
-                    {isCollectionOnly ? (
+                    {isSold ? (
+                      <Link href="/seller-dashboard">
+                        View in Seller Dashboard
+                      </Link>
+                    ) : isCollectionOnly ? (
                       <>
+                        <Link className="buy-button" href={`/list?edit=${card.id}`}>
+                          Edit Card
+                        </Link>
                         <Link href={`/list?edit=${card.id}`}>List For Sale</Link>
                         <button type="button" onClick={deleteCardFromCollection}>
                           Delete From Collection
@@ -1135,6 +1192,9 @@ export default function CardDetailPage() {
                       </>
                     ) : (
                       <>
+                        <Link className="buy-button" href={`/list?edit=${card.id}`}>
+                          Edit Listing
+                        </Link>
                         <Link href="/seller-dashboard">
                           View in Seller Dashboard
                         </Link>
@@ -1151,31 +1211,37 @@ export default function CardDetailPage() {
               ) : (
                 <>
                   <div className="purchase-buttons">
-                    {!isCollectionOnly ? (
+                    {!isCollectionOnly && !isSold ? (
                       <Link className="buy-button" href={`/checkout/${card.id}`}>
                         Buy Now
                       </Link>
                     ) : null}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsOfferOpen(true);
-                        setOfferAmount("");
-                        setOfferMessage("");
-                        setOfferError("");
-                        setSentOfferAmount(null);
-                      }}
-                    >
-                      Make Offer
-                    </button>
+                    {!isSold ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsOfferOpen(true);
+                          setOfferAmount("");
+                          setOfferMessage("");
+                          setOfferError("");
+                          setSentOfferAmount(null);
+                        }}
+                      >
+                        Make Offer
+                      </button>
+                    ) : null}
                     <button type="button" onClick={openMessageModal}>
                       Message Seller
                     </button>
                   </div>
 
-                  <p className="offer-note">
-                    Minimum offer: {minimumOfferDisplay}
-                  </p>
+                  {!isSold ? (
+                    <p className="offer-note">
+                      Minimum offer: {minimumOfferDisplay}
+                    </p>
+                  ) : (
+                    <p className="offer-note">This card has sold.</p>
+                  )}
                 </>
               )}
             </section>
@@ -1452,16 +1518,20 @@ const pageStyles = `
     margin: 18px 0 14px;
   }
 
-  .top-link-row a,
+  .top-link-row button,
   .not-found a,
   .seller-link {
+    border: 0;
+    background: transparent;
     color: #E7DED0;
     font-size: 13px;
     font-weight: 900;
     text-decoration: none;
+    cursor: pointer;
+    padding: 0;
   }
 
-  .top-link-row a:hover,
+  .top-link-row button:hover,
   .seller-link:hover,
   .not-found a:hover {
     text-decoration: underline;
@@ -1943,6 +2013,13 @@ const pageStyles = `
       linear-gradient(180deg, rgba(231,222,208,0.16), rgba(201,205,211,0.05));
     color: #fff;
     box-shadow: 0 0 22px rgba(201,205,211,0.2);
+  }
+
+  .tag-sold {
+    border-color: rgba(244,63,94,0.34);
+    background: rgba(244,63,94,0.09);
+    color: #fecdd3;
+    box-shadow: 0 0 18px rgba(244,63,94,0.08);
   }
 
   .stat-grid,

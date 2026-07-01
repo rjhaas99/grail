@@ -1,12 +1,41 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
 import { mockSellerDashboardData } from "../lib/mockData";
 
 type OfferStatus = "Pending" | "Accepted" | "Countered" | "Declined";
-type OrderStatus = "Processing" | "Shipped";
+type OrderStatus = "Processing" | "Shipped" | "Paid";
+type DashboardOrder = {
+  id: string;
+  card: string;
+  buyer: string;
+  total: string;
+  status: OrderStatus;
+  shipBy: string;
+  href?: string;
+};
+type SupabaseOrderRow = {
+  id: string;
+  listing_id?: string | null;
+  buyer_id?: string | null;
+  seller_id?: string | null;
+  total_amount?: number | null;
+  card_price?: number | null;
+  status?: string | null;
+  created_at?: string | null;
+};
+type ListingRow = {
+  id: string;
+  title: string | null;
+};
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  username: string | null;
+};
 
 const listings = mockSellerDashboardData.activeListings;
 const initialOffers = mockSellerDashboardData.incomingOffers.map((offer) => ({
@@ -17,6 +46,36 @@ const initialOrders = mockSellerDashboardData.recentOrders.map((order) => ({
   ...order,
   status: order.status as OrderStatus,
 }));
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function shortId(value?: string | null) {
+  return value ? value.slice(0, 8) : "Unknown";
+}
+
+function getProfileName(profile?: ProfileRow, fallbackId?: string | null) {
+  return profile?.full_name || profile?.username || shortId(fallbackId);
+}
+
+function normalizeOrderStatus(status?: string | null): OrderStatus {
+  const normalized = status?.toLowerCase();
+
+  if (normalized === "shipped") {
+    return "Shipped";
+  }
+
+  if (normalized === "processing") {
+    return "Processing";
+  }
+
+  return "Paid";
+}
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
@@ -29,19 +88,136 @@ function StatCard({ label, value }: { label: string; value: string }) {
 
 export default function SellerDashboardPage() {
   const [offers, setOffers] = useState(initialOffers);
-  const [orders, setOrders] = useState(initialOrders);
+  const [orders, setOrders] = useState<DashboardOrder[]>(initialOrders);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSellerOrders() {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        console.error("Seller dashboard session error:", sessionError);
+      }
+
+      if (!session?.user.id) {
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from("orders")
+          .select("*")
+          .eq("seller_id", session.user.id)
+          .order("created_at", { ascending: false })
+          .limit(8);
+
+        if (error) {
+          throw error;
+        }
+
+        const orderRows = (data || []) as SupabaseOrderRow[];
+
+        if (orderRows.length === 0) {
+          return;
+        }
+
+        const listingIds = Array.from(
+          new Set(
+            orderRows
+              .map((order) => order.listing_id)
+              .filter((listingId): listingId is string => Boolean(listingId)),
+          ),
+        );
+        const buyerIds = Array.from(
+          new Set(
+            orderRows
+              .map((order) => order.buyer_id)
+              .filter((buyerId): buyerId is string => Boolean(buyerId)),
+          ),
+        );
+        const listingsById = new Map<string, ListingRow>();
+        const profilesById = new Map<string, ProfileRow>();
+
+        if (listingIds.length > 0) {
+          const { data: listingData, error: listingError } = await supabase
+            .from("listings")
+            .select("id, title")
+            .in("id", listingIds);
+
+          if (listingError) {
+            console.error("Seller dashboard order listing fetch error:", listingError);
+          } else {
+            ((listingData || []) as ListingRow[]).forEach((listing) => {
+              listingsById.set(listing.id, listing);
+            });
+          }
+        }
+
+        if (buyerIds.length > 0) {
+          const { data: profileData, error: profileError } = await supabase
+            .from("profiles")
+            .select("id, full_name, username")
+            .in("id", buyerIds);
+
+          if (profileError) {
+            console.error("Seller dashboard buyer profile fetch error:", profileError);
+          } else {
+            ((profileData || []) as ProfileRow[]).forEach((profile) => {
+              profilesById.set(profile.id, profile);
+            });
+          }
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        setOrders(
+          orderRows.map((order) => {
+            const listing = order.listing_id
+              ? listingsById.get(order.listing_id)
+              : undefined;
+            const total = Number(order.total_amount || order.card_price || 0);
+
+            return {
+              id: order.id,
+              card: listing?.title || "GRAIL Card",
+              buyer: getProfileName(
+                order.buyer_id ? profilesById.get(order.buyer_id) : undefined,
+                order.buyer_id,
+              ),
+              total: formatCurrency(total),
+              status: normalizeOrderStatus(order.status),
+              shipBy: order.created_at
+                ? new Date(order.created_at).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })
+                : "Recorded",
+              href: order.listing_id ? `/cards/${order.listing_id}` : "/orders",
+            };
+          }),
+        );
+      } catch (error) {
+        console.error("Seller dashboard orders fetch error:", error);
+      }
+    }
+
+    loadSellerOrders();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   function updateOffer(id: string, status: OfferStatus) {
     setOffers((items) =>
       items.map((offer) => (offer.id === id ? { ...offer, status } : offer)),
-    );
-  }
-
-  function markShipped(id: string) {
-    setOrders((items) =>
-      items.map((order) =>
-        order.id === id ? { ...order, status: "Shipped" } : order,
-      ),
     );
   }
 
@@ -133,7 +309,7 @@ export default function SellerDashboardPage() {
 
             <section className="panel dashboard-section">
               <div className="section-heading">
-                <h2>Recent Orders</h2>
+                <h2>Recent Sold Orders</h2>
                 <Link href="/orders">View Orders</Link>
               </div>
               <div className="table-list">
@@ -148,12 +324,9 @@ export default function SellerDashboardPage() {
                     <span className={`status status-${order.status.toLowerCase()}`}>
                       {order.status}
                     </span>
-                    <span>Ship by {order.shipBy}</span>
+                    <span>Date {order.shipBy}</span>
                     <div className="row-actions">
-                      <button type="button">Print Label</button>
-                      <button type="button" onClick={() => markShipped(order.id)}>
-                        Mark Shipped
-                      </button>
+                      {order.href ? <Link href={order.href}>View</Link> : null}
                     </div>
                   </article>
                 ))}
@@ -425,7 +598,8 @@ const pageStyles = `
   }
 
   .status-accepted,
-  .status-shipped {
+  .status-shipped,
+  .status-paid {
     color: #86efac !important;
     background: rgba(52,211,153,0.08);
     border-color: rgba(52,211,153,0.24);
