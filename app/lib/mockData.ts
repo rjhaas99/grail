@@ -1,4 +1,4 @@
-export type ListingTag = "Graded" | "Raw" | "Hot" | "Grail" | "Collection";
+export type ListingTag = "Graded" | "Raw" | "Hot" | "Grail" | "Collection" | "Sold";
 export type CardCategory = "Sports" | "TCG";
 export type OfferStatus =
   | "Pending"
@@ -708,6 +708,10 @@ export function getListingTag(listing: {
   isHot?: boolean;
   isCollectionOnly?: boolean;
 }): ListingTag {
+  if (listing.tag === "Sold" || listing.tags?.includes("Sold")) {
+    return "Sold";
+  }
+
   if (listing.isCollectionOnly || listing.tag === "Collection" || listing.tags?.includes("Collection")) {
     return "Collection";
   }
