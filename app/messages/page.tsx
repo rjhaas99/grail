@@ -416,6 +416,12 @@ function MessagesContent() {
             const cardHref = group.listingId ? `/cards/${group.listingId}` : "/browse";
             const latestTime = latestMessage?.created_at || null;
             const snippet = latestMessage?.body || "Conversation ready.";
+            const participantRole =
+              listing?.seller_id && group.otherUserId === listing.seller_id
+                ? "Seller"
+                : listing
+                  ? "Buyer"
+                  : "GRAIL User";
 
             return {
               id: groupId,
@@ -424,9 +430,9 @@ function MessagesContent() {
               sellerId: group.otherUserId,
               listingId: group.listingId,
               participantName,
-              participantRole: "Seller",
+              participantRole,
               person: participantName,
-              badge: "Seller",
+              badge: participantRole,
               cardId: group.listingId || groupId,
               cardTitle,
               cardRoute: cardHref,

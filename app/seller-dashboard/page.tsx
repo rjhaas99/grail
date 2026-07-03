@@ -212,6 +212,10 @@ export default function SellerDashboardPage() {
   const [trackingCarrier, setTrackingCarrier] = useState("");
   const [trackingNumber, setTrackingNumber] = useState("");
   const [updatingOrderId, setUpdatingOrderId] = useState("");
+  const [evidenceFiles, setEvidenceFiles] = useState<Record<string, File | null>>({});
+  const [evidenceNotes, setEvidenceNotes] = useState<Record<string, string>>({});
+  const [collapsedEvidenceUploads, setCollapsedEvidenceUploads] = useState<Record<string, boolean>>({});
+  const [uploadingEvidenceId, setUploadingEvidenceId] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -691,6 +695,68 @@ export default function SellerDashboardPage() {
     }
   }
 
+  async function uploadEvidence(order: DashboardOrder) {
+    const file = evidenceFiles[order.id];
+
+    if (!file) {
+      setDashboardMessage("Choose an evidence image before uploading.");
+      return;
+    }
+
+    if (!["opened", "under_review"].includes(order.disputeStatus)) {
+      setDashboardMessage("Evidence can only be uploaded while a dispute is open or under review.");
+      return;
+    }
+
+    setUploadingEvidenceId(order.id);
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      console.error("Seller dashboard evidence auth error:", sessionError);
+    }
+
+    if (!session?.user.id) {
+      setDashboardMessage("Sign in to upload dispute evidence.");
+      setUploadingEvidenceId("");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("orderId", order.id);
+    formData.append("note", evidenceNotes[order.id]?.trim() || "");
+    formData.append("file", file);
+
+    const response = await fetch("/api/disputes/evidence/upload", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${session.access_token}`,
+      },
+      body: formData,
+    });
+    const payload = (await response.json()) as { error?: string };
+
+    if (!response.ok) {
+      console.error("Seller dashboard evidence API upload error:", {
+        error: payload.error,
+        orderId: order.id,
+        fileName: file.name,
+      });
+      setDashboardMessage(payload.error || "Evidence upload failed.");
+      setUploadingEvidenceId("");
+      return;
+    }
+
+    setEvidenceFiles((items) => ({ ...items, [order.id]: null }));
+    setEvidenceNotes((items) => ({ ...items, [order.id]: "" }));
+    setCollapsedEvidenceUploads((items) => ({ ...items, [order.id]: true }));
+    setDashboardMessage("Evidence uploaded.");
+    setUploadingEvidenceId("");
+  }
+
   function getPayoutBlockReason(order: DashboardOrder) {
     if (order.transferStatus === "paid") return "Payout released";
     if (!payoutStatus?.payoutsEnabled) return "Payout setup incomplete";
@@ -849,6 +915,11 @@ export default function SellerDashboardPage() {
                     order.transferStatus !== "paid" &&
                     order.transferStatus !== "blocked";
                   const showPayoutReason = !canReleasePayout && blockReason;
+                  const canUploadEvidence = ["opened", "under_review"].includes(
+                    order.disputeStatus,
+                  );
+                  const showEvidenceUpload =
+                    canUploadEvidence && !collapsedEvidenceUploads[order.id];
 
                   return (
                     <article key={order.id} className="table-row order-row payout-order-row">
@@ -953,6 +1024,38 @@ export default function SellerDashboardPage() {
                           ) : null
                         )}
                       </div>
+                      {showEvidenceUpload ? (
+                        <div className="evidence-upload">
+                          <span>Upload Evidence</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(event) =>
+                              setEvidenceFiles((items) => ({
+                                ...items,
+                                [order.id]: event.target.files?.[0] || null,
+                              }))
+                            }
+                          />
+                          <textarea
+                            value={evidenceNotes[order.id] || ""}
+                            onChange={(event) =>
+                              setEvidenceNotes((items) => ({
+                                ...items,
+                                [order.id]: event.target.value,
+                              }))
+                            }
+                            placeholder="Optional evidence note"
+                          />
+                          <button
+                            type="button"
+                            disabled={uploadingEvidenceId === order.id}
+                            onClick={() => uploadEvidence(order)}
+                          >
+                            Upload Evidence
+                          </button>
+                        </div>
+                      ) : null}
                     </article>
                   );
                 })}
@@ -1329,6 +1432,55 @@ const pageStyles = `
     border-radius: 999px;
     background: rgba(201,205,211,0.045);
     padding: 7px 9px;
+  }
+
+  .evidence-upload {
+    grid-column: 1 / -1;
+    border: 1px solid rgba(201,205,211,0.12);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.035);
+    padding: 10px;
+    display: grid;
+    grid-template-columns: minmax(160px, 0.35fr) minmax(220px, 1fr) auto;
+    gap: 9px;
+    align-items: center;
+  }
+
+  .evidence-upload span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .evidence-upload input,
+  .evidence-upload textarea {
+    border: 1px solid #202026;
+    border-radius: 10px;
+    background: rgba(8,8,10,0.84);
+    color: #fff;
+    padding: 9px 10px;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .evidence-upload textarea {
+    min-height: 42px;
+    resize: vertical;
+  }
+
+  .evidence-upload button {
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    color: #fff;
+    min-height: 38px;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
   }
 
   .status {
