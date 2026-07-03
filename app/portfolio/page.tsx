@@ -183,9 +183,13 @@ function isActiveListing(listing: SupabasePortfolioListing) {
   return listing.status?.toLowerCase() === "active";
 }
 
+function isSoldListing(listing: SupabasePortfolioListing) {
+  return listing.status?.toLowerCase() === "sold";
+}
+
 function isCollectionOnlyListing(listing: SupabasePortfolioListing) {
   const status = listing.status?.toLowerCase();
-  return status === "collection" || Boolean(listing.is_collection_card);
+  return !isSoldListing(listing) && (status === "collection" || Boolean(listing.is_collection_card));
 }
 
 function isDeletedListing(listing: SupabasePortfolioListing) {
@@ -247,7 +251,7 @@ function getListingTags(listing: SupabasePortfolioListing) {
   const isGraded =
     Boolean(listing.grader && listing.grade) ||
     listing.card_type?.toLowerCase() === "graded";
-  const tags = [isCollectionOnlyListing(listing) ? "Collection" : isGraded ? "Graded" : "Raw"];
+  const tags = [isSoldListing(listing) ? "Sold" : isCollectionOnlyListing(listing) ? "Collection" : isGraded ? "Graded" : "Raw"];
 
   if (listing.estimated_value && listing.estimated_value >= 1200) {
     tags.push("Grail");
@@ -398,10 +402,16 @@ export default function PortfolioPage() {
     () => visibleRealListings.filter(isActiveListing),
     [visibleRealListings],
   );
+  const soldRealListings = useMemo(
+    () => visibleRealListings.filter(isSoldListing),
+    [visibleRealListings],
+  );
   const explicitOwnedRealListings = useMemo(
     () =>
       visibleRealListings.filter(
-        (listing) => listing.is_collection_card || !isActiveListing(listing),
+        (listing) =>
+          !isSoldListing(listing) &&
+          (listing.is_collection_card || !isActiveListing(listing)),
       ),
     [visibleRealListings],
   );
@@ -427,7 +437,7 @@ export default function PortfolioPage() {
       ["Raw", visibleRealListings.filter((listing) => !listing.grader && listing.card_type?.toLowerCase() !== "graded").length],
       ["Grails", visibleRealListings.filter((listing) => listing.estimated_value && listing.estimated_value >= 1200).length],
       ["Listed", visibleRealListings.filter(isActiveListing).length],
-      ["Collection-only", visibleRealListings.filter((listing) => !isActiveListing(listing)).length],
+      ["Collection-only", visibleRealListings.filter((listing) => !isActiveListing(listing) && !isSoldListing(listing)).length],
     ];
 
     return rows.map(([label, count]) => `${label} ${Math.round((Number(count) / total) * 100)}%`);
@@ -716,7 +726,9 @@ export default function PortfolioPage() {
           ? drafts.length
           : activeTab === "Watched"
             ? watched.length
-            : soldCards.length;
+            : shouldShowLivePortfolio
+              ? soldRealListings.length
+              : soldCards.length;
 
   function renderOwnedCard(card: PortfolioCard) {
     return (
@@ -749,7 +761,10 @@ export default function PortfolioPage() {
     const costBasis = getListingCostBasis(listing);
     const gainLoss = costBasis && value ? value - costBasis : null;
     const isActive = isActiveListing(listing);
-    const statusLabel = isActive
+    const isSold = isSoldListing(listing);
+    const statusLabel = isSold
+      ? "SOLD"
+      : isActive
       ? "Listed For Sale"
       : isCollectionOnlyListing(listing)
         ? "In Collection"
@@ -763,7 +778,9 @@ export default function PortfolioPage() {
           accent={realListingAccents[index % realListingAccents.length]}
         />
         <div className="badge-row">
-          {getListingTags(listing).map((tag) => <span key={tag}>{tag}</span>)}
+          {getListingTags(listing).map((tag) => (
+            <span key={tag}>{tag === "Sold" ? "SOLD" : tag}</span>
+          ))}
         </div>
         <h3>{title}</h3>
         <p>{getListingSubtitle(listing)}</p>
@@ -778,7 +795,14 @@ export default function PortfolioPage() {
         {savedNote ? <p className="saved-note">Note: {savedNote}</p> : null}
         <div className="card-actions">
           <Link href={`/cards/${listing.id}`}>View Details</Link>
-          {isActive ? (
+          {isSold ? (
+            <>
+              <Link href={`/list?edit=${listing.id}`}>Edit Card</Link>
+              <button type="button" onClick={() => openNoteModal(listing.id, title)}>
+                Add Note
+              </button>
+            </>
+          ) : isActive ? (
             <button
               type="button"
               onClick={() =>
@@ -807,11 +831,36 @@ export default function PortfolioPage() {
               </button>
             </>
           )}
-          <Link href={`/list?edit=${listing.id}`}>Edit Listing</Link>
-          <button type="button" onClick={() => openNoteModal(listing.id, title)}>
-            Add Note
-          </button>
+          {!isSold ? (
+            <>
+              <Link href={`/list?edit=${listing.id}`}>Edit Listing</Link>
+              <button type="button" onClick={() => openNoteModal(listing.id, title)}>
+                Add Note
+              </button>
+            </>
+          ) : null}
         </div>
+      </article>
+    );
+  }
+
+  function renderRealSoldRow(listing: SupabasePortfolioListing, index: number) {
+    const title = getListingTitle(listing);
+
+    return (
+      <article key={listing.id} className="list-row">
+        <ListingArt
+          listing={listing}
+          accent={realListingAccents[index % realListingAccents.length]}
+        />
+        <div>
+          <h3>{title}</h3>
+          <p>{getListingSubtitle(listing)}</p>
+        </div>
+        <strong>{formatOptionalCurrency(listing.price)}</strong>
+        <span>SOLD</span>
+        <span>{listing.created_at ? formatDate(listing.created_at) : "Recently"}</span>
+        <Link href={`/cards/${listing.id}`}>View Details</Link>
       </article>
     );
   }
@@ -1033,21 +1082,39 @@ export default function PortfolioPage() {
             ) : null}
 
             {activeTab === "Sold" ? (
-              <section className="list-panel panel">
-                {soldCards.map((card) => (
-                  <article key={card.id} className="list-row">
-                    <CardArt accent={card.accent} />
-                    <div>
-                      <h3>{card.title}</h3>
-                      <p>{card.subtitle}</p>
-                    </div>
-                    <strong>{formatCurrency(card.salePrice ?? card.estimatedValue)}</strong>
-                    <span>{card.soldDate}</span>
-                    <span>Buyer: {card.buyer}</span>
-                    <Link href={card.route}>View Details</Link>
-                  </article>
-                ))}
-              </section>
+              shouldShowLivePortfolio ? (
+                isLoadingListings ? (
+                  <EmptyState
+                    title="Loading sold cards..."
+                    copy="Fetching your completed GRAIL sales."
+                  />
+                ) : soldRealListings.length > 0 ? (
+                  <section className="list-panel panel">
+                    {soldRealListings.map(renderRealSoldRow)}
+                  </section>
+                ) : (
+                  <EmptyState
+                    title="No sold cards yet."
+                    copy="Sold listings will appear here after Stripe checkout completes and the webhook marks them sold."
+                  />
+                )
+              ) : (
+                <section className="list-panel panel">
+                  {soldCards.map((card) => (
+                    <article key={card.id} className="list-row">
+                      <CardArt accent={card.accent} />
+                      <div>
+                        <h3>{card.title}</h3>
+                        <p>{card.subtitle}</p>
+                      </div>
+                      <strong>{formatCurrency(card.salePrice ?? card.estimatedValue)}</strong>
+                      <span>{card.soldDate}</span>
+                      <span>Buyer: {card.buyer}</span>
+                      <Link href={card.route}>View Details</Link>
+                    </article>
+                  ))}
+                </section>
+              )
             ) : null}
           </div>
 

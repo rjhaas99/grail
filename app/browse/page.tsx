@@ -804,7 +804,8 @@ function BrowseContent() {
             status === "collection" ||
             (Boolean(listing.is_public_collection) &&
               status !== "inactive" &&
-              status !== "deleted")
+              status !== "deleted" &&
+              status !== "sold")
           );
         });
 

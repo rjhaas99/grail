@@ -90,7 +90,19 @@ export default function CollectionsPage() {
         }
 
         const listingsBySeller = new Map<string, ListingRow[]>();
-        listings.forEach((listing) => {
+        listings
+          .filter((listing) => {
+            const status = listing.status?.toLowerCase();
+            return (
+              status === "active" ||
+              status === "collection" ||
+              (Boolean(listing.is_public_collection) &&
+                status !== "inactive" &&
+                status !== "deleted" &&
+                status !== "sold")
+            );
+          })
+          .forEach((listing) => {
           if (!listing.seller_id) {
             return;
           }
