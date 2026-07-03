@@ -16,7 +16,13 @@ type SupabaseOrderRow = {
   status?: string | null;
   created_at?: string | null;
   fulfillment_status?: string | null;
+  tracking_number?: string | null;
+  carrier?: string | null;
+  delivered_at?: string | null;
   dispute_status?: string | null;
+  dispute_reason?: string | null;
+  dispute_notes?: string | null;
+  dispute_opened_at?: string | null;
   transfer_status?: string | null;
   inspection_ends_at?: string | null;
 };
@@ -42,7 +48,13 @@ type OrderView = {
   href: string;
   isBuyer?: boolean;
   fulfillmentStatus?: string;
+  trackingNumber?: string;
+  carrier?: string;
+  deliveredAt?: string | null;
   disputeStatus?: string;
+  disputeReason?: string | null;
+  disputeNotes?: string | null;
+  disputeOpenedAt?: string | null;
   transferStatus?: string;
   inspectionEndsAt?: string | null;
 };
@@ -57,9 +69,24 @@ const mockOrderViews: OrderView[] = mockOrders.map((order) => ({
   href: order.href,
   isBuyer: true,
   fulfillmentStatus: "processing",
+  trackingNumber: "",
+  carrier: "",
+  deliveredAt: null,
   disputeStatus: "none",
+  disputeReason: null,
+  disputeNotes: null,
+  disputeOpenedAt: null,
   transferStatus: "not_ready",
 }));
+
+const disputeReasons = [
+  "Not received",
+  "Damaged",
+  "Not as described",
+  "Suspected fake/counterfeit",
+  "Wrong card",
+  "Other",
+];
 
 function formatCurrency(value: number, currency = "usd") {
   return new Intl.NumberFormat("en-US", {
@@ -81,6 +108,20 @@ function formatDate(value?: string | null) {
   });
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) {
+    return "Not set";
+  }
+
+  return new Date(value).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function shortId(value?: string | null) {
   return value ? value.slice(0, 8) : "Unknown";
 }
@@ -93,11 +134,55 @@ function isInspectionActive(value?: string | null) {
   return value ? new Date(value).getTime() > Date.now() : false;
 }
 
+function getTrackingUrl(carrier?: string, trackingNumber?: string) {
+  if (!carrier || !trackingNumber) {
+    return "";
+  }
+
+  const encodedTracking = encodeURIComponent(trackingNumber);
+
+  switch (carrier.toLowerCase()) {
+    case "usps":
+      return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodedTracking}`;
+    case "ups":
+      return `https://www.ups.com/track?tracknum=${encodedTracking}`;
+    case "fedex":
+      return `https://www.fedex.com/fedextrack/?trknbr=${encodedTracking}`;
+    case "dhl":
+      return `https://www.dhl.com/us-en/home/tracking.html?tracking-id=${encodedTracking}`;
+    default:
+      return "";
+  }
+}
+
+function getInspectionStatus(order: OrderView) {
+  if (order.transferStatus === "paid") {
+    return "Payout released.";
+  }
+
+  if (order.disputeStatus === "opened") {
+    return "Dispute opened. Payout blocked.";
+  }
+
+  if (order.fulfillmentStatus !== "delivered") {
+    return "Waiting for delivery.";
+  }
+
+  if (isInspectionActive(order.inspectionEndsAt)) {
+    return `Inspection window active until ${formatDateTime(order.inspectionEndsAt)}.`;
+  }
+
+  return "Inspection complete. Payout eligible.";
+}
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderView[]>(mockOrderViews);
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("Demo orders");
   const [updatingOrderId, setUpdatingOrderId] = useState("");
+  const [disputeOrder, setDisputeOrder] = useState<OrderView | null>(null);
+  const [disputeReason, setDisputeReason] = useState("");
+  const [disputeNotes, setDisputeNotes] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -220,7 +305,13 @@ export default function OrdersPage() {
               href: order.listing_id ? `/cards/${order.listing_id}` : "/orders",
               isBuyer,
               fulfillmentStatus: order.fulfillment_status || "pending",
+              trackingNumber: order.tracking_number || "",
+              carrier: order.carrier || "",
+              deliveredAt: order.delivered_at,
               disputeStatus: order.dispute_status || "none",
+              disputeReason: order.dispute_reason,
+              disputeNotes: order.dispute_notes,
+              disputeOpenedAt: order.dispute_opened_at,
               transferStatus: order.transfer_status || "not_ready",
               inspectionEndsAt: order.inspection_ends_at,
             };
@@ -248,7 +339,24 @@ export default function OrdersPage() {
     };
   }, []);
 
-  async function openDispute(order: OrderView) {
+  function openDispute(order: OrderView) {
+    setDisputeOrder(order);
+    setDisputeReason("");
+    setDisputeNotes("");
+    setNotice("");
+  }
+
+  async function submitDispute() {
+    if (!disputeOrder) {
+      return;
+    }
+
+    if (!disputeReason || !disputeNotes.trim()) {
+      setNotice("Choose a dispute reason and describe the issue.");
+      return;
+    }
+
+    const order = disputeOrder;
     setUpdatingOrderId(order.id);
 
     const {
@@ -266,11 +374,29 @@ export default function OrdersPage() {
       return;
     }
 
+    const canOpenDispute =
+      order.isBuyer &&
+      order.fulfillmentStatus === "delivered" &&
+      Boolean(order.inspectionEndsAt) &&
+      isInspectionActive(order.inspectionEndsAt) &&
+      order.disputeStatus === "none" &&
+      order.transferStatus !== "paid";
+
+    if (!canOpenDispute) {
+      setNotice("This order is not eligible for a dispute.");
+      setUpdatingOrderId("");
+      return;
+    }
+
+    const disputeOpenedAt = new Date().toISOString();
     const { error } = await supabase
       .from("orders")
       .update({
         dispute_status: "opened",
         transfer_status: "blocked",
+        dispute_reason: disputeReason,
+        dispute_notes: disputeNotes.trim(),
+        dispute_opened_at: disputeOpenedAt,
       })
       .eq("id", order.id)
       .eq("buyer_id", session.user.id);
@@ -289,10 +415,20 @@ export default function OrdersPage() {
     setOrders((items) =>
       items.map((item) =>
         item.id === order.id
-          ? { ...item, disputeStatus: "opened", transferStatus: "blocked" }
+          ? {
+              ...item,
+              disputeStatus: "opened",
+              disputeReason,
+              disputeNotes: disputeNotes.trim(),
+              disputeOpenedAt,
+              transferStatus: "blocked",
+            }
           : item,
       ),
     );
+    setDisputeOrder(null);
+    setDisputeReason("");
+    setDisputeNotes("");
     setNotice("Dispute opened. GRAIL review workflow coming next.");
     setUpdatingOrderId("");
   }
@@ -325,10 +461,13 @@ export default function OrdersPage() {
           ) : null}
 
           {!isLoading ? orders.map((order) => {
+            const trackingUrl = getTrackingUrl(order.carrier, order.trackingNumber);
             const canOpenDispute =
               order.isBuyer &&
               order.fulfillmentStatus === "delivered" &&
+              Boolean(order.inspectionEndsAt) &&
               order.disputeStatus === "none" &&
+              order.transferStatus !== "paid" &&
               isInspectionActive(order.inspectionEndsAt);
 
             return (
@@ -345,6 +484,21 @@ export default function OrdersPage() {
                   </strong>
                   <span>{order.fulfillmentStatus}</span>
                   <span>Dispute: {order.disputeStatus}</span>
+                </div>
+                <div className="order-shipping-stack">
+                  <span>{order.carrier ? `Carrier: ${order.carrier}` : "Carrier pending"}</span>
+                  <span>
+                    {order.trackingNumber
+                      ? `Tracking: ${order.trackingNumber}`
+                      : "Tracking pending"}
+                  </span>
+                  {trackingUrl ? (
+                    <a href={trackingUrl} target="_blank" rel="noreferrer">
+                      Track Package
+                    </a>
+                  ) : null}
+                  <span>Delivered: {formatDate(order.deliveredAt)}</span>
+                  <span>{getInspectionStatus(order)}</span>
                 </div>
                 <strong>{order.totalDisplay}</strong>
                 <div className="order-actions">
@@ -364,6 +518,70 @@ export default function OrdersPage() {
           }) : null}
         </section>
       </div>
+      {disputeOrder ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="panel dispute-modal" role="dialog" aria-modal="true">
+            <div className="modal-heading">
+              <div>
+                <span>Open Dispute</span>
+                <h2>{disputeOrder.cardTitle}</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDisputeOrder(null);
+                  setDisputeReason("");
+                  setDisputeNotes("");
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <label>
+              <span>Reason</span>
+              <select
+                value={disputeReason}
+                onChange={(event) => setDisputeReason(event.target.value)}
+              >
+                <option value="">Select a reason</option>
+                {disputeReasons.map((reason) => (
+                  <option key={reason} value={reason}>
+                    {reason}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Describe the issue</span>
+              <textarea
+                value={disputeNotes}
+                onChange={(event) => setDisputeNotes(event.target.value)}
+                placeholder="Tell GRAIL what happened with this order."
+              />
+            </label>
+            <div className="order-actions">
+              <button
+                type="button"
+                disabled={updatingOrderId === disputeOrder.id}
+                onClick={submitDispute}
+              >
+                Submit Dispute
+              </button>
+              <button
+                type="button"
+                disabled={updatingOrderId === disputeOrder.id}
+                onClick={() => {
+                  setDisputeOrder(null);
+                  setDisputeReason("");
+                  setDisputeNotes("");
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -468,7 +686,7 @@ const pageStyles = `
     background: rgba(8,8,10,0.76);
     padding: 14px;
     display: grid;
-    grid-template-columns: 1fr auto auto auto;
+    grid-template-columns: minmax(220px, 1fr) 140px minmax(190px, 0.8fr) auto auto;
     gap: 16px;
     align-items: center;
   }
@@ -488,14 +706,22 @@ const pageStyles = `
   }
 
   .order-status-stack,
+  .order-shipping-stack,
   .order-actions {
     display: grid;
     gap: 7px;
     justify-items: start;
   }
 
-  .order-status-stack span {
+  .order-status-stack span,
+  .order-shipping-stack span {
     letter-spacing: 0;
+  }
+
+  .order-shipping-stack a {
+    min-height: 30px;
+    padding: 0 10px;
+    font-size: 11px;
   }
 
   .order-actions button:disabled {
@@ -546,6 +772,81 @@ const pageStyles = `
     font-size: 20px;
     line-height: 24px;
     font-weight: 900;
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    background: rgba(0,0,0,0.72);
+    display: grid;
+    place-items: center;
+    padding: 18px;
+  }
+
+  .dispute-modal {
+    width: min(480px, 100%);
+    padding: 16px;
+    display: grid;
+    gap: 12px;
+  }
+
+  .modal-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .modal-heading span,
+  .dispute-modal label span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .modal-heading h2 {
+    margin: 5px 0 0;
+    color: #fff;
+    font-size: 18px;
+    line-height: 22px;
+    font-weight: 900;
+  }
+
+  .modal-heading button {
+    border: 1px solid rgba(231,222,208,0.24);
+    border-radius: 999px;
+    background: rgba(231,222,208,0.055);
+    color: #fff;
+    min-height: 32px;
+    padding: 0 11px;
+    font-size: 11px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .dispute-modal label {
+    display: grid;
+    gap: 7px;
+  }
+
+  .dispute-modal select,
+  .dispute-modal textarea {
+    border: 1px solid #202026;
+    border-radius: 10px;
+    background: rgba(8,8,10,0.84);
+    color: #fff;
+    padding: 10px 11px;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .dispute-modal textarea {
+    min-height: 110px;
+    resize: vertical;
   }
 
   @media (max-width: 1100px) {

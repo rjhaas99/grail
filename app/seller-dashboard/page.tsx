@@ -19,6 +19,9 @@ type DashboardOrder = {
   fulfillmentStatus: string;
   transferStatus: string;
   disputeStatus: string;
+  disputeReason?: string | null;
+  disputeNotes?: string | null;
+  disputeOpenedAt?: string | null;
   trackingNumber: string;
   carrier: string;
   deliveredAt?: string | null;
@@ -43,6 +46,9 @@ type SupabaseOrderRow = {
   delivered_at?: string | null;
   inspection_ends_at?: string | null;
   dispute_status?: string | null;
+  dispute_reason?: string | null;
+  dispute_notes?: string | null;
+  dispute_opened_at?: string | null;
   seller_payout_amount?: number | null;
   platform_fee?: number | null;
   processing_fee?: number | null;
@@ -82,6 +88,9 @@ const initialOrders = mockSellerDashboardData.recentOrders.map((order) => ({
   fulfillmentStatus: "pending",
   transferStatus: "not_ready",
   disputeStatus: "none",
+  disputeReason: null,
+  disputeNotes: null,
+  disputeOpenedAt: null,
   trackingNumber: "",
   carrier: "",
   deliveredAt: null,
@@ -312,6 +321,9 @@ export default function SellerDashboardPage() {
               fulfillmentStatus: order.fulfillment_status || "pending",
               transferStatus: order.transfer_status || "not_ready",
               disputeStatus: order.dispute_status || "none",
+              disputeReason: order.dispute_reason,
+              disputeNotes: order.dispute_notes,
+              disputeOpenedAt: order.dispute_opened_at,
               trackingNumber: order.tracking_number || "",
               carrier: order.carrier || "",
               deliveredAt: order.delivered_at,
@@ -866,6 +878,15 @@ export default function SellerDashboardPage() {
                         <span>Tracking {order.trackingNumber || "Not added"}</span>
                         <span>Delivered {formatDate(order.deliveredAt)}</span>
                         <span>{getInspectionStatus(order)}</span>
+                        {order.disputeReason ? (
+                          <span>Dispute reason: {order.disputeReason}</span>
+                        ) : null}
+                        {order.disputeNotes ? (
+                          <span>Dispute notes: {order.disputeNotes}</span>
+                        ) : null}
+                        {order.disputeOpenedAt ? (
+                          <span>Dispute opened: {formatDateTime(order.disputeOpenedAt)}</span>
+                        ) : null}
                       </div>
                       <div className="row-actions">
                         {order.href ? <Link href={order.href}>View Card</Link> : null}
