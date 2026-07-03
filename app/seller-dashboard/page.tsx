@@ -21,6 +21,7 @@ type DashboardOrder = {
   disputeStatus: string;
   trackingNumber: string;
   carrier: string;
+  deliveredAt?: string | null;
   inspectionEndsAt?: string | null;
   sellerPayoutAmount: number;
   href?: string;
@@ -83,8 +84,11 @@ const initialOrders = mockSellerDashboardData.recentOrders.map((order) => ({
   disputeStatus: "none",
   trackingNumber: "",
   carrier: "",
+  deliveredAt: null,
   sellerPayoutAmount: 0,
 }));
+
+const carrierOptions = ["USPS", "UPS", "FedEx", "DHL", "Other"];
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -138,6 +142,44 @@ function formatDate(value?: string | null) {
     day: "numeric",
     year: "numeric",
   });
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) {
+    return "Not set";
+  }
+
+  return new Date(value).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function hasInspectionPassed(value?: string | null) {
+  return Boolean(value && new Date(value).getTime() <= Date.now());
+}
+
+function getInspectionStatus(order: DashboardOrder) {
+  if (order.transferStatus === "paid") {
+    return "Payout released.";
+  }
+
+  if (order.disputeStatus === "opened") {
+    return "Dispute opened. Payout blocked.";
+  }
+
+  if (order.fulfillmentStatus !== "delivered") {
+    return "Waiting for delivery.";
+  }
+
+  if (order.inspectionEndsAt && !hasInspectionPassed(order.inspectionEndsAt)) {
+    return `Inspection window active until ${formatDateTime(order.inspectionEndsAt)}.`;
+  }
+
+  return "Inspection complete. Payout eligible.";
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -272,6 +314,7 @@ export default function SellerDashboardPage() {
               disputeStatus: order.dispute_status || "none",
               trackingNumber: order.tracking_number || "",
               carrier: order.carrier || "",
+              deliveredAt: order.delivered_at,
               inspectionEndsAt: order.inspection_ends_at,
               sellerPayoutAmount,
               href: order.listing_id ? `/cards/${order.listing_id}` : "/orders",
@@ -419,7 +462,11 @@ export default function SellerDashboardPage() {
     );
   }
 
-  async function updateOrderFields(orderId: string, fields: Record<string, unknown>) {
+  async function updateOrderFields(
+    orderId: string,
+    fields: Record<string, unknown>,
+    actionLabel = "Order update",
+  ) {
     const {
       data: { session },
       error: sessionError,
@@ -434,20 +481,41 @@ export default function SellerDashboardPage() {
       return false;
     }
 
-    const { error } = await supabase
+    const { data, error, status, statusText } = await supabase
       .from("orders")
       .update(fields)
       .eq("id", orderId)
-      .eq("seller_id", session.user.id);
+      .eq("seller_id", session.user.id)
+      .select("id, carrier, tracking_number")
+      .maybeSingle();
 
     if (error) {
       console.error("Seller dashboard fulfillment update error:", {
+        actionLabel,
         error,
         errorMessage: error.message,
+        status,
+        statusText,
         orderId,
+        sellerId: session.user.id,
         fields,
       });
-      setDashboardMessage("Order could not be updated. Check RLS policies and order columns.");
+      setDashboardMessage(`${actionLabel} failed: ${error.message}`);
+      return false;
+    }
+
+    if (!data) {
+      const detail =
+        "No matching order row was updated. Check that this order belongs to the logged-in seller and that RLS allows seller updates.";
+      console.error("Seller dashboard fulfillment update matched no rows:", {
+        actionLabel,
+        orderId,
+        sellerId: session.user.id,
+        fields,
+        status,
+        statusText,
+      });
+      setDashboardMessage(`${actionLabel} failed: ${detail}`);
       return false;
     }
 
@@ -476,7 +544,7 @@ export default function SellerDashboardPage() {
     const success = await updateOrderFields(trackingOrderId, {
       carrier: trackingCarrier.trim(),
       tracking_number: trackingNumber.trim(),
-    });
+    }, "Save tracking");
 
     if (success) {
       updateLocalOrder(trackingOrderId, {
@@ -493,6 +561,11 @@ export default function SellerDashboardPage() {
   }
 
   async function markShipped(order: DashboardOrder) {
+    if (!order.carrier || !order.trackingNumber) {
+      setDashboardMessage("Add carrier and tracking number before marking shipped.");
+      return;
+    }
+
     setUpdatingOrderId(order.id);
 
     const now = new Date().toISOString();
@@ -514,6 +587,11 @@ export default function SellerDashboardPage() {
   }
 
   async function markDelivered(order: DashboardOrder) {
+    if (order.fulfillmentStatus !== "shipped") {
+      setDashboardMessage("Mark the order shipped before marking it delivered.");
+      return;
+    }
+
     setUpdatingOrderId(order.id);
 
     const deliveredAt = new Date();
@@ -532,6 +610,7 @@ export default function SellerDashboardPage() {
         fulfillmentStatus: "delivered",
         transferStatus: "not_ready",
         disputeStatus: order.disputeStatus || "none",
+        deliveredAt: deliveredAt.toISOString(),
         inspectionEndsAt: inspectionEndsAt.toISOString(),
       });
       setDashboardMessage("Order marked delivered. Payout waits for the inspection window.");
@@ -603,9 +682,13 @@ export default function SellerDashboardPage() {
   function getPayoutBlockReason(order: DashboardOrder) {
     if (order.transferStatus === "paid") return "Payout released";
     if (!payoutStatus?.payoutsEnabled) return "Payout setup incomplete";
-    if (order.disputeStatus === "opened") return "Dispute opened";
+    if (order.disputeStatus === "opened") return "Dispute opened - payout blocked";
     if (order.fulfillmentStatus !== "delivered") return "Waiting for delivery";
-    if (order.transferStatus !== "ready") return "Inspection window active";
+    if (order.transferStatus === "failed") return "Payout failed. Retry when eligible.";
+    if (order.inspectionEndsAt && !hasInspectionPassed(order.inspectionEndsAt)) {
+      return "Inspection window active";
+    }
+    if (order.transferStatus !== "ready") return "Payout not ready";
     return "";
   }
 
@@ -737,11 +820,23 @@ export default function SellerDashboardPage() {
               <div className="table-list">
                 {orders.map((order) => {
                   const blockReason = getPayoutBlockReason(order);
+                  const hasTracking = Boolean(order.carrier && order.trackingNumber);
+                  const inspectionComplete =
+                    order.fulfillmentStatus === "delivered" &&
+                    order.disputeStatus === "none" &&
+                    hasInspectionPassed(order.inspectionEndsAt);
                   const canReleasePayout =
                     payoutStatus?.payoutsEnabled &&
                     order.transferStatus === "ready" &&
                     order.disputeStatus === "none" &&
-                    order.fulfillmentStatus === "delivered";
+                    order.fulfillmentStatus === "delivered" &&
+                    order.sellerPayoutAmount > 0;
+                  const canMarkReady =
+                    inspectionComplete &&
+                    order.transferStatus !== "ready" &&
+                    order.transferStatus !== "paid" &&
+                    order.transferStatus !== "blocked";
+                  const showPayoutReason = !canReleasePayout && blockReason;
 
                   return (
                     <article key={order.id} className="table-row order-row payout-order-row">
@@ -755,49 +850,72 @@ export default function SellerDashboardPage() {
                         <span>Sold price</span>
                         <span>Payout {order.payoutDisplay}</span>
                       </div>
-                      <div>
+                      <div className="status-stack">
                         <span className={`status status-${order.fulfillmentStatus}`}>
                           {order.fulfillmentStatus}
                         </span>
+                        <span className={`status status-${order.disputeStatus}`}>
+                          Dispute {order.disputeStatus}
+                        </span>
                         <span className={`status status-${order.transferStatus}`}>
-                          {order.transferStatus}
+                          Payout {order.transferStatus}
                         </span>
                       </div>
                       <div>
+                        <span>Carrier {order.carrier || "Pending"}</span>
                         <span>Tracking {order.trackingNumber || "Not added"}</span>
-                        <span>{order.carrier || "Carrier pending"}</span>
-                        <span>Inspection {formatDate(order.inspectionEndsAt)}</span>
+                        <span>Delivered {formatDate(order.deliveredAt)}</span>
+                        <span>{getInspectionStatus(order)}</span>
                       </div>
                       <div className="row-actions">
                         {order.href ? <Link href={order.href}>View Card</Link> : null}
-                        <button
-                          type="button"
-                          disabled={updatingOrderId === order.id}
-                          onClick={() => openTrackingModal(order)}
-                        >
-                          Add Tracking
-                        </button>
-                        <button
-                          type="button"
-                          disabled={updatingOrderId === order.id}
-                          onClick={() => markShipped(order)}
-                        >
-                          Mark Shipped
-                        </button>
-                        <button
-                          type="button"
-                          disabled={updatingOrderId === order.id}
-                          onClick={() => markDelivered(order)}
-                        >
-                          Mark Delivered
-                        </button>
-                        {isDevToolsEnabled ? (
+                        {order.fulfillmentStatus === "pending" ||
+                        order.fulfillmentStatus === "shipped" ? (
+                          <button
+                            type="button"
+                            disabled={updatingOrderId === order.id}
+                            onClick={() => openTrackingModal(order)}
+                          >
+                            {hasTracking ? "Edit Tracking" : "Add Tracking"}
+                          </button>
+                        ) : null}
+                        {order.fulfillmentStatus === "pending" && hasTracking ? (
+                          <button
+                            type="button"
+                            disabled={updatingOrderId === order.id}
+                            onClick={() => markShipped(order)}
+                          >
+                            Mark Shipped
+                          </button>
+                        ) : null}
+                        {order.fulfillmentStatus === "pending" && !hasTracking ? (
+                          <span className="payout-reason">Add tracking before shipping</span>
+                        ) : null}
+                        {order.fulfillmentStatus === "shipped" ? (
+                          <button
+                            type="button"
+                            disabled={updatingOrderId === order.id}
+                            onClick={() => markDelivered(order)}
+                          >
+                            Mark Delivered
+                          </button>
+                        ) : null}
+                        {canMarkReady && isDevToolsEnabled ? (
                           <button
                             type="button"
                             disabled={updatingOrderId === order.id}
                             onClick={() => markInspectionComplete(order)}
                           >
                             Mark Inspection Complete
+                          </button>
+                        ) : null}
+                        {canMarkReady && !isDevToolsEnabled ? (
+                          <button
+                            type="button"
+                            disabled={updatingOrderId === order.id}
+                            onClick={() => markInspectionComplete(order)}
+                          >
+                            Mark Ready for Payout
                           </button>
                         ) : null}
                         {canReleasePayout ? (
@@ -809,7 +927,9 @@ export default function SellerDashboardPage() {
                             Release Payout
                           </button>
                         ) : (
-                          <span className="payout-reason">{blockReason}</span>
+                          showPayoutReason ? (
+                            <span className="payout-reason">{blockReason}</span>
+                          ) : null
                         )}
                       </div>
                     </article>
@@ -916,11 +1036,17 @@ export default function SellerDashboardPage() {
             </div>
             <label>
               <span>Carrier</span>
-              <input
+              <select
                 value={trackingCarrier}
                 onChange={(event) => setTrackingCarrier(event.target.value)}
-                placeholder="USPS, UPS, FedEx..."
-              />
+              >
+                <option value="">Select carrier</option>
+                {carrierOptions.map((carrier) => (
+                  <option key={carrier} value={carrier}>
+                    {carrier}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               <span>Tracking number</span>
@@ -1150,6 +1276,11 @@ const pageStyles = `
     grid-template-columns: minmax(180px, 1.2fr) 110px 120px 150px minmax(220px, auto);
   }
 
+  .status-stack {
+    display: grid;
+    gap: 6px;
+  }
+
   .table-row strong {
     display: block;
     color: #fff;
@@ -1333,7 +1464,8 @@ const pageStyles = `
     text-transform: uppercase;
   }
 
-  .tracking-modal input {
+  .tracking-modal input,
+  .tracking-modal select {
     border: 1px solid #202026;
     border-radius: 10px;
     background: rgba(8,8,10,0.84);
