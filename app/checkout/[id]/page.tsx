@@ -45,6 +45,13 @@ type CheckoutCard = {
   source: "mock" | "supabase" | "fallback";
 };
 
+const checkoutLegalLinks = [
+  { label: "Buyer Protection", href: "/buyer-protection" },
+  { label: "Fees", href: "/fees" },
+  { label: "Refunds & Disputes", href: "/refund-dispute-policy" },
+  { label: "Terms", href: "/terms" },
+];
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -506,6 +513,20 @@ export default function CheckoutPage() {
             ) : null}
             {stripeError ? <p className="stripe-error">{stripeError}</p> : null}
 
+            <div className="checkout-legal">
+              <p>
+                By using GRAIL checkout, you agree to the Terms and understand
+                GRAIL Protected Checkout, fees, and dispute policies.
+              </p>
+              <div>
+                {checkoutLegalLinks.map((link) => (
+                  <Link key={link.href} href={link.href}>
+                    {link.label}
+                  </Link>
+                ))}
+              </div>
+            </div>
+
             {isPlaced ? (
               <div className="confirmation-box">
                 <strong>Order placed.</strong>
@@ -801,6 +822,37 @@ const pageStyles = `
   .summary-total strong {
     font-size: 26px;
     line-height: 30px;
+  }
+
+  .checkout-legal {
+    border: 1px solid rgba(201,205,211,0.16);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.045);
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .checkout-legal p {
+    margin: 0;
+    color: #a1a1aa;
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 800;
+  }
+
+  .checkout-legal div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .checkout-legal a {
+    min-height: 30px;
+    padding: 0 9px;
+    border-radius: 8px;
+    color: #E7DED0;
+    font-size: 11px;
   }
 
   .place-order {

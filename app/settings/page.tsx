@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import Header from "../components/Header";
 
@@ -19,6 +20,17 @@ const initialToggles: Record<ToggleKey, boolean> = {
   sellerRewardUpdates: true,
   autoWatch: true,
 };
+
+const legalLinks = [
+  { label: "Terms", href: "/terms" },
+  { label: "Privacy", href: "/privacy" },
+  { label: "Buyer Protection", href: "/buyer-protection" },
+  { label: "Seller Rules", href: "/seller-rules" },
+  { label: "Fees", href: "/fees" },
+  { label: "Shipping Policy", href: "/shipping-policy" },
+  { label: "Refunds & Disputes", href: "/refund-dispute-policy" },
+  { label: "Prohibited Items", href: "/prohibited-items" },
+];
 
 function ToggleRow({
   label,
@@ -216,6 +228,21 @@ export default function SettingsPage() {
               Sign out of all devices
             </button>
           </div>
+
+          <div className="panel section-card legal-card">
+            <h2>Legal & Protection</h2>
+            <p className="field-note">
+              Review GRAIL marketplace policies, protected checkout, fees,
+              shipping, and dispute rules.
+            </p>
+            <div className="legal-link-grid">
+              {legalLinks.map((link) => (
+                <Link key={link.href} href={link.href}>
+                  {link.label}
+                </Link>
+              ))}
+            </div>
+          </div>
         </section>
 
         <div className="save-row">
@@ -281,6 +308,12 @@ const pageStyles = `
     margin-top: 12px; border: 1px solid #202026; border-radius: 10px; background: rgba(8,8,10,0.76); padding: 12px; display: flex; justify-content: space-between; gap: 10px;
   }
   .security-row strong { color: #fff; font-size: 13px; font-weight: 900; }
+  .legal-link-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .legal-link-grid a {
+    min-height: 40px; border: 1px solid rgba(231,222,208,0.24); border-radius: 10px; background: rgba(231,222,208,0.055);
+    color: #fff; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; font-size: 12px; font-weight: 900;
+  }
+  .legal-link-grid a:hover { border-color: rgba(231,222,208,0.58); background: rgba(231,222,208,0.1); }
   .save-row { margin-top: 16px; display: flex; justify-content: flex-end; }
   .save-row button { background: #E7DED0; color: #111; min-width: 150px; }
   @media (max-width: 1100px) {

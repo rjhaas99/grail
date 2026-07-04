@@ -169,6 +169,13 @@ const serialNumberOptions = [
   "Custom",
 ];
 
+const sellerPolicyLinks = [
+  { label: "Seller Rules", href: "/seller-rules" },
+  { label: "Fees", href: "/fees" },
+  { label: "Shipping Policy", href: "/shipping-policy" },
+  { label: "Prohibited Items", href: "/prohibited-items" },
+];
+
 function formatCurrency(value: string | number) {
   const number = Number(value);
   if (!number) return "$0";
@@ -1346,10 +1353,23 @@ export default function ListCardPage() {
                       : "Publishing..."
                   : isEditMode
                     ? "Save Changes"
-                    : isCollectionMode
-                      ? "Add to Collection"
-                      : "Publish Listing"}
+                  : isCollectionMode
+                    ? "Add to Collection"
+                    : "Publish Listing"}
               </button>
+              <div className="listing-legal">
+                <p>
+                  Before listing, review seller rules, fees, shipping
+                  expectations, and prohibited items.
+                </p>
+                <div>
+                  {sellerPolicyLinks.map((link) => (
+                    <Link key={link.href} href={link.href}>
+                      {link.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
               {!session && !isCheckingAuth ? (
                 <Link href="/login">Sign In to Publish</Link>
               ) : null}
@@ -1512,5 +1532,9 @@ const pageStyles = `
   .message-icon::after { content: ""; position: absolute; width: 8px; height: 8px; border-left: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); bottom: 12px; }
   .view-card { margin-top: 14px; width: 100%; }
   .action-panel { display: grid; gap: 10px; }
+  .listing-legal { border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); padding: 12px; display: grid; gap: 10px; }
+  .listing-legal p { margin: 0; color: #a1a1aa; font-size: 11px; line-height: 16px; font-weight: 800; }
+  .listing-legal div { display: flex; flex-wrap: wrap; gap: 8px; }
+  .listing-legal a { min-height: 30px; padding: 0 9px; border-radius: 8px; color: #E7DED0; font-size: 11px; }
   @media (max-width: 1100px) { .page-shell { width: min(1240px, calc(100vw - 32px)); } .list-layout, .field-grid, .field-grid.three, .upload-grid, .preview-modal-body, .preview-detail-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success { align-items: flex-start; flex-direction: column; } }
 `;

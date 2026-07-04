@@ -130,6 +130,25 @@ const collections = [
   },
 ];
 
+const legalLinks = [
+  { title: "Terms", href: "/terms", subtitle: "Marketplace account and transaction rules." },
+  { title: "Privacy", href: "/privacy", subtitle: "How GRAIL handles marketplace information." },
+  {
+    title: "Buyer Protection",
+    href: "/buyer-protection",
+    subtitle: "GRAIL Protected Checkout and inspection basics.",
+  },
+  { title: "Seller Rules", href: "/seller-rules", subtitle: "Listing, shipping, and dispute expectations." },
+  { title: "Fees", href: "/fees", subtitle: "Seller fees, buyer costs, and fee examples." },
+  { title: "Shipping Policy", href: "/shipping-policy", subtitle: "Tracking, packaging, and delivery timelines." },
+  {
+    title: "Refunds & Disputes",
+    href: "/refund-dispute-policy",
+    subtitle: "How order issues and evidence review work.",
+  },
+  { title: "Prohibited Items", href: "/prohibited-items", subtitle: "Cards and listing behavior not allowed." },
+];
+
 const carouselSlots = {
   center: {
     x: 0,
@@ -594,6 +613,10 @@ export default function Home() {
           .collection-card:hover {
             border-color: rgba(231, 222, 208, 0.42) !important;
             box-shadow: 0 0 28px rgba(201, 205, 211, 0.08);
+          }
+          .legal-card:hover {
+            border-color: rgba(231, 222, 208, 0.42) !important;
+            background: rgba(231, 222, 208, 0.08) !important;
           }
         `}
       </style>
@@ -1063,6 +1086,95 @@ export default function Home() {
                     {collection.change} 7D
                   </span>
                 </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        <section style={{ marginTop: "24px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "space-between",
+              marginBottom: "14px",
+              gap: "18px",
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  margin: 0,
+                  color: "#fff",
+                  fontSize: "28px",
+                  lineHeight: "34px",
+                  fontWeight: 900,
+                }}
+              >
+                Legal & Protection
+              </h2>
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  color: "#a1a1aa",
+                  fontSize: "13px",
+                  lineHeight: "18px",
+                  fontWeight: 800,
+                }}
+              >
+                Review GRAIL marketplace policies, protected checkout, fees,
+                shipping, and dispute rules.
+              </p>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: "12px",
+            }}
+          >
+            {legalLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="legal-card"
+                style={{
+                  minHeight: "104px",
+                  border: "1px solid #1d1d22",
+                  borderRadius: "10px",
+                  background:
+                    "linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.006)), rgba(5,5,6,0.92)",
+                  padding: "14px",
+                  color: "#fff",
+                  textDecoration: "none",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  boxSizing: "border-box",
+                }}
+              >
+                <strong
+                  style={{
+                    color: "#E7DED0",
+                    fontSize: "14px",
+                    lineHeight: "18px",
+                    fontWeight: 900,
+                  }}
+                >
+                  {link.title}
+                </strong>
+                <span
+                  style={{
+                    color: "#9ca3af",
+                    fontSize: "11px",
+                    lineHeight: "15px",
+                    fontWeight: 700,
+                  }}
+                >
+                  {link.subtitle}
+                </span>
               </Link>
             ))}
           </div>
