@@ -51,6 +51,7 @@ type DisputeOrder = {
   disputeNotes: string;
   disputeOpenedAt?: string | null;
   adminDisputeNotes: string;
+  canRefundAutomatically?: boolean;
   evidence: EvidenceItem[];
   createdAt?: string | null;
 };
@@ -211,6 +212,7 @@ export default function AdminDisputesPage() {
       | "mark_under_review"
       | "request_more_info"
       | "resolve_release_seller"
+      | "resolve_refund_buyer"
       | "resolve_keep_blocked",
     adminNote: string,
     successMessage: string,
@@ -369,7 +371,10 @@ export default function AdminDisputesPage() {
     }
   }
 
-  async function resolveDispute(order: DisputeOrder, transferStatus: "ready" | "blocked") {
+  async function resolveDispute(
+    order: DisputeOrder,
+    outcome: "release_seller" | "refund_buyer" | "keep_blocked",
+  ) {
     const note = noteDrafts[order.id]?.trim() || "";
 
     if (!note) {
@@ -377,13 +382,24 @@ export default function AdminDisputesPage() {
       return;
     }
 
+    const action =
+      outcome === "release_seller"
+        ? "resolve_release_seller"
+        : outcome === "refund_buyer"
+          ? "resolve_refund_buyer"
+          : "resolve_keep_blocked";
+    const successMessage =
+      outcome === "release_seller"
+        ? "Dispute resolved. Seller payout marked ready for automatic release."
+        : outcome === "refund_buyer"
+          ? "Dispute resolved. Buyer refund created and seller payout blocked."
+          : "Dispute resolved. Seller payout remains blocked.";
+
     const saved = await updateDispute(
       order,
-      transferStatus === "ready" ? "resolve_release_seller" : "resolve_keep_blocked",
+      action,
       note,
-      transferStatus === "ready"
-        ? "Dispute resolved. Seller payout marked ready."
-        : "Dispute resolved. Seller payout remains blocked.",
+      successMessage,
     );
 
     if (saved) {
@@ -427,12 +443,16 @@ export default function AdminDisputesPage() {
               {!isLoading && orders.length === 0 ? (
                 <article className="empty-state">
                   <h2>No open disputes.</h2>
-                  <p>Orders with dispute_status opened will appear here.</p>
+                  <p>Orders with dispute_status opened or under_review will appear here.</p>
                 </article>
               ) : null}
 
               {!isLoading
-                ? orders.map((order) => (
+                ? orders.map((order) => {
+                    const refundUnavailableMessage =
+                      "This order was created before Stripe refund tracking was added, or the webhook did not store payment data. Automatic refund is unavailable for this test order. Create a new checkout order to test refunds.";
+
+                    return (
                     <article key={order.id} className="dispute-card">
                       <div className="dispute-header">
                         <div>
@@ -462,6 +482,15 @@ export default function AdminDisputesPage() {
                       <div className="notes-block">
                         <strong>Buyer notes</strong>
                         <p>{order.disputeNotes}</p>
+                      </div>
+
+                      <div className="notes-block">
+                        <strong>Resolution guide</strong>
+                        <p>
+                          Release Seller Payout marks the order ready for automatic
+                          payout. Refund Buyer refunds the original Stripe payment
+                          and blocks seller payout.
+                        </p>
                       </div>
 
                       <div className="evidence-block">
@@ -573,20 +602,33 @@ export default function AdminDisputesPage() {
                         <button
                           type="button"
                           disabled={actionOrderId === order.id}
-                          onClick={() => resolveDispute(order, "ready")}
+                          onClick={() => resolveDispute(order, "release_seller")}
                         >
                           Resolve: Release Seller Payout
                         </button>
                         <button
                           type="button"
+                          disabled={actionOrderId === order.id || !order.canRefundAutomatically}
+                          onClick={() => resolveDispute(order, "refund_buyer")}
+                        >
+                          Resolve: Refund Buyer
+                        </button>
+                        {!order.canRefundAutomatically ? (
+                          <p className="refund-unavailable-note">
+                            {refundUnavailableMessage}
+                          </p>
+                        ) : null}
+                        <button
+                          type="button"
                           disabled={actionOrderId === order.id}
-                          onClick={() => resolveDispute(order, "blocked")}
+                          onClick={() => resolveDispute(order, "keep_blocked")}
                         >
                           Resolve: Keep Payout Blocked
                         </button>
                       </div>
                     </article>
-                  ))
+                    );
+                  })
                 : null}
             </section>
           </>
@@ -690,8 +732,21 @@ const pageStyles = `
   }
 
   .action-row button:disabled {
-    cursor: wait;
+    cursor: not-allowed;
     opacity: 0.62;
+  }
+
+  .refund-unavailable-note {
+    flex-basis: 100%;
+    margin: 0;
+    border: 1px solid rgba(201,205,211,0.16);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.045);
+    color: #C9CDD3;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 17px;
+    font-weight: 800;
   }
 
   .status-message {

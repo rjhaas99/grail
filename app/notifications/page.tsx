@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
 
 type NotificationType = "All" | "Offers" | "Messages" | "Orders" | "Market" | "Seller";
@@ -15,6 +16,17 @@ type Notification = {
   href: string;
   action: string;
   unread: boolean;
+  source?: "mock" | "supabase";
+};
+
+type NotificationRow = {
+  id: string;
+  title: string;
+  body: string;
+  type: string | null;
+  link_url: string | null;
+  read_at: string | null;
+  created_at: string | null;
 };
 
 const tabs: NotificationType[] = ["All", "Offers", "Messages", "Orders", "Market", "Seller"];
@@ -92,9 +104,119 @@ const initialNotifications: Notification[] = [
   },
 ];
 
+function formatTimestamp(value?: string | null) {
+  if (!value) {
+    return "Recently";
+  }
+
+  return new Date(value).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function getNotificationType(row: NotificationRow): Exclude<NotificationType, "All"> {
+  const text = `${row.title} ${row.body} ${row.type || ""}`.toLowerCase();
+
+  if (text.includes("offer")) return "Offers";
+  if (text.includes("message") || text.includes("information")) return "Messages";
+  if (text.includes("order") || text.includes("refund") || text.includes("shipped")) return "Orders";
+  if (text.includes("market")) return "Market";
+
+  return "Seller";
+}
+
+function getActionLabel(type: Exclude<NotificationType, "All">) {
+  if (type === "Offers") return "View Offer";
+  if (type === "Messages") return "Open Message";
+  if (type === "Orders") return "View Order";
+  if (type === "Market") return "View Card";
+
+  return "Open";
+}
+
 export default function NotificationsPage() {
   const [activeTab, setActiveTab] = useState<NotificationType>("All");
   const [notifications, setNotifications] = useState(initialNotifications);
+  const [notice, setNotice] = useState("Demo notifications");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadNotifications() {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        console.error("Notifications auth error:", sessionError);
+      }
+
+      if (!session?.user.id) {
+        if (isMounted) {
+          setNotifications(initialNotifications);
+          setNotice("Sign in to view real notifications. Showing demo notifications.");
+        }
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id, title, body, type, link_url, read_at, created_at")
+        .eq("user_id", session.user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.warn("Notifications fetch unavailable, using demo notifications:", error);
+
+        if (isMounted) {
+          setNotifications(initialNotifications);
+          setNotice("Real notifications unavailable. Showing demo notifications.");
+        }
+        return;
+      }
+
+      const rows = (data || []) as NotificationRow[];
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (rows.length === 0) {
+        setNotifications([]);
+        setNotice("No notifications yet.");
+        return;
+      }
+
+      setNotifications(
+        rows.map((row) => {
+          const type = getNotificationType(row);
+
+          return {
+            id: row.id,
+            type,
+            title: row.title,
+            description: row.body,
+            timestamp: formatTimestamp(row.created_at),
+            href: row.link_url || "/notifications",
+            action: getActionLabel(type),
+            unread: !row.read_at,
+            source: "supabase",
+          };
+        }),
+      );
+      setNotice("Live GRAIL Admin notifications");
+    }
+
+    loadNotifications();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const visibleNotifications = useMemo(() => {
     if (activeTab === "All") {
@@ -106,12 +228,60 @@ export default function NotificationsPage() {
 
   const unreadCount = notifications.filter((notification) => notification.unread).length;
 
-  function markRead(id: string) {
+  async function markRead(id: string) {
     setNotifications((items) =>
       items.map((notification) =>
         notification.id === id ? { ...notification, unread: false } : notification,
       ),
     );
+
+    const notification = notifications.find((item) => item.id === id);
+
+    if (notification?.source !== "supabase") {
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.user.id) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("user_id", session.user.id);
+
+    if (error) {
+      console.warn("Notification read update failed:", error);
+    }
+  }
+
+  async function markAllRead() {
+    setNotifications((items) =>
+      items.map((notification) => ({ ...notification, unread: false })),
+    );
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.user.id) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("user_id", session.user.id)
+      .is("read_at", null);
+
+    if (error) {
+      console.warn("Notification bulk read update failed:", error);
+    }
   }
 
   return (
@@ -129,15 +299,13 @@ export default function NotificationsPage() {
           <button
             type="button"
             className="mark-read-button"
-            onClick={() =>
-              setNotifications((items) =>
-                items.map((notification) => ({ ...notification, unread: false })),
-              )
-            }
+            onClick={markAllRead}
           >
             Mark all as read
           </button>
         </section>
+
+        {notice ? <p className="notification-notice">{notice}</p> : null}
 
         <section className="tabs panel" aria-label="Notification filters">
           {tabs.map((tab) => (
@@ -179,6 +347,19 @@ export default function NotificationsPage() {
               </div>
             </article>
           ))}
+          {visibleNotifications.length === 0 ? (
+            <article className="notification-row panel">
+              <div className="notification-icon">
+                <span>G</span>
+              </div>
+              <div>
+                <div className="notification-title-row">
+                  <h2>No notifications.</h2>
+                </div>
+                <p>Official GRAIL Admin updates will appear here.</p>
+              </div>
+            </article>
+          ) : null}
         </section>
       </div>
     </main>
@@ -204,9 +385,10 @@ const pageStyles = `
     color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase;
   }
   .page-heading h1 { margin: 8px 0 0; color: #fff; font-size: 42px; line-height: 46px; font-weight: 900; }
-  .page-heading p, .notification-row p, .notification-row small {
+  .page-heading p, .notification-row p, .notification-row small, .notification-notice {
     color: #a1a1aa; font-size: 13px; line-height: 18px; font-weight: 800;
   }
+  .notification-notice { margin: 14px 0 0; border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); padding: 10px 12px; }
   .mark-read-button, .tabs button, .notification-action a {
     border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055);
     color: #fff; min-height: 38px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center;

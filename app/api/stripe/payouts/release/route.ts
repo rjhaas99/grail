@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { createSystemNotifications } from "../../../../lib/serverNotifications";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,7 @@ type ReleaseRequestBody = {
 type OrderRow = {
   id: string;
   listing_id: string | null;
+  buyer_id: string | null;
   seller_id: string | null;
   card_price: number | null;
   total_amount: number | null;
@@ -162,7 +164,7 @@ export async function POST(request: Request) {
     const { data: orderData, error: orderError } = await supabase
       .from("orders")
       .select(
-        "id, listing_id, seller_id, card_price, total_amount, buyer_fee, fulfillment_status, dispute_status, transfer_status, seller_payout_amount",
+        "id, listing_id, buyer_id, seller_id, card_price, total_amount, buyer_fee, fulfillment_status, dispute_status, transfer_status, seller_payout_amount",
       )
       .eq("id", orderId)
       .maybeSingle();
@@ -313,6 +315,7 @@ export async function POST(request: Request) {
         },
       });
 
+      const completedAt = new Date().toISOString();
       const { error: updateError } = await supabase
         .from("orders")
         .update({
@@ -321,7 +324,8 @@ export async function POST(request: Request) {
           processing_fee: calculated.processingFee,
           transfer_status: "paid",
           stripe_transfer_id: transfer.id,
-          payout_released_at: new Date().toISOString(),
+          payout_released_at: completedAt,
+          completed_at: completedAt,
         })
         .eq("id", order.id)
         .eq("seller_id", user.id);
@@ -335,6 +339,21 @@ export async function POST(request: Request) {
         });
         throw updateError;
       }
+
+      await createSystemNotifications(supabase, [
+        {
+          userId: order.seller_id,
+          title: "Payout sent",
+          body: "Payment has been sent. Card passed inspection.",
+          linkUrl: "/seller-dashboard",
+        },
+        {
+          userId: order.buyer_id,
+          title: "Order complete",
+          body: "Your order is complete.",
+          linkUrl: "/orders",
+        },
+      ]);
 
       return NextResponse.json({
         success: true,

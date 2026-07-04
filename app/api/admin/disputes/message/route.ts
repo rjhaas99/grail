@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { createSystemNotifications } from "../../../../lib/serverNotifications";
 
 export const runtime = "nodejs";
 
@@ -254,6 +255,20 @@ export async function POST(request: Request) {
     insertedRecipients,
     skippedSelfRecipients,
   });
+
+  await createSystemNotifications(
+    supabase,
+    insertedRecipients.map((recipient) => {
+      const isSeller = recipient.labels.includes("Seller");
+
+      return {
+        userId: recipient.id,
+        title: "GRAIL needs more information",
+        body: "GRAIL requested more information for your dispute.",
+        linkUrl: isSeller ? "/seller-dashboard" : "/orders",
+      };
+    }),
+  );
 
   return NextResponse.json({
     sent: true,

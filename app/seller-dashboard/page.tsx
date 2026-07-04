@@ -18,6 +18,9 @@ type DashboardOrder = {
   orderDate: string;
   fulfillmentStatus: string;
   transferStatus: string;
+  refundStatus: string;
+  autoReleaseError?: string | null;
+  completedAt?: string | null;
   disputeStatus: string;
   disputeReason?: string | null;
   disputeNotes?: string | null;
@@ -55,6 +58,9 @@ type SupabaseOrderRow = {
   transfer_status?: string | null;
   stripe_transfer_id?: string | null;
   payout_released_at?: string | null;
+  refund_status?: string | null;
+  auto_release_error?: string | null;
+  completed_at?: string | null;
 };
 type ListingRow = {
   id: string;
@@ -87,6 +93,9 @@ const initialOrders = mockSellerDashboardData.recentOrders.map((order) => ({
   orderDate: order.shipBy,
   fulfillmentStatus: "pending",
   transferStatus: "not_ready",
+  refundStatus: "none",
+  autoReleaseError: null,
+  completedAt: null,
   disputeStatus: "none",
   disputeReason: null,
   disputeNotes: null,
@@ -172,11 +181,15 @@ function hasInspectionPassed(value?: string | null) {
 }
 
 function getInspectionStatus(order: DashboardOrder) {
-  if (order.transferStatus === "paid") {
-    return "Payout released.";
+  if (order.refundStatus === "refunded" || order.transferStatus === "refunded") {
+    return "Buyer refunded. Payout not released.";
   }
 
-  if (order.disputeStatus === "opened") {
+  if (order.transferStatus === "paid") {
+    return "Complete.";
+  }
+
+  if (["opened", "under_review"].includes(order.disputeStatus)) {
     return "Dispute opened. Payout blocked.";
   }
 
@@ -189,6 +202,50 @@ function getInspectionStatus(order: DashboardOrder) {
   }
 
   return "Inspection complete. Payout eligible.";
+}
+
+function getSellerOrderStatus(order: DashboardOrder) {
+  if (order.refundStatus === "refunded" || order.transferStatus === "refunded") {
+    return "Refunded";
+  }
+
+  if (order.transferStatus === "paid" || order.completedAt) {
+    return "Complete";
+  }
+
+  if (["opened", "under_review"].includes(order.disputeStatus)) {
+    return "Disputed";
+  }
+
+  if (order.fulfillmentStatus === "delivered") {
+    return "Delivered / Inspecting";
+  }
+
+  if (order.fulfillmentStatus === "shipped") {
+    return "Shipped";
+  }
+
+  return "Paid";
+}
+
+function getSellerPayoutLabel(order: DashboardOrder) {
+  if (order.refundStatus === "refunded" || order.transferStatus === "refunded") {
+    return "Refunded";
+  }
+
+  if (order.transferStatus === "paid") {
+    return "Paid";
+  }
+
+  if (order.transferStatus === "ready") {
+    return "Queued";
+  }
+
+  if (order.transferStatus === "blocked" || ["opened", "under_review"].includes(order.disputeStatus)) {
+    return "Blocked";
+  }
+
+  return "Pending";
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -216,6 +273,7 @@ export default function SellerDashboardPage() {
   const [evidenceNotes, setEvidenceNotes] = useState<Record<string, string>>({});
   const [collapsedEvidenceUploads, setCollapsedEvidenceUploads] = useState<Record<string, boolean>>({});
   const [uploadingEvidenceId, setUploadingEvidenceId] = useState("");
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let isMounted = true;
@@ -324,6 +382,9 @@ export default function SellerDashboardPage() {
               orderDate: formatDate(order.created_at),
               fulfillmentStatus: order.fulfillment_status || "pending",
               transferStatus: order.transfer_status || "not_ready",
+              refundStatus: order.refund_status || "none",
+              autoReleaseError: order.auto_release_error,
+              completedAt: order.completed_at,
               disputeStatus: order.dispute_status || "none",
               disputeReason: order.dispute_reason,
               disputeNotes: order.dispute_notes,
@@ -478,6 +539,30 @@ export default function SellerDashboardPage() {
     );
   }
 
+  async function sendSystemNotification(
+    kind: "order_tracking_added" | "order_shipped" | "order_delivered",
+    orderId: string,
+  ) {
+    const accessToken = await getAccessToken();
+
+    if (!accessToken) {
+      return;
+    }
+
+    try {
+      await fetch("/api/notifications/system", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ kind, orderId }),
+      });
+    } catch (error) {
+      console.warn("Seller dashboard system notification skipped:", error);
+    }
+  }
+
   async function updateOrderFields(
     orderId: string,
     fields: Record<string, unknown>,
@@ -571,6 +656,7 @@ export default function SellerDashboardPage() {
       setTrackingCarrier("");
       setTrackingNumber("");
       setDashboardMessage("Tracking saved.");
+      void sendSystemNotification("order_tracking_added", trackingOrderId);
     }
 
     setUpdatingOrderId("");
@@ -597,6 +683,7 @@ export default function SellerDashboardPage() {
         transferStatus: "not_ready",
       });
       setDashboardMessage("Order marked shipped.");
+      void sendSystemNotification("order_shipped", order.id);
     }
 
     setUpdatingOrderId("");
@@ -630,69 +717,10 @@ export default function SellerDashboardPage() {
         inspectionEndsAt: inspectionEndsAt.toISOString(),
       });
       setDashboardMessage("Order marked delivered. Payout waits for the inspection window.");
+      void sendSystemNotification("order_delivered", order.id);
     }
 
     setUpdatingOrderId("");
-  }
-
-  async function markInspectionComplete(order: DashboardOrder) {
-    if (order.disputeStatus !== "none") {
-      setDashboardMessage("Payout cannot become ready while a dispute is open.");
-      return;
-    }
-
-    setUpdatingOrderId(order.id);
-
-    const success = await updateOrderFields(order.id, {
-      transfer_status: "ready",
-      seller_payout_amount: order.sellerPayoutAmount,
-    });
-
-    if (success) {
-      updateLocalOrder(order.id, { transferStatus: "ready" });
-      setDashboardMessage("Inspection marked complete. Payout is ready.");
-    }
-
-    setUpdatingOrderId("");
-  }
-
-  async function releasePayout(order: DashboardOrder) {
-    setUpdatingOrderId(order.id);
-
-    try {
-      const accessToken = await getAccessToken();
-
-      if (!accessToken) {
-        setDashboardMessage("Sign in to release payouts.");
-        return;
-      }
-
-      const response = await fetch("/api/stripe/payouts/release", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ orderId: order.id }),
-      });
-      const payload = (await response.json()) as { error?: string; detail?: string };
-
-      if (!response.ok) {
-        throw new Error(
-          payload.detail || payload.error || "Payout could not be released.",
-        );
-      }
-
-      updateLocalOrder(order.id, { transferStatus: "paid" });
-      setDashboardMessage("Payout released.");
-    } catch (error) {
-      console.error("Seller dashboard payout release error:", error);
-      setDashboardMessage(
-        error instanceof Error ? error.message : "Payout could not be released.",
-      );
-    } finally {
-      setUpdatingOrderId("");
-    }
   }
 
   async function uploadEvidence(order: DashboardOrder) {
@@ -759,8 +787,13 @@ export default function SellerDashboardPage() {
 
   function getPayoutBlockReason(order: DashboardOrder) {
     if (order.transferStatus === "paid") return "Payout released";
+    if (order.refundStatus === "refunded" || order.transferStatus === "refunded") {
+      return "Buyer refunded - payout not released";
+    }
     if (!payoutStatus?.payoutsEnabled) return "Payout setup incomplete";
-    if (order.disputeStatus === "opened") return "Dispute opened - payout blocked";
+    if (["opened", "under_review"].includes(order.disputeStatus)) {
+      return "Dispute opened - payout blocked";
+    }
     if (order.fulfillmentStatus !== "delivered") return "Waiting for delivery";
     if (order.transferStatus === "failed") return "Payout failed. Retry when eligible.";
     if (order.inspectionEndsAt && !hasInspectionPassed(order.inspectionEndsAt)) {
@@ -800,7 +833,6 @@ export default function SellerDashboardPage() {
           : "Finish Stripe Express onboarding to enable seller payouts.";
   const shouldShowPayoutButton = !isLoadingPayoutStatus && (!payoutConnected || payoutIncomplete);
   const payoutButtonLabel = payoutConnected ? "Continue Payout Setup" : "Set Up Payouts";
-  const isDevToolsEnabled = process.env.NODE_ENV !== "production";
 
   return (
     <main className="dashboard-page">
@@ -899,27 +931,16 @@ export default function SellerDashboardPage() {
                 {orders.map((order) => {
                   const blockReason = getPayoutBlockReason(order);
                   const hasTracking = Boolean(order.carrier && order.trackingNumber);
-                  const inspectionComplete =
-                    order.fulfillmentStatus === "delivered" &&
-                    order.disputeStatus === "none" &&
-                    hasInspectionPassed(order.inspectionEndsAt);
-                  const canReleasePayout =
-                    payoutStatus?.payoutsEnabled &&
-                    order.transferStatus === "ready" &&
-                    order.disputeStatus === "none" &&
-                    order.fulfillmentStatus === "delivered" &&
-                    order.sellerPayoutAmount > 0;
-                  const canMarkReady =
-                    inspectionComplete &&
-                    order.transferStatus !== "ready" &&
-                    order.transferStatus !== "paid" &&
-                    order.transferStatus !== "blocked";
-                  const showPayoutReason = !canReleasePayout && blockReason;
+                  const simpleStatus = getSellerOrderStatus(order);
+                  const payoutLabel = getSellerPayoutLabel(order);
+                  const isExpanded = Boolean(expandedOrderIds[order.id]);
+                  const showPayoutReason =
+                    !["Paid", "Queued", "Refunded"].includes(payoutLabel) && blockReason;
                   const canUploadEvidence = ["opened", "under_review"].includes(
                     order.disputeStatus,
                   );
                   const showEvidenceUpload =
-                    canUploadEvidence && !collapsedEvidenceUploads[order.id];
+                    isExpanded && canUploadEvidence && !collapsedEvidenceUploads[order.id];
 
                   return (
                     <article key={order.id} className="table-row order-row payout-order-row">
@@ -934,33 +955,32 @@ export default function SellerDashboardPage() {
                         <span>Payout {order.payoutDisplay}</span>
                       </div>
                       <div className="status-stack">
-                        <span className={`status status-${order.fulfillmentStatus}`}>
-                          {order.fulfillmentStatus}
+                        <span className={`status status-${simpleStatus.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
+                          {simpleStatus}
                         </span>
-                        <span className={`status status-${order.disputeStatus}`}>
-                          Dispute {order.disputeStatus}
-                        </span>
-                        <span className={`status status-${order.transferStatus}`}>
-                          Payout {order.transferStatus}
+                        <span className={`status status-${payoutLabel.toLowerCase()}`}>
+                          Payout {payoutLabel}
                         </span>
                       </div>
-                      <div>
-                        <span>Carrier {order.carrier || "Pending"}</span>
-                        <span>Tracking {order.trackingNumber || "Not added"}</span>
-                        <span>Delivered {formatDate(order.deliveredAt)}</span>
+                      <div className="seller-order-summary">
                         <span>{getInspectionStatus(order)}</span>
-                        {order.disputeReason ? (
-                          <span>Dispute reason: {order.disputeReason}</span>
-                        ) : null}
-                        {order.disputeNotes ? (
-                          <span>Dispute notes: {order.disputeNotes}</span>
-                        ) : null}
-                        {order.disputeOpenedAt ? (
-                          <span>Dispute opened: {formatDateTime(order.disputeOpenedAt)}</span>
+                        {order.autoReleaseError ? (
+                          <span>Payout retry/error: {order.autoReleaseError}</span>
                         ) : null}
                       </div>
                       <div className="row-actions">
                         {order.href ? <Link href={order.href}>View Card</Link> : null}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedOrderIds((items) => ({
+                              ...items,
+                              [order.id]: !items[order.id],
+                            }))
+                          }
+                        >
+                          {isExpanded ? "Hide Details" : "View Details"}
+                        </button>
                         {order.fulfillmentStatus === "pending" ||
                         order.fulfillmentStatus === "shipped" ? (
                           <button
@@ -992,38 +1012,29 @@ export default function SellerDashboardPage() {
                             Mark Delivered
                           </button>
                         ) : null}
-                        {canMarkReady && isDevToolsEnabled ? (
-                          <button
-                            type="button"
-                            disabled={updatingOrderId === order.id}
-                            onClick={() => markInspectionComplete(order)}
-                          >
-                            Mark Inspection Complete
-                          </button>
+                        {showPayoutReason ? (
+                          <span className="payout-reason">{blockReason}</span>
                         ) : null}
-                        {canMarkReady && !isDevToolsEnabled ? (
-                          <button
-                            type="button"
-                            disabled={updatingOrderId === order.id}
-                            onClick={() => markInspectionComplete(order)}
-                          >
-                            Mark Ready for Payout
-                          </button>
-                        ) : null}
-                        {canReleasePayout ? (
-                          <button
-                            type="button"
-                            disabled={updatingOrderId === order.id}
-                            onClick={() => releasePayout(order)}
-                          >
-                            Release Payout
-                          </button>
-                        ) : (
-                          showPayoutReason ? (
-                            <span className="payout-reason">{blockReason}</span>
-                          ) : null
-                        )}
                       </div>
+                      {isExpanded ? (
+                        <div className="seller-order-details">
+                          <span>Carrier {order.carrier || "Pending"}</span>
+                          <span>Tracking {order.trackingNumber || "Not added"}</span>
+                          <span>Delivered {formatDate(order.deliveredAt)}</span>
+                          <span>Fulfillment {order.fulfillmentStatus}</span>
+                          <span>Transfer {order.transferStatus}</span>
+                          <span>Refund {order.refundStatus}</span>
+                          {order.disputeReason ? (
+                            <span>Dispute reason: {order.disputeReason}</span>
+                          ) : null}
+                          {order.disputeNotes ? (
+                            <span>Dispute notes: {order.disputeNotes}</span>
+                          ) : null}
+                          {order.disputeOpenedAt ? (
+                            <span>Dispute opened: {formatDateTime(order.disputeOpenedAt)}</span>
+                          ) : null}
+                        </div>
+                      ) : null}
                       {showEvidenceUpload ? (
                         <div className="evidence-upload">
                           <span>Upload Evidence</span>
@@ -1403,6 +1414,33 @@ const pageStyles = `
   .status-stack {
     display: grid;
     gap: 6px;
+  }
+
+  .seller-order-summary {
+    display: grid;
+    gap: 6px;
+  }
+
+  .seller-order-details {
+    grid-column: 1 / -1;
+    border: 1px solid rgba(201,205,211,0.12);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.035);
+    padding: 10px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .seller-order-details span {
+    border: 1px solid rgba(201,205,211,0.14);
+    border-radius: 999px;
+    background: rgba(8,8,10,0.62);
+    min-height: 30px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
   }
 
   .table-row strong {

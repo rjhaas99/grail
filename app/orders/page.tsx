@@ -25,6 +25,9 @@ type SupabaseOrderRow = {
   dispute_opened_at?: string | null;
   transfer_status?: string | null;
   inspection_ends_at?: string | null;
+  inspection_completed_at?: string | null;
+  completed_at?: string | null;
+  refund_status?: string | null;
 };
 
 type ListingRow = {
@@ -57,6 +60,9 @@ type OrderView = {
   disputeOpenedAt?: string | null;
   transferStatus?: string;
   inspectionEndsAt?: string | null;
+  inspectionCompletedAt?: string | null;
+  completedAt?: string | null;
+  refundStatus?: string;
 };
 
 const mockOrderViews: OrderView[] = mockOrders.map((order) => ({
@@ -77,6 +83,9 @@ const mockOrderViews: OrderView[] = mockOrders.map((order) => ({
   disputeNotes: null,
   disputeOpenedAt: null,
   transferStatus: "not_ready",
+  inspectionCompletedAt: null,
+  completedAt: null,
+  refundStatus: "none",
 }));
 
 const disputeReasons = [
@@ -156,11 +165,15 @@ function getTrackingUrl(carrier?: string, trackingNumber?: string) {
 }
 
 function getInspectionStatus(order: OrderView) {
-  if (order.transferStatus === "paid") {
-    return "Payout released.";
+  if (order.refundStatus === "refunded" || order.transferStatus === "refunded") {
+    return "Buyer refunded.";
   }
 
-  if (order.disputeStatus === "opened") {
+  if (order.transferStatus === "paid") {
+    return "Order complete.";
+  }
+
+  if (["opened", "under_review"].includes(order.disputeStatus || "")) {
     return "Dispute opened. Payout blocked.";
   }
 
@@ -175,6 +188,30 @@ function getInspectionStatus(order: OrderView) {
   return "Inspection complete. Payout eligible.";
 }
 
+function getSimpleOrderStatus(order: OrderView) {
+  if (order.refundStatus === "refunded" || order.transferStatus === "refunded") {
+    return "Refunded";
+  }
+
+  if (order.transferStatus === "paid" || order.completedAt) {
+    return "Complete";
+  }
+
+  if (["opened", "under_review"].includes(order.disputeStatus || "")) {
+    return "Disputed";
+  }
+
+  if (order.fulfillmentStatus === "delivered") {
+    return "Delivered / Inspecting";
+  }
+
+  if (order.fulfillmentStatus === "shipped") {
+    return "Shipped";
+  }
+
+  return "Paid";
+}
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderView[]>(mockOrderViews);
   const [isLoading, setIsLoading] = useState(true);
@@ -187,6 +224,7 @@ export default function OrdersPage() {
   const [evidenceNotes, setEvidenceNotes] = useState<Record<string, string>>({});
   const [collapsedEvidenceUploads, setCollapsedEvidenceUploads] = useState<Record<string, boolean>>({});
   const [uploadingEvidenceId, setUploadingEvidenceId] = useState("");
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let isMounted = true;
@@ -318,6 +356,9 @@ export default function OrdersPage() {
               disputeOpenedAt: order.dispute_opened_at,
               transferStatus: order.transfer_status || "not_ready",
               inspectionEndsAt: order.inspection_ends_at,
+              inspectionCompletedAt: order.inspection_completed_at,
+              completedAt: order.completed_at,
+              refundStatus: order.refund_status || "none",
             };
           }),
         );
@@ -348,6 +389,94 @@ export default function OrdersPage() {
     setDisputeReason("");
     setDisputeNotes("");
     setNotice("");
+  }
+
+  async function sendSystemNotification(kind: "dispute_opened", orderId: string) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      return;
+    }
+
+    try {
+      await fetch("/api/notifications/system", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ kind, orderId }),
+      });
+    } catch (error) {
+      console.warn("Order system notification skipped:", error);
+    }
+  }
+
+  async function approveInspection(order: OrderView) {
+    setUpdatingOrderId(order.id);
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      console.error("Approve inspection auth error:", sessionError);
+    }
+
+    if (!session?.access_token) {
+      setNotice("Sign in to approve inspection.");
+      setUpdatingOrderId("");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/orders/approve-inspection", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const payload = (await response.json()) as {
+        order?: {
+          inspection_completed_at?: string;
+          inspection_ends_at?: string;
+          transfer_status?: string;
+        };
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Inspection approval failed.");
+      }
+
+      setOrders((items) =>
+        items.map((item) =>
+          item.id === order.id
+            ? {
+                ...item,
+                inspectionCompletedAt: payload.order?.inspection_completed_at,
+                inspectionEndsAt: payload.order?.inspection_ends_at,
+                transferStatus: payload.order?.transfer_status || "ready",
+              }
+            : item,
+        ),
+      );
+      setNotice("Order approved. Seller payout is queued for automatic release.");
+    } catch (error) {
+      console.error("Approve inspection error:", error);
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Inspection approval could not be saved.",
+      );
+    } finally {
+      setUpdatingOrderId("");
+    }
   }
 
   async function submitDispute() {
@@ -434,6 +563,7 @@ export default function OrdersPage() {
     setDisputeReason("");
     setDisputeNotes("");
     setNotice("Dispute opened. GRAIL review workflow coming next.");
+    void sendSystemNotification("dispute_opened", order.id);
     setUpdatingOrderId("");
   }
 
@@ -528,13 +658,23 @@ export default function OrdersPage() {
 
           {!isLoading ? orders.map((order) => {
             const trackingUrl = getTrackingUrl(order.carrier, order.trackingNumber);
+            const simpleStatus = getSimpleOrderStatus(order);
+            const isExpanded = Boolean(expandedOrderIds[order.id]);
             const canOpenDispute =
               order.isBuyer &&
               order.fulfillmentStatus === "delivered" &&
               Boolean(order.inspectionEndsAt) &&
               order.disputeStatus === "none" &&
               order.transferStatus !== "paid" &&
+              order.transferStatus !== "refunded" &&
+              order.refundStatus !== "refunded" &&
               isInspectionActive(order.inspectionEndsAt);
+            const canApproveInspection =
+              order.isBuyer &&
+              order.fulfillmentStatus === "delivered" &&
+              order.disputeStatus === "none" &&
+              !["paid", "refunded", "ready"].includes(order.transferStatus || "") &&
+              order.refundStatus !== "refunded";
             const canUploadEvidence =
               order.isBuyer &&
               ["opened", "under_review"].includes(order.disputeStatus || "");
@@ -550,30 +690,37 @@ export default function OrdersPage() {
                   <p>{order.date}</p>
                 </div>
                 <div className="order-status-stack">
-                  <strong className={`status status-${order.status.toLowerCase()}`}>
-                    {order.status}
+                  <strong className={`status status-${simpleStatus.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
+                    {simpleStatus}
                   </strong>
-                  <span>{order.fulfillmentStatus}</span>
-                  <span>Dispute: {order.disputeStatus}</span>
-                </div>
-                <div className="order-shipping-stack">
-                  <span>{order.carrier ? `Carrier: ${order.carrier}` : "Carrier pending"}</span>
-                  <span>
-                    {order.trackingNumber
-                      ? `Tracking: ${order.trackingNumber}`
-                      : "Tracking pending"}
-                  </span>
-                  {trackingUrl ? (
-                    <a href={trackingUrl} target="_blank" rel="noreferrer">
-                      Track Package
-                    </a>
+                  {order.refundStatus === "refunded" ? (
+                    <span>Refund processed</span>
                   ) : null}
-                  <span>Delivered: {formatDate(order.deliveredAt)}</span>
-                  <span>{getInspectionStatus(order)}</span>
                 </div>
+                <p className="order-summary-note">{getInspectionStatus(order)}</p>
                 <strong>{order.totalDisplay}</strong>
                 <div className="order-actions">
                   <Link href={order.href}>View Card</Link>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedOrderIds((items) => ({
+                        ...items,
+                        [order.id]: !items[order.id],
+                      }))
+                    }
+                  >
+                    {isExpanded ? "Hide Details" : "View Details"}
+                  </button>
+                  {canApproveInspection ? (
+                    <button
+                      type="button"
+                      disabled={updatingOrderId === order.id}
+                      onClick={() => approveInspection(order)}
+                    >
+                      Mark as Inspected
+                    </button>
+                  ) : null}
                   {canOpenDispute ? (
                     <button
                       type="button"
@@ -584,6 +731,26 @@ export default function OrdersPage() {
                     </button>
                   ) : null}
                 </div>
+                {isExpanded ? (
+                  <div className="order-detail-panel">
+                    <span>{order.carrier ? `Carrier: ${order.carrier}` : "Carrier pending"}</span>
+                    <span>
+                      {order.trackingNumber
+                        ? `Tracking: ${order.trackingNumber}`
+                        : "Tracking pending"}
+                    </span>
+                    {trackingUrl ? (
+                      <a href={trackingUrl} target="_blank" rel="noreferrer">
+                        Track Package
+                      </a>
+                    ) : null}
+                    <span>Delivered: {formatDate(order.deliveredAt)}</span>
+                    <span>Fulfillment: {order.fulfillmentStatus}</span>
+                    <span>Dispute: {order.disputeStatus}</span>
+                    <span>Refund: {order.refundStatus || "none"}</span>
+                    <span>Inspection: {getInspectionStatus(order)}</span>
+                  </div>
+                ) : null}
                 {showEvidenceUpload ? (
                   <div className="evidence-upload">
                     <span>Upload Evidence</span>
@@ -825,6 +992,43 @@ const pageStyles = `
     min-height: 30px;
     padding: 0 10px;
     font-size: 11px;
+  }
+
+  .order-summary-note {
+    margin: 0;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 17px;
+    font-weight: 800;
+  }
+
+  .order-detail-panel {
+    grid-column: 1 / -1;
+    border: 1px solid rgba(201,205,211,0.12);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.035);
+    padding: 10px;
+    display: flex;
+    gap: 9px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .order-detail-panel span,
+  .order-detail-panel a {
+    border: 1px solid rgba(201,205,211,0.14);
+    border-radius: 999px;
+    background: rgba(8,8,10,0.62);
+    color: #C9CDD3;
+    min-height: 30px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 0;
+    text-transform: none;
   }
 
   .evidence-upload {

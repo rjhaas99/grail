@@ -906,6 +906,21 @@ export default function ListCardPage() {
       const imageResult = await uploadListingImages(createdListing.id);
 
       setPublishedListingId(createdListing.id);
+      try {
+        await fetch("/api/notifications/system", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${currentSession.access_token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            kind: "listing_live",
+            listingId: createdListing.id,
+          }),
+        });
+      } catch (notificationError) {
+        console.warn("Listing live notification skipped:", notificationError);
+      }
 
       if (
         imageResult.failedUploads.length > 0 ||
