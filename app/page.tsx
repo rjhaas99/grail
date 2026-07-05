@@ -95,6 +95,27 @@ const marketCategories = [
   },
 ];
 
+const trustCards = [
+  {
+    title: "Protected Checkout",
+    href: "/buyer-protection",
+    body: "Payments are held until delivery and the inspection window clears.",
+    badge: "Stripe checkout",
+  },
+  {
+    title: "Real Photos Required",
+    href: "/seller-rules",
+    body: "Listings are built around actual front and back card photos.",
+    badge: "Listing rules",
+  },
+  {
+    title: "Dispute Support",
+    href: "/refund-dispute-policy",
+    body: "If something is wrong, buyers and sellers can submit evidence for review.",
+    badge: "Evidence review",
+  },
+];
+
 const collections = [
   {
     name: "Vintage Basketball Vault",
@@ -956,6 +977,138 @@ export default function Home() {
                   </p>
                 </div>
                 <MiniArtwork accent={category.accent} />
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        <section style={{ marginTop: "24px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "space-between",
+              marginBottom: "14px",
+              gap: "18px",
+            }}
+          >
+            <div>
+              <p
+                style={{
+                  margin: "0 0 8px",
+                  color: "#C9CDD3",
+                  fontSize: "11px",
+                  lineHeight: "14px",
+                  fontWeight: 900,
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                }}
+              >
+                GRAIL Protected Checkout
+              </p>
+              <h2
+                style={{
+                  margin: 0,
+                  color: "#fff",
+                  fontSize: "28px",
+                  lineHeight: "34px",
+                  fontWeight: 900,
+                }}
+              >
+                Built for safer collecting.
+              </h2>
+            </div>
+            <Link
+              href="/buyer-protection"
+              style={{
+                color: "#E7DED0",
+                textDecoration: "none",
+                fontSize: "13px",
+                fontWeight: 900,
+              }}
+            >
+              Learn about protection
+            </Link>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: "14px",
+            }}
+          >
+            {trustCards.map((card) => (
+              <Link
+                key={card.title}
+                href={card.href}
+                className="market-card"
+                style={{
+                  minHeight: "148px",
+                  border: "1px solid rgba(231,222,208,0.16)",
+                  borderRadius: "10px",
+                  background:
+                    "linear-gradient(180deg,rgba(255,255,255,0.034),rgba(255,255,255,0.006)), rgba(5,5,6,0.94)",
+                  padding: "16px",
+                  color: "#fff",
+                  textDecoration: "none",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
+                }}
+              >
+                <div>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      minHeight: "24px",
+                      border: "1px solid rgba(231,222,208,0.28)",
+                      borderRadius: "999px",
+                      color: "#E7DED0",
+                      background: "rgba(231,222,208,0.055)",
+                      padding: "0 9px",
+                      fontSize: "10px",
+                      lineHeight: "12px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    {card.badge}
+                  </span>
+                  <h3
+                    style={{
+                      margin: "13px 0 0",
+                      color: "#fff",
+                      fontSize: "19px",
+                      lineHeight: "23px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    {card.title}
+                  </h3>
+                  <p
+                    style={{
+                      margin: "9px 0 0",
+                      color: "#a1a1aa",
+                      fontSize: "12px",
+                      lineHeight: "18px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    {card.body}
+                  </p>
+                </div>
+                <span
+                  style={{
+                    color: "#C9CDD3",
+                    fontSize: "11px",
+                    lineHeight: "15px",
+                    fontWeight: 900,
+                  }}
+                >
+                  View policy
+                </span>
               </Link>
             ))}
           </div>

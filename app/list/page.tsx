@@ -1339,6 +1339,21 @@ export default function ListCardPage() {
               </button>
             </section>
 
+            <section className="panel seller-trust-panel">
+              <h2>Seller Protection</h2>
+              <div className="seller-trust-grid">
+                <span>Seller payout is queued after tracking, delivery, and inspection.</span>
+                <span>Disputes pause payout until GRAIL review is complete.</span>
+                <span>Real front and back card photos are required.</span>
+                <span>Secure fulfillment helps protect seller rewards.</span>
+              </div>
+              <div className="seller-trust-links">
+                <Link href="/seller-rules">Seller Rules</Link>
+                <Link href="/fees">Fees</Link>
+                <Link href="/shipping-policy">Shipping Policy</Link>
+              </div>
+            </section>
+
             <section className="panel action-panel">
               {!isEditMode ? (
                 <button
@@ -1507,7 +1522,7 @@ const pageStyles = `
   .preview-detail-grid strong { display: block; margin-top: 5px; color: #fff; font-size: 13px; line-height: 17px; font-weight: 900; }
   .list-layout { margin-top: 18px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
   .main-column, .preview-column { display: grid; gap: 14px; }
-  .form-section, .preview-card, .action-panel { padding: 16px; }
+  .form-section, .preview-card, .action-panel, .seller-trust-panel { padding: 16px; }
   h2 { margin: 0; color: #fff; font-size: 20px; line-height: 24px; font-weight: 900; }
   .upload-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .upload-box { min-height: 112px; border: 1px dashed rgba(201,205,211,0.24); border-radius: 10px; background: rgba(8,8,10,0.76); color: #fff; display: grid; place-items: center; gap: 4px; cursor: pointer; padding: 10px; box-sizing: border-box; overflow: hidden; }
@@ -1551,5 +1566,9 @@ const pageStyles = `
   .listing-legal p { margin: 0; color: #a1a1aa; font-size: 11px; line-height: 16px; font-weight: 800; }
   .listing-legal div { display: flex; flex-wrap: wrap; gap: 8px; }
   .listing-legal a { min-height: 30px; padding: 0 9px; border-radius: 8px; color: #E7DED0; font-size: 11px; }
+  .seller-trust-grid { margin-top: 12px; display: grid; gap: 8px; }
+  .seller-trust-grid span { border: 1px solid rgba(201,205,211,0.14); border-radius: 10px; background: rgba(201,205,211,0.04); color: #C9CDD3; padding: 10px; font-size: 11px; line-height: 16px; font-weight: 800; }
+  .seller-trust-links { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .seller-trust-links a { min-height: 30px; border: 1px solid rgba(231,222,208,0.22); border-radius: 8px; background: rgba(231,222,208,0.055); color: #E7DED0; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 11px; font-weight: 900; }
   @media (max-width: 1100px) { .page-shell { width: min(1240px, calc(100vw - 32px)); } .list-layout, .field-grid, .field-grid.three, .upload-grid, .preview-modal-body, .preview-detail-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success { align-items: flex-start; flex-direction: column; } }
 `;

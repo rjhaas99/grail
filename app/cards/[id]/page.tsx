@@ -1264,6 +1264,21 @@ export default function CardDetailPage() {
                 Investor style price tracking.
               </p>
 
+              <div className="purchase-trust-panel">
+                <span>GRAIL Protected Checkout</span>
+                <ul>
+                  <li>Protected checkout</li>
+                  <li>3-day inspection window after delivery</li>
+                  <li>Report suspicious listings</li>
+                  <li>Contact support if there is an issue</li>
+                </ul>
+                <div>
+                  <Link href="/buyer-protection">Buyer Protection</Link>
+                  <Link href="/refund-dispute-policy">Disputes</Link>
+                  <Link href="/contact-support">Support</Link>
+                </div>
+              </div>
+
               {isOwnerListing ? (
                 <>
                   <p className="owner-note">This is your listing.</p>
@@ -1363,10 +1378,10 @@ export default function CardDetailPage() {
             <section className="trust-panel panel">
               <h2>Buyer Protection</h2>
               <ul>
-                <li>Secure checkout</li>
-                <li>Offers protected</li>
-                <li>Seller verified</li>
-                <li>Buyer protection placeholder</li>
+                <li>Secure payments through Stripe</li>
+                <li>Real card photos expected</li>
+                <li>Dispute support if something is wrong</li>
+                <li>Seller payout protection after delivery and inspection</li>
               </ul>
               <button type="button" className="report-listing-button" onClick={openReportModal}>
                 Report Listing
@@ -2538,6 +2553,61 @@ const pageStyles = `
 
   .offer-note {
     margin: 13px 0 0;
+  }
+
+  .purchase-trust-panel {
+    margin-top: 14px;
+    border: 1px solid rgba(201,205,211,0.16);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.045);
+    padding: 12px;
+  }
+
+  .purchase-trust-panel > span {
+    color: #E7DED0;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .purchase-trust-panel ul {
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .purchase-trust-panel li {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: 800;
+  }
+
+  .purchase-trust-panel div {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .purchase-trust-panel a {
+    min-height: 28px;
+    border: 1px solid rgba(231,222,208,0.22);
+    border-radius: 8px;
+    background: rgba(231,222,208,0.055);
+    color: #E7DED0;
+    padding: 0 9px;
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+    font-size: 10px;
+    line-height: 12px;
+    font-weight: 900;
   }
 
   .seller-header {

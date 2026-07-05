@@ -450,18 +450,18 @@ export default function CheckoutPage() {
                 <button type="button">Add payment method</button>
               </div>
               <p>
-                Stripe test checkout is available for active live listings. Mock
+                Secure Stripe checkout is available for active live listings. Mock
                 checkout remains available when Stripe is not configured.
               </p>
             </section>
 
             <section className="panel protection-panel">
-              <h2>Buyer Protection</h2>
+              <h2>GRAIL Buyer Protection</h2>
               <ul>
-                <li>Secure checkout</li>
-                <li>Seller verified</li>
-                <li>Tracked shipping</li>
-                <li>Buyer protection placeholder</li>
+                <li>Secure payments through Stripe</li>
+                <li>Protected by GRAIL Buyer Protection</li>
+                <li>Tracked shipping after purchase</li>
+                <li>Inspection window after delivery</li>
               </ul>
             </section>
           </div>
@@ -475,6 +475,12 @@ export default function CheckoutPage() {
             <div className="summary-total">
               <span>Total</span>
               <strong>{formatCurrency(total)}</strong>
+            </div>
+
+            <div className="checkout-trust-strip">
+              <span>Secure Stripe checkout</span>
+              <span>GRAIL Protected Checkout</span>
+              <span>3-day inspection window after delivery</span>
             </div>
 
             {isStripeSuccess ? (
@@ -822,6 +828,22 @@ const pageStyles = `
   .summary-total strong {
     font-size: 26px;
     line-height: 30px;
+  }
+
+  .checkout-trust-strip {
+    border: 1px solid rgba(231,222,208,0.16);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.045);
+    padding: 10px;
+    display: grid;
+    gap: 7px;
+  }
+
+  .checkout-trust-strip span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: 900;
   }
 
   .checkout-legal {
