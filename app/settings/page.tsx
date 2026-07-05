@@ -30,6 +30,7 @@ const legalLinks = [
   { label: "Shipping Policy", href: "/shipping-policy" },
   { label: "Refunds & Disputes", href: "/refund-dispute-policy" },
   { label: "Prohibited Items", href: "/prohibited-items" },
+  { label: "Contact Support", href: "/contact-support" },
 ];
 
 function ToggleRow({
