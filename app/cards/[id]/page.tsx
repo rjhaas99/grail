@@ -22,7 +22,18 @@ const photoViews = [
   "Edges",
 ] as const;
 
+const reportReasons = [
+  "Counterfeit / authenticity concern",
+  "Wrong photos",
+  "Wrong card details",
+  "Wrong grade or condition",
+  "Suspicious seller",
+  "Scam or unsafe listing",
+  "Other",
+] as const;
+
 type PhotoView = (typeof photoViews)[number];
+type ReportReason = (typeof reportReasons)[number];
 type MockCard = MockListing & {
   imageUrls?: Partial<Record<PhotoView, string>>;
   sellerId?: string | null;
@@ -567,6 +578,12 @@ export default function CardDetailPage() {
   const [messageError, setMessageError] = useState("");
   const [messageSuccessHref, setMessageSuccessHref] = useState("");
   const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [isReportOpen, setIsReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState<ReportReason | "">("");
+  const [reportDetails, setReportDetails] = useState("");
+  const [reportError, setReportError] = useState("");
+  const [reportSuccess, setReportSuccess] = useState(false);
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [ownerActionStatus, setOwnerActionStatus] = useState("");
   const card = mockCard ?? realCard;
   const availablePhotoViews: PhotoView[] = card?.imageUrls
@@ -851,6 +868,81 @@ export default function CardDetailPage() {
     setMessageError("");
     setMessageSuccessHref("");
     setIsSendingMessage(false);
+  }
+
+  function openReportModal() {
+    setIsReportOpen(true);
+    setReportReason("");
+    setReportDetails("");
+    setReportError("");
+    setReportSuccess(false);
+  }
+
+  function closeReportModal() {
+    setIsReportOpen(false);
+    setReportReason("");
+    setReportDetails("");
+    setReportError("");
+    setReportSuccess(false);
+    setIsSubmittingReport(false);
+  }
+
+  async function submitReport() {
+    if (!card) {
+      return;
+    }
+
+    if (!reportReason) {
+      setReportError("Choose a report reason.");
+      return;
+    }
+
+    if (mockCard) {
+      setReportError("Reports can be submitted for live listings only.");
+      return;
+    }
+
+    setIsSubmittingReport(true);
+    setReportError("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers: HeadersInit = {
+        "content-type": "application/json",
+      };
+
+      if (session?.access_token) {
+        headers.authorization = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch("/api/reports", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          listingId: card.id,
+          reason: reportReason,
+          details: reportDetails.trim(),
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Report could not be submitted.");
+      }
+
+      setReportSuccess(true);
+      setReportDetails("");
+    } catch (error) {
+      console.error("Listing report submit error:", error);
+      setReportError(
+        error instanceof Error ? error.message : "Report could not be submitted.",
+      );
+      setReportSuccess(false);
+    } finally {
+      setIsSubmittingReport(false);
+    }
   }
 
   async function submitMessage() {
@@ -1276,6 +1368,9 @@ export default function CardDetailPage() {
                 <li>Seller verified</li>
                 <li>Buyer protection placeholder</li>
               </ul>
+              <button type="button" className="report-listing-button" onClick={openReportModal}>
+                Report Listing
+              </button>
             </section>
           </aside>
         </section>
@@ -1479,6 +1574,97 @@ export default function CardDetailPage() {
                 </button>
                 <button type="button" onClick={closeMessageModal}>
                   Cancel
+                </button>
+              </div>
+            )}
+          </section>
+        </div>
+      ) : null}
+
+      {isReportOpen ? (
+        <div className="offer-modal-backdrop" role="presentation">
+          <section
+            className="offer-modal panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Report listing"
+          >
+            <div className="offer-modal-header">
+              <div>
+                <span>Report Listing</span>
+                <h2>{card.title}</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close report modal"
+                onClick={closeReportModal}
+              >
+                x
+              </button>
+            </div>
+
+            <p className="offer-helper">
+              Reports go to GRAIL admin review. Include specific details if
+              something looks counterfeit, unsafe, or inaccurate.
+            </p>
+
+            {!reportSuccess ? (
+              <>
+                <label className="offer-field">
+                  <span>Reason</span>
+                  <select
+                    value={reportReason}
+                    onChange={(event) =>
+                      setReportReason(event.target.value as ReportReason | "")
+                    }
+                  >
+                    <option value="">Choose a reason</option>
+                    {reportReasons.map((reason) => (
+                      <option key={reason} value={reason}>
+                        {reason}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="offer-field">
+                  <span>Optional details</span>
+                  <textarea
+                    value={reportDetails}
+                    onChange={(event) => setReportDetails(event.target.value)}
+                    placeholder="Add details for GRAIL admin review."
+                  />
+                </label>
+              </>
+            ) : null}
+
+            {reportError ? <p className="offer-error">{reportError}</p> : null}
+
+            {reportSuccess ? (
+              <div className="offer-confirmation">
+                <strong>Report submitted.</strong>
+                <p>GRAIL admin will review this listing.</p>
+              </div>
+            ) : null}
+
+            {!reportSuccess ? (
+              <div className="offer-modal-actions">
+                <button
+                  type="button"
+                  className="buy-button"
+                  disabled={isSubmittingReport}
+                  onClick={submitReport}
+                >
+                  {isSubmittingReport ? "Submitting..." : "Submit Report"}
+                </button>
+                <button type="button" onClick={closeReportModal}>
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="offer-modal-actions single-action">
+                <button type="button" className="buy-button" onClick={closeReportModal}>
+                  Done
                 </button>
               </div>
             )}
@@ -2281,6 +2467,7 @@ const pageStyles = `
   }
 
   .offer-field input,
+  .offer-field select,
   .offer-field textarea {
     width: 100%;
     border: 1px solid #24242a;
@@ -2293,6 +2480,10 @@ const pageStyles = `
     font-size: 13px;
     font-weight: 800;
     outline: none;
+  }
+
+  .offer-field select {
+    min-height: 43px;
   }
 
   .offer-field textarea {
@@ -2424,6 +2615,25 @@ const pageStyles = `
     font-size: 12px;
     line-height: 16px;
     font-weight: 800;
+  }
+
+  .report-listing-button {
+    width: 100%;
+    margin-top: 14px;
+    border: 1px solid rgba(231,222,208,0.2);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.045);
+    color: #E7DED0;
+    padding: 11px 12px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .report-listing-button:hover {
+    border-color: rgba(231,222,208,0.46);
+    box-shadow: 0 0 18px rgba(201,205,211,0.12);
   }
 
   .bottom-panels {
