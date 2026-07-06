@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { Suspense, useEffect, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
@@ -10,14 +11,12 @@ import {
   type MockConversation,
   type MockListing,
   getListingTag,
-  mockFeaturedSellers as featuredSellers,
-  mockListings,
-  mockMarketData,
 } from "../lib/mockData";
 
 type BrowseListing = MockListing & {
   imageUrl?: string | null;
   sellerId?: string | null;
+  createdAt?: string | null;
   source: "supabase" | "mock";
 };
 
@@ -46,6 +45,7 @@ type SupabaseListingRow = {
   title: string | null;
   sport: string | null;
   player: string | null;
+  player_name?: string | null;
   year: string | null;
   brand: string | null;
   card_number: string | null;
@@ -67,22 +67,44 @@ type ProfileRow = {
   username: string | null;
 };
 
-const fallbackListings: BrowseListing[] = mockListings.map((listing) => ({
-  ...listing,
-  source: "mock",
-}));
+type OrderRow = {
+  id: string;
+  total_amount: number | null;
+  card_price: number | null;
+  status: string | null;
+  created_at: string | null;
+  completed_at?: string | null;
+};
+
+type BrowseMarketSnapshot = {
+  activeListings: number;
+  newThisWeek: number;
+  averageListPrice: number;
+  completedSales: number | null;
+  marketplaceVolume: number | null;
+};
+
+type FeaturedSeller = {
+  sellerId: string;
+  name: string;
+  initials: string;
+  route: string;
+  listingCount: number;
+  latestListedAt: string | null;
+};
+
 const mockOfferStorageKey = "grail-mock-offers";
 const mockConversationStorageKey = "grail-mock-conversations";
 
 const realListingAccents = [
-  "#8f1d2c",
-  "#334155",
-  "#0f766e",
-  "#1e3a8a",
-  "#7c3aed",
-  "#475569",
-  "#047857",
-  "#1d4ed8",
+  "#E7DED0",
+  "#C9CDD3",
+  "#B7A682",
+  "#f5f5f5",
+  "#8D949D",
+  "#E7DED0",
+  "#C9CDD3",
+  "#B7A682",
 ];
 
 const categoryFilters = [
@@ -150,19 +172,6 @@ const standardGradeOptions = [
   "1.5",
   "1",
   "Authentic",
-];
-
-const sellerLevels = [
-  "Level 10 Seller",
-  "Level 9 Seller",
-  "Level 8 Seller",
-  "Level 7 Seller",
-  "Level 6 Seller",
-  "Level 5 Seller",
-  "Level 4 Seller",
-  "Level 3 Seller",
-  "Level 2 Seller",
-  "Level 1 Seller",
 ];
 
 function formatCurrency(value: number) {
@@ -358,7 +367,9 @@ function mapSupabaseListing(
   const condition = getConditionDisplay(listing);
   const title =
     listing.title ||
-    [listing.year, listing.brand, listing.player].filter(Boolean).join(" ") ||
+    [listing.year, listing.brand, listing.player_name || listing.player]
+      .filter(Boolean)
+      .join(" ") ||
     "Untitled Card";
   const price = Number(listing.price || 0);
   const status = listing.status?.toLowerCase() || "";
@@ -419,6 +430,7 @@ function mapSupabaseListing(
     accent,
     artworkTone: "live listing",
     imageUrl: getImageUrl(listing),
+    createdAt: listing.created_at,
     source: "supabase",
     cardDetailRoute: route,
     sellerCollectionRoute: `/collections/${sellerSlug}`,
@@ -426,7 +438,7 @@ function mapSupabaseListing(
       year: listing.year || "Unknown",
       set: listing.brand || "Unknown",
       cardNumber: listing.card_number || "Unknown",
-      subject: listing.player || "Unknown",
+      subject: listing.player_name || listing.player || "Unknown",
       grader: listing.grader || "Raw",
       grade: listing.grade || listing.condition || "Raw",
       certNumber: "Not available",
@@ -441,6 +453,154 @@ function mapSupabaseListing(
     },
     overview: "Live Supabase listing.",
   };
+}
+
+function getProfileName(profile: ProfileRow | undefined, fallbackId: string) {
+  return profile?.full_name || profile?.username || fallbackId.slice(0, 8);
+}
+
+function getInitials(name: string) {
+  return (
+    name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "GS"
+  );
+}
+
+function buildFeaturedSellers(
+  rows: SupabaseListingRow[],
+  profilesById: Map<string, ProfileRow>,
+) {
+  const listingsBySeller = new Map<string, SupabaseListingRow[]>();
+
+  rows.forEach((listing) => {
+    if (!listing.seller_id) {
+      return;
+    }
+
+    listingsBySeller.set(listing.seller_id, [
+      ...(listingsBySeller.get(listing.seller_id) || []),
+      listing,
+    ]);
+  });
+
+  return Array.from(listingsBySeller.entries())
+    .map(([sellerId, sellerListings]) => {
+      const profile = profilesById.get(sellerId);
+      const name = getProfileName(profile, sellerId);
+      const latestListing = sellerListings
+        .slice()
+        .sort(
+          (left, right) =>
+            new Date(right.created_at || 0).getTime() -
+            new Date(left.created_at || 0).getTime(),
+        )[0];
+
+      return {
+        sellerId,
+        name,
+        initials: getInitials(name),
+        route: `/collections/${getSellerSlug(profile, sellerId)}`,
+        listingCount: sellerListings.length,
+        latestListedAt: latestListing?.created_at || null,
+      } satisfies FeaturedSeller;
+    })
+    .sort((left, right) => {
+      if (right.listingCount !== left.listingCount) {
+        return right.listingCount - left.listingCount;
+      }
+
+      return (
+        new Date(right.latestListedAt || 0).getTime() -
+        new Date(left.latestListedAt || 0).getTime()
+      );
+    })
+    .slice(0, 4);
+}
+
+function isWithinLastWeek(value?: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  return new Date(value).getTime() >= Date.now() - 7 * 24 * 60 * 60 * 1000;
+}
+
+function isCompletedOrder(order: OrderRow) {
+  const status = order.status?.toLowerCase();
+
+  return (
+    status === "paid" ||
+    status === "complete" ||
+    status === "completed" ||
+    Boolean(order.completed_at)
+  );
+}
+
+function matchesPriceFilter(price: number, filter: string) {
+  if (filter === "Under $25") return price > 0 && price < 25;
+  if (filter === "$25–$50") return price >= 25 && price <= 50;
+  if (filter === "$50–$100") return price >= 50 && price <= 100;
+  if (filter === "$100–$250") return price >= 100 && price <= 250;
+  if (filter === "$250–$500") return price >= 250 && price <= 500;
+  if (filter === "$500–$1,000") return price >= 500 && price <= 1000;
+  if (filter === "$1,000–$2,500") return price >= 1000 && price <= 2500;
+  if (filter === "$2,500–$5,000") return price >= 2500 && price <= 5000;
+  if (filter === "$5,000+") return price >= 5000;
+
+  return true;
+}
+
+function matchesCategoryFilter(listing: BrowseListing, filter: string) {
+  if (filter === "Sports Cards") return listing.category === "Sports";
+  if (filter === "TCG Cards") return listing.category === "TCG";
+  if (filter === "Slabs") return listing.isGraded;
+  if (filter === "Raw Cards") return listing.isRaw;
+  if (filter === "Grail Cards") return listing.isGrail;
+
+  return true;
+}
+
+function matchesSelectedGrade(listing: BrowseListing, option: string) {
+  const [grader, grade] = option.split(":");
+  const listingGrader = listing.details.grader?.toLowerCase() || "";
+  const listingGrade = listing.details.grade?.toLowerCase() || "";
+
+  if (!listing.isGraded) {
+    return false;
+  }
+
+  if (grader === "Other") {
+    const knownGraders = ["psa", "bgs", "cgc", "sgc"];
+    return !knownGraders.includes(listingGrader) && listingGrade === grade.toLowerCase();
+  }
+
+  return (
+    listingGrader === grader.toLowerCase() &&
+    listingGrade === grade.toLowerCase()
+  );
+}
+
+function getListingSearchText(listing: BrowseListing) {
+  return [
+    listing.title,
+    listing.category,
+    listing.condition,
+    listing.meta,
+    listing.seller,
+    listing.details.year,
+    listing.details.set,
+    listing.details.subject,
+    listing.details.cardNumber,
+    listing.details.grader,
+    listing.details.grade,
+    getListingTag(listing),
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 function CardArtwork({
@@ -508,9 +668,13 @@ function CardArtwork({
 function FilterGroup({
   title,
   options,
+  selectedOptions,
+  onToggleOption,
 }: {
   title: string;
   options: string[];
+  selectedOptions: string[];
+  onToggleOption: (option: string) => void;
 }) {
   return (
     <section className="filter-group">
@@ -518,7 +682,11 @@ function FilterGroup({
       <div className="filter-options">
         {options.map((option) => (
           <label key={option} className="filter-option">
-            <input type="checkbox" />
+            <input
+              type="checkbox"
+              checked={selectedOptions.includes(option)}
+              onChange={() => onToggleOption(option)}
+            />
             <span>{option}</span>
           </label>
         ))}
@@ -530,15 +698,27 @@ function FilterGroup({
 function GradeFilters({
   openGraders,
   onToggle,
+  rawSelected,
+  selectedGradeOptions,
+  onToggleRaw,
+  onToggleGrade,
 }: {
   openGraders: string[];
   onToggle: (grader: string) => void;
+  rawSelected: boolean;
+  selectedGradeOptions: string[];
+  onToggleRaw: () => void;
+  onToggleGrade: (grader: string, grade: string) => void;
 }) {
   return (
     <section className="filter-group grade-filter">
       <h3>Grade</h3>
       <label className="filter-option grade-raw-option">
-        <input type="checkbox" />
+        <input
+          type="checkbox"
+          checked={rawSelected}
+          onChange={onToggleRaw}
+        />
         <span>Raw</span>
       </label>
 
@@ -564,7 +744,11 @@ function GradeFilters({
                 <div className="grade-panel">
                   {options.map((grade) => (
                     <label key={`${grader}-${grade}`} className="grade-option">
-                      <input type="checkbox" />
+                      <input
+                        type="checkbox"
+                        checked={selectedGradeOptions.includes(`${grader}:${grade}`)}
+                        onChange={() => onToggleGrade(grader, grade)}
+                      />
                       <span>{grade}</span>
                     </label>
                   ))}
@@ -579,74 +763,38 @@ function GradeFilters({
 }
 
 function SellerFilters({
-  isOpen,
-  onToggle,
+  multiListingSellersOnly,
+  newListingsOnly,
+  onToggleMultiListingSellers,
+  onToggleNewListings,
 }: {
-  isOpen: boolean;
-  onToggle: () => void;
+  multiListingSellersOnly: boolean;
+  newListingsOnly: boolean;
+  onToggleMultiListingSellers: () => void;
+  onToggleNewListings: () => void;
 }) {
   return (
     <section className="filter-group seller-filters">
       <h3>Seller Filters</h3>
-      <div className="grader-item">
-        <button
-          type="button"
-          className="grader-toggle"
-          aria-expanded={isOpen}
-          onClick={onToggle}
-        >
-          <span>Level Sellers</span>
-          <span aria-hidden="true">{isOpen ? "▴" : "▾"}</span>
-        </button>
-
-        {isOpen ? (
-          <div className="seller-level-panel">
-            {sellerLevels.map((level) => (
-              <label key={level} className="grade-option seller-level-option">
-                <input type="checkbox" />
-                <span>{level}</span>
-              </label>
-            ))}
-          </div>
-        ) : null}
-      </div>
-
       <div className="filter-options seller-quick-options">
         <label className="filter-option">
-          <input type="checkbox" />
+          <input
+            type="checkbox"
+            checked={newListingsOnly}
+            onChange={onToggleNewListings}
+          />
           <span>New Listings</span>
         </label>
         <label className="filter-option">
-          <input type="checkbox" />
-          <span>Featured Sellers</span>
+          <input
+            type="checkbox"
+            checked={multiListingSellersOnly}
+            onChange={onToggleMultiListingSellers}
+          />
+          <span>Sellers with multiple active listings</span>
         </label>
       </div>
     </section>
-  );
-}
-
-function MarketIndexChart() {
-  return (
-    <svg
-      className="market-chart"
-      viewBox="0 0 236 86"
-      role="img"
-      aria-label="Mock GRAIL Market Index chart"
-    >
-      <path
-        className="chart-fill"
-        d="M8 70 C28 60 38 42 58 48 C78 54 87 31 109 36 C130 41 138 60 158 50 C179 39 186 24 205 31 C219 36 225 26 232 20 L232 78 L8 78 Z"
-      />
-      <path
-        className="chart-line"
-        d="M8 70 C28 60 38 42 58 48 C78 54 87 31 109 36 C130 41 138 60 158 50 C179 39 186 24 205 31 C219 36 225 26 232 20"
-      />
-      <g className="chart-grid" aria-hidden="true">
-        <path d="M8 24 H232" />
-        <path d="M8 50 H232" />
-        <path d="M8 76 H232" />
-      </g>
-    </svg>
   );
 }
 
@@ -706,11 +854,24 @@ function BrowseContent() {
   const searchParams = useSearchParams();
   const urlSearchQuery = searchParams.get("search") || "";
   const [listings, setListings] = useState<BrowseListing[]>([]);
+  const [featuredSellers, setFeaturedSellers] = useState<FeaturedSeller[]>([]);
+  const [marketSnapshot, setMarketSnapshot] = useState<BrowseMarketSnapshot>({
+    activeListings: 0,
+    newThisWeek: 0,
+    averageListPrice: 0,
+    completedSales: null,
+    marketplaceVolume: null,
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [fallbackNote, setFallbackNote] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [openGraders, setOpenGraders] = useState<string[]>(["PSA"]);
-  const [isSellerLevelsOpen, setIsSellerLevelsOpen] = useState(false);
+  const [selectedCategoryFilters, setSelectedCategoryFilters] = useState<string[]>([]);
+  const [selectedPriceFilters, setSelectedPriceFilters] = useState<string[]>([]);
+  const [selectedGradeOptions, setSelectedGradeOptions] = useState<string[]>([]);
+  const [rawSelected, setRawSelected] = useState(false);
+  const [newListingsOnly, setNewListingsOnly] = useState(false);
+  const [multiListingSellersOnly, setMultiListingSellersOnly] = useState(false);
   const [sortMode, setSortMode] = useState<"newest" | "hot">("newest");
   const [localSearchQuery, setLocalSearchQuery] = useState("");
   const [hasLocalSearch, setHasLocalSearch] = useState(false);
@@ -772,6 +933,7 @@ function BrowseContent() {
               title,
               sport,
               player,
+              player_name,
               year,
               brand,
               card_number,
@@ -790,34 +952,16 @@ function BrowseContent() {
               )
             `,
           )
-          .or("status.eq.active,status.eq.collection,is_public_collection.eq.true")
+          .eq("status", "active")
           .order("created_at", { ascending: false });
 
         if (error) {
           throw error;
         }
 
-        const rows = ((data || []) as SupabaseListingRow[]).filter((listing) => {
-          const status = listing.status?.toLowerCase();
-          return (
-            status === "active" ||
-            status === "collection" ||
-            (Boolean(listing.is_public_collection) &&
-              status !== "inactive" &&
-              status !== "deleted" &&
-              status !== "sold")
-          );
-        });
-
-        if (rows.length === 0) {
-          if (!isMounted) {
-            return;
-          }
-
-          setListings(fallbackListings);
-          setFallbackNote("No live listings yet. Showing demo listings.");
-          return;
-        }
+        const rows = ((data || []) as SupabaseListingRow[]).filter(
+          (listing) => listing.status?.toLowerCase() === "active",
+        );
 
         const sellerIds = Array.from(
           new Set(
@@ -850,13 +994,54 @@ function BrowseContent() {
         const liveListings = rows.map((listing, index) =>
           mapSupabaseListing(listing, index, rows.length, profilesById),
         );
-        const liveIds = new Set(liveListings.map((listing) => listing.id));
-        const demoListings = fallbackListings.filter(
-          (listing) => !liveIds.has(listing.id),
+        const pricedListings = rows.filter(
+          (listing) => listing.price !== null && Number(listing.price) > 0,
         );
+        const completedSnapshot = {
+          completedSales: null as number | null,
+          marketplaceVolume: null as number | null,
+        };
 
-        setListings([...liveListings, ...demoListings]);
-        setFallbackNote("Showing live + demo listings.");
+        try {
+          const { data: orderData, error: orderError } = await supabase
+            .from("orders")
+            .select("id, total_amount, card_price, status, created_at, completed_at")
+            .limit(1000);
+
+          if (orderError) {
+            throw orderError;
+          }
+
+          const orders = (orderData || []) as OrderRow[];
+          const completedOrders = orders.filter(isCompletedOrder);
+
+          completedSnapshot.completedSales = completedOrders.length;
+          completedSnapshot.marketplaceVolume = completedOrders.reduce(
+            (sum, order) => sum + Number(order.total_amount || order.card_price || 0),
+            0,
+          );
+        } catch (orderError) {
+          console.warn("Browse orders snapshot unavailable:", orderError);
+        }
+
+        setListings(liveListings);
+        setFeaturedSellers(buildFeaturedSellers(rows, profilesById));
+        setMarketSnapshot({
+          activeListings: rows.length,
+          newThisWeek: rows.filter((listing) => isWithinLastWeek(listing.created_at))
+            .length,
+          averageListPrice: pricedListings.length
+            ? Math.round(
+                pricedListings.reduce(
+                  (sum, listing) => sum + Number(listing.price || 0),
+                  0,
+                ) / pricedListings.length,
+              )
+            : 0,
+          completedSales: completedSnapshot.completedSales,
+          marketplaceVolume: completedSnapshot.marketplaceVolume,
+        });
+        setFallbackNote("");
       } catch (error) {
         console.error("Browse listings error:", error);
 
@@ -864,8 +1049,16 @@ function BrowseContent() {
           return;
         }
 
-        setListings(fallbackListings);
-        setFallbackNote("Showing demo listings.");
+        setListings([]);
+        setFeaturedSellers([]);
+        setMarketSnapshot({
+          activeListings: 0,
+          newThisWeek: 0,
+          averageListPrice: 0,
+          completedSales: null,
+          marketplaceVolume: null,
+        });
+        setFallbackNote("Live listings could not be loaded right now.");
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -881,41 +1074,113 @@ function BrowseContent() {
   }, []);
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
-  const visibleListings = listings
-    .filter((listing) => {
-      const tag = getListingTag(listing);
+  const sellerListingCounts = useMemo(() => {
+    const counts = new Map<string, number>();
 
-      if (sortMode === "hot" && tag !== "Hot") {
-        return false;
+    listings.forEach((listing) => {
+      if (!listing.sellerId) {
+        return;
       }
 
-      if (!normalizedQuery) {
-        return true;
-      }
-
-      return [
-        listing.title,
-        listing.category,
-        listing.condition,
-        listing.meta,
-        listing.seller,
-        tag,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(normalizedQuery);
-    })
-    .sort((first, second) => {
-      if (sortMode === "hot") {
-        return (
-          second.watchCount +
-          second.views * 0.1 -
-          (first.watchCount + first.views * 0.1)
-        );
-      }
-
-      return second.listedOrder - first.listedOrder;
+      counts.set(listing.sellerId, (counts.get(listing.sellerId) || 0) + 1);
     });
+
+    return counts;
+  }, [listings]);
+  const hasActiveFilters =
+    Boolean(normalizedQuery) ||
+    selectedCategoryFilters.length > 0 ||
+    selectedPriceFilters.length > 0 ||
+    selectedGradeOptions.length > 0 ||
+    rawSelected ||
+    newListingsOnly ||
+    multiListingSellersOnly ||
+    sortMode === "hot";
+  const visibleListings = useMemo(
+    () =>
+      listings
+        .filter((listing) => {
+          const tag = getListingTag(listing);
+
+          if (sortMode === "hot" && tag !== "Hot") {
+            return false;
+          }
+
+          if (
+            normalizedQuery &&
+            !getListingSearchText(listing).includes(normalizedQuery)
+          ) {
+            return false;
+          }
+
+          if (
+            selectedCategoryFilters.length > 0 &&
+            !selectedCategoryFilters.some((filter) =>
+              matchesCategoryFilter(listing, filter),
+            )
+          ) {
+            return false;
+          }
+
+          if (
+            selectedPriceFilters.length > 0 &&
+            !selectedPriceFilters.some((filter) =>
+              matchesPriceFilter(listing.price, filter),
+            )
+          ) {
+            return false;
+          }
+
+          if (
+            (rawSelected || selectedGradeOptions.length > 0) &&
+            !(
+              (rawSelected && listing.isRaw) ||
+              selectedGradeOptions.some((option) =>
+                matchesSelectedGrade(listing, option),
+              )
+            )
+          ) {
+            return false;
+          }
+
+          if (newListingsOnly && !isWithinLastWeek(listing.createdAt)) {
+            return false;
+          }
+
+          if (
+            multiListingSellersOnly &&
+            (!listing.sellerId ||
+              (sellerListingCounts.get(listing.sellerId) || 0) < 2)
+          ) {
+            return false;
+          }
+
+          return true;
+        })
+        .sort((first, second) => {
+          if (sortMode === "hot") {
+            return (
+              second.watchCount +
+              second.views * 0.1 -
+              (first.watchCount + first.views * 0.1)
+            );
+          }
+
+          return second.listedOrder - first.listedOrder;
+        }),
+    [
+      listings,
+      multiListingSellersOnly,
+      newListingsOnly,
+      normalizedQuery,
+      rawSelected,
+      selectedCategoryFilters,
+      selectedGradeOptions,
+      selectedPriceFilters,
+      sellerListingCounts,
+      sortMode,
+    ],
+  );
 
   const resultLabel = isLoading
     ? "Loading listings..."
@@ -925,7 +1190,32 @@ function BrowseContent() {
         }`
       : sortMode === "hot"
         ? `${visibleListings.length} hot cards`
-        : `${listings.length} listings`;
+        : hasActiveFilters
+          ? `${visibleListings.length} matching listings`
+          : `${listings.length} listings`;
+
+  function toggleStringFilter(
+    value: string,
+    setter: Dispatch<SetStateAction<string[]>>,
+  ) {
+    setter((current) =>
+      current.includes(value)
+        ? current.filter((item) => item !== value)
+        : [...current, value],
+    );
+  }
+
+  function resetFilters() {
+    setHasLocalSearch(true);
+    setLocalSearchQuery("");
+    setSelectedCategoryFilters([]);
+    setSelectedPriceFilters([]);
+    setSelectedGradeOptions([]);
+    setRawSelected(false);
+    setNewListingsOnly(false);
+    setMultiListingSellersOnly(false);
+    setSortMode("newest");
+  }
 
   function toggleGrader(grader: string) {
     setOpenGraders((current) =>
@@ -933,6 +1223,10 @@ function BrowseContent() {
         ? current.filter((item) => item !== grader)
         : [...current, grader],
     );
+  }
+
+  function toggleGradeFilter(grader: string, grade: string) {
+    toggleStringFilter(`${grader}:${grade}`, setSelectedGradeOptions);
   }
 
   function openOfferModal(listing: BrowseListing) {
@@ -1493,14 +1787,14 @@ function BrowseContent() {
 
           .offer-confirmation {
             margin-top: 14px;
-            border: 1px solid rgba(52,211,153,0.24);
+            border: 1px solid rgba(231,222,208,0.24);
             border-radius: 10px;
-            background: rgba(52,211,153,0.07);
+            background: rgba(231,222,208,0.07);
             padding: 12px;
           }
 
           .offer-confirmation strong {
-            color: #86efac;
+            color: #E7DED0;
             font-size: 13px;
             line-height: 17px;
             font-weight: 900;
@@ -1970,10 +2264,10 @@ function BrowseContent() {
           }
 
           .badge-hot {
-            border-color: rgba(244,63,94,0.3);
-            background: rgba(244,63,94,0.085);
-            color: #fb7185;
-            box-shadow: 0 0 16px rgba(244,63,94,0.08);
+            border-color: rgba(231,222,208,0.34);
+            background: rgba(231,222,208,0.085);
+            color: #E7DED0;
+            box-shadow: 0 0 16px rgba(201,205,211,0.08);
           }
 
           .badge-grail {
@@ -1995,9 +2289,9 @@ function BrowseContent() {
           }
 
           .badge-raw {
-            border-color: rgba(45,212,191,0.22);
-            background: rgba(45,212,191,0.055);
-            color: #99f6e4;
+            border-color: rgba(201,205,211,0.24);
+            background: rgba(201,205,211,0.055);
+            color: #C9CDD3;
           }
 
           .badge-collection {
@@ -2357,7 +2651,7 @@ function BrowseContent() {
             border: 1px solid #1d1d22;
             border-radius: 10px;
             background:
-              radial-gradient(circle at 78% 8%, rgba(52,211,153,0.12), transparent 34%),
+              radial-gradient(circle at 78% 8%, rgba(231,222,208,0.1), transparent 34%),
               rgba(8,8,10,0.78);
             padding: 11px;
           }
@@ -2393,16 +2687,16 @@ function BrowseContent() {
           }
 
           .chart-fill {
-            fill: rgba(52, 211, 153, 0.1);
+            fill: rgba(231, 222, 208, 0.1);
           }
 
           .chart-line {
             fill: none;
-            stroke: #34d399;
+            stroke: #E7DED0;
             stroke-width: 3;
             stroke-linecap: round;
             stroke-linejoin: round;
-            filter: drop-shadow(0 0 8px rgba(52,211,153,0.24));
+            filter: drop-shadow(0 0 8px rgba(231,222,208,0.18));
           }
 
           .chart-grid path {
@@ -2423,7 +2717,7 @@ function BrowseContent() {
           }
 
           .market-index-caption span {
-            color: #34d399;
+            color: #E7DED0;
             font-weight: 900;
           }
 
@@ -2438,6 +2732,8 @@ function BrowseContent() {
             grid-template-columns: 34px 1fr auto;
             gap: 9px;
             align-items: center;
+            color: inherit;
+            text-decoration: none;
           }
 
           .seller-avatar {
@@ -2472,10 +2768,10 @@ function BrowseContent() {
           }
 
           .seller-trust {
-            border: 1px solid rgba(74,222,128,0.22);
+            border: 1px solid rgba(231,222,208,0.26);
             border-radius: 999px;
-            color: #86efac;
-            background: rgba(74,222,128,0.06);
+            color: #E7DED0;
+            background: rgba(231,222,208,0.06);
             padding: 4px 7px;
             font-size: 9px;
             font-weight: 900;
@@ -2609,17 +2905,44 @@ function BrowseContent() {
           <aside className="panel filters" aria-label="Filters">
             <div className="filters-header">
               <h2>FILTERS</h2>
-              <button type="button" className="reset-button">
+              <button type="button" className="reset-button" onClick={resetFilters}>
                 Reset
               </button>
             </div>
 
-            <FilterGroup title="Category" options={categoryFilters} />
-            <FilterGroup title="Price" options={priceFilters} />
-            <GradeFilters openGraders={openGraders} onToggle={toggleGrader} />
+            <FilterGroup
+              title="Category"
+              options={categoryFilters}
+              selectedOptions={selectedCategoryFilters}
+              onToggleOption={(option) =>
+                toggleStringFilter(option, setSelectedCategoryFilters)
+              }
+            />
+            <FilterGroup
+              title="Price"
+              options={priceFilters}
+              selectedOptions={selectedPriceFilters}
+              onToggleOption={(option) =>
+                toggleStringFilter(option, setSelectedPriceFilters)
+              }
+            />
+            <GradeFilters
+              openGraders={openGraders}
+              onToggle={toggleGrader}
+              rawSelected={rawSelected}
+              selectedGradeOptions={selectedGradeOptions}
+              onToggleRaw={() => setRawSelected((current) => !current)}
+              onToggleGrade={toggleGradeFilter}
+            />
             <SellerFilters
-              isOpen={isSellerLevelsOpen}
-              onToggle={() => setIsSellerLevelsOpen((current) => !current)}
+              multiListingSellersOnly={multiListingSellersOnly}
+              newListingsOnly={newListingsOnly}
+              onToggleMultiListingSellers={() =>
+                setMultiListingSellersOnly((current) => !current)
+              }
+              onToggleNewListings={() =>
+                setNewListingsOnly((current) => !current)
+              }
             />
           </aside>
 
@@ -2735,44 +3058,66 @@ function BrowseContent() {
               </div>
             ) : (
               <div className="panel empty-state">
-                <h2>No cards found.</h2>
-                <p>Try a different search or filter.</p>
+                <h2>
+                  {listings.length === 0
+                    ? "No active listings yet."
+                    : "No listings match these filters."}
+                </h2>
+                <p>
+                  {listings.length === 0
+                    ? "Active marketplace listings will appear here as collectors list cards."
+                    : "Try a different search or clear the filters."}
+                </p>
               </div>
             )}
           </section>
 
           <aside className="right-stack" aria-label="Market panels">
             <section className="panel side-panel">
-              <h2>MARKET SNAPSHOT</h2>
+              <h2>GRAIL MARKET SNAPSHOT</h2>
+              <p className="side-subtitle">
+                Live activity from cards listed and sold on GRAIL.
+              </p>
 
               <div className="snapshot-grid">
                 <div className="metric">
-                  <span>Total Listings</span>
-                  <strong>{mockMarketData.snapshot.totalListings}</strong>
+                  <span>Active Listings</span>
+                  <strong>{marketSnapshot.activeListings}</strong>
                 </div>
                 <div className="metric">
-                  <span>Avg Sale Price</span>
-                  <strong>${mockMarketData.snapshot.avgSalePrice}</strong>
+                  <span>New This Week</span>
+                  <strong>{marketSnapshot.newThisWeek}</strong>
                 </div>
                 <div className="metric">
-                  <span>New Today</span>
-                  <strong>{mockMarketData.snapshot.newToday}</strong>
+                  <span>Avg List Price</span>
+                  <strong>
+                    {marketSnapshot.averageListPrice
+                      ? formatCurrency(marketSnapshot.averageListPrice)
+                      : "Pending"}
+                  </strong>
                 </div>
                 <div className="metric">
-                  <span>Trending Category</span>
-                  <strong>{mockMarketData.snapshot.trendingCategory}</strong>
+                  <span>Completed Sales</span>
+                  <strong>
+                    {marketSnapshot.completedSales === null
+                      ? "Pending"
+                      : marketSnapshot.completedSales}
+                  </strong>
                 </div>
               </div>
 
               <div className="market-index">
                 <div className="market-index-header">
-                  <span>GRAIL Market Index</span>
-                  <strong>{mockMarketData.grailMarketIndex.value}</strong>
+                  <span>Marketplace Volume</span>
+                  <strong>
+                    {marketSnapshot.marketplaceVolume === null
+                      ? "Pending"
+                      : formatCurrency(marketSnapshot.marketplaceVolume)}
+                  </strong>
                 </div>
-                <MarketIndexChart />
                 <p className="market-index-caption">
-                  {mockMarketData.grailMarketIndex.label}{" "}
-                  <span>{mockMarketData.grailMarketIndex.dailyChange}</span>
+                  Internal GRAIL sales data only. No external card market index
+                  is shown here.
                 </p>
               </div>
             </section>
@@ -2784,18 +3129,29 @@ function BrowseContent() {
               </p>
 
               <div className="seller-list">
-                {featuredSellers.map((seller) => (
-                  <div key={seller.name} className="seller-row">
-                    <span className="seller-avatar">{seller.name.slice(0, 1)}</span>
+                {featuredSellers.length === 0 ? (
+                  <p className="seller-rewards-note">
+                    Featured sellers will appear as collectors start listing cards.
+                  </p>
+                ) : (
+                  featuredSellers.map((seller) => (
+                  <Link
+                    key={seller.sellerId}
+                    className="seller-row"
+                    href={seller.route}
+                  >
+                    <span className="seller-avatar">{seller.initials}</span>
                     <div>
                       <strong>{seller.name}</strong>
                       <span>
-                        {seller.level} · {seller.sales}
+                        {seller.listingCount} active{" "}
+                        {seller.listingCount === 1 ? "listing" : "listings"}
                       </span>
                     </div>
-                    <span className="seller-trust">{seller.badge}</span>
-                  </div>
-                ))}
+                    <span className="seller-trust">Live</span>
+                  </Link>
+                  ))
+                )}
               </div>
 
               <p className="seller-rewards-note">
