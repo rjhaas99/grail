@@ -6,6 +6,7 @@ import Header from "./components/Header";
 import { supabase } from "../lib/supabase";
 
 type HeroCardData = {
+  id: string;
   href: string;
   title: string;
   subtitle: string;
@@ -14,6 +15,8 @@ type HeroCardData = {
   type: "slab" | "raw";
   accent: string;
   secondary: string;
+  imageUrl: string | null;
+  featuredLabel: string;
 };
 
 type ListingImageRow = {
@@ -26,10 +29,23 @@ type HomeListingRow = {
   seller_id: string | null;
   title: string | null;
   sport: string | null;
+  player?: string | null;
+  player_name?: string | null;
+  year?: string | null;
+  brand?: string | null;
+  card_number?: string | null;
+  card_type?: string | null;
+  grader?: string | null;
+  grade?: string | null;
+  condition?: string | null;
   price: number | null;
   status: string | null;
   is_collection_card?: boolean | null;
   is_public_collection?: boolean | null;
+  homepage_featured?: boolean | null;
+  homepage_featured_order?: number | null;
+  homepage_featured_at?: string | null;
+  homepage_featured_until?: string | null;
   created_at: string | null;
   listing_images: ListingImageRow[] | null;
 };
@@ -69,58 +85,15 @@ type MarketSnapshot = {
   marketplaceVolume: number | null;
 };
 
-const heroCards: HeroCardData[] = [
-  {
-    href: "/cards/featured-1",
-    title: "Obsidian Court Ace",
-    subtitle: "Premium basketball-style grail",
-    condition: "Graded 10",
-    price: "$4,500",
-    type: "slab",
-    accent: "#8f1d2c",
-    secondary: "#E7DED0",
-  },
-  {
-    href: "/cards/featured-2",
-    title: "Silver Crest Sentinel",
-    subtitle: "Blue/silver sports showcase",
-    condition: "Slabbed 9",
-    price: "$2,850",
-    type: "slab",
-    accent: "#1e3a8a",
-    secondary: "#C9CDD3",
-  },
-  {
-    href: "/cards/featured-3",
-    title: "Midnight Archivist",
-    subtitle: "Archive TCG-style single",
-    condition: "Raw Near Mint",
-    price: "$950",
-    type: "raw",
-    accent: "#0f766e",
-    secondary: "#C9CDD3",
-  },
-  {
-    href: "/cards/featured-4",
-    title: "Crimson Rookie Vault",
-    subtitle: "Rookie category showcase",
-    condition: "Graded 9",
-    price: "$1,250",
-    type: "slab",
-    accent: "#7f1d1d",
-    secondary: "#E7DED0",
-  },
-  {
-    href: "/cards/featured-5",
-    title: "Aurora Strike Holo",
-    subtitle: "Holographic chase single",
-    condition: "Raw Mint",
-    price: "$775",
-    type: "raw",
-    accent: "#0e7490",
-    secondary: "#C9CDD3",
-  },
+const featuredAccentPairs = [
+  { accent: "#E7DED0", secondary: "#ffffff" },
+  { accent: "#C9CDD3", secondary: "#f3f4f6" },
+  { accent: "#B7A682", secondary: "#E7DED0" },
+  { accent: "#f5f5f5", secondary: "#C9CDD3" },
+  { accent: "#8D949D", secondary: "#E7DED0" },
 ];
+
+const featuredCardLimit = 5;
 
 const marketCategories = [
   {
@@ -239,8 +212,8 @@ const carouselSlots = {
 
 type CarouselVariant = "center" | "side" | "back";
 
-function getCarouselSlot(index: number, activeIndex: number) {
-  const relativeIndex = (index - activeIndex + heroCards.length) % heroCards.length;
+function getCarouselSlot(index: number, activeIndex: number, totalCards: number) {
+  const relativeIndex = (index - activeIndex + totalCards) % totalCards;
 
   if (relativeIndex === 0) return carouselSlots.center;
   if (relativeIndex === 1) return carouselSlots.frontRight;
@@ -290,9 +263,11 @@ function CardFace({
         border: isRaw
           ? "1px solid rgba(231,222,208,0.32)"
           : "1px solid rgba(244,244,245,0.5)",
-        background: isRaw
-          ? `linear-gradient(145deg, ${card.accent}, #111827 56%, #030304)`
-          : "linear-gradient(180deg,#eeeeef 0%,#fafafa 15%,#d7d7da 16%,#f8fafc 17%,#1f1f23 100%)",
+        background: card.imageUrl
+          ? "linear-gradient(180deg,#eeeeef 0%,#fafafa 15%,#d7d7da 16%,#f8fafc 17%,#1f1f23 100%)"
+          : isRaw
+            ? `linear-gradient(145deg, ${card.accent}, #111827 58%, #030304)`
+            : "linear-gradient(180deg,#eeeeef 0%,#fafafa 15%,#d7d7da 16%,#f8fafc 17%,#1f1f23 100%)",
         boxShadow: isCenter
           ? "0 0 34px rgba(231,222,208,0.18), 0 18px 34px rgba(0,0,0,0.68)"
           : "0 12px 26px rgba(0,0,0,0.58)",
@@ -329,78 +304,100 @@ function CardFace({
           height: isRaw ? "100%" : isCenter ? "102px" : isBack ? "86px" : "92px",
           borderRadius: isRaw ? "8px" : "7px",
           border: "1px solid rgba(255,255,255,0.26)",
-          background: isRaw
-            ? `radial-gradient(circle at 48% 24%, rgba(231,222,208,0.2), transparent 15%), linear-gradient(145deg, ${card.accent}, #0f766e 54%, #030304 100%)`
-            : `radial-gradient(circle at 48% 24%, rgba(231,222,208,0.22), transparent 15%), linear-gradient(145deg, ${card.accent} 0%, ${card.secondary} 44%, #18181b 100%)`,
+          background: card.imageUrl
+            ? "#050506"
+            : isRaw
+              ? `radial-gradient(circle at 48% 24%, rgba(231,222,208,0.2), transparent 15%), linear-gradient(145deg, ${card.accent}, #2b2b31 54%, #030304 100%)`
+              : `radial-gradient(circle at 48% 24%, rgba(231,222,208,0.22), transparent 15%), linear-gradient(145deg, ${card.accent} 0%, ${card.secondary} 44%, #18181b 100%)`,
           position: "relative",
           overflow: "hidden",
         }}
       >
-        <div
-          style={{
-            position: "absolute",
-            left: isCenter ? "24px" : "20px",
-            right: isCenter ? "24px" : "20px",
-            bottom: isCenter ? "16px" : "13px",
-            height: isCenter ? "18px" : "15px",
-            borderRadius: "50%",
-            border: "1px solid rgba(255,255,255,0.18)",
-            opacity: 0.64,
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            right: isCenter ? "22px" : "18px",
-            top: isCenter ? "20px" : "16px",
-            width: isCenter ? "25px" : "20px",
-            height: isCenter ? "25px" : "20px",
-            borderRadius: "999px",
-            background: "rgba(255,255,255,0.78)",
-            boxShadow: "0 0 18px rgba(231,222,208,0.3)",
-            opacity: isRaw ? 0.44 : 0.78,
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            left: isCenter ? "21px" : "18px",
-            top: isCenter ? "22px" : "18px",
-            width: isCenter ? "72px" : isBack ? "52px" : "62px",
-            height: isCenter ? "72px" : isBack ? "52px" : "62px",
-            border: "1px solid rgba(255,255,255,0.16)",
-            borderRadius: "50%",
-            transform: "rotate(-18deg)",
-            opacity: 0.46,
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            left: isCenter ? "42px" : isBack ? "32px" : "36px",
-            top: isCenter ? "34px" : isBack ? "27px" : "30px",
-            width: isCenter ? "34px" : isBack ? "25px" : "28px",
-            height: isCenter ? "58px" : isBack ? "42px" : "48px",
-            borderRadius: "999px 999px 14px 14px",
-            background: "rgba(255,255,255,0.72)",
-            opacity: 0.68,
-            transform: "skew(-8deg)",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            left: "18px",
-            right: "18px",
-            bottom: isCenter ? "16px" : "13px",
-            height: "1px",
-            background:
-              "linear-gradient(90deg, transparent, rgba(231,222,208,0.44), transparent)",
-          }}
-        />
+        {card.imageUrl ? (
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              inset: 0,
+              backgroundImage: `url(${card.imageUrl})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+              filter: "saturate(0.92) contrast(1.04)",
+            }}
+          />
+        ) : (
+          <>
+            <div
+              style={{
+                position: "absolute",
+                left: isCenter ? "24px" : "20px",
+                right: isCenter ? "24px" : "20px",
+                bottom: isCenter ? "16px" : "13px",
+                height: isCenter ? "18px" : "15px",
+                borderRadius: "50%",
+                border: "1px solid rgba(255,255,255,0.18)",
+                opacity: 0.64,
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                right: isCenter ? "22px" : "18px",
+                top: isCenter ? "20px" : "16px",
+                width: isCenter ? "25px" : "20px",
+                height: isCenter ? "25px" : "20px",
+                borderRadius: "999px",
+                background: "rgba(255,255,255,0.78)",
+                boxShadow: "0 0 18px rgba(231,222,208,0.3)",
+                opacity: isRaw ? 0.44 : 0.78,
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                left: isCenter ? "21px" : "18px",
+                top: isCenter ? "22px" : "18px",
+                width: isCenter ? "72px" : isBack ? "52px" : "62px",
+                height: isCenter ? "72px" : isBack ? "52px" : "62px",
+                border: "1px solid rgba(255,255,255,0.16)",
+                borderRadius: "50%",
+                transform: "rotate(-18deg)",
+                opacity: 0.46,
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                left: isCenter ? "30px" : isBack ? "25px" : "28px",
+                right: isCenter ? "30px" : isBack ? "25px" : "28px",
+                top: isCenter ? "42px" : isBack ? "35px" : "38px",
+                color: "rgba(255,255,255,0.72)",
+                fontSize: isCenter ? "9px" : "7px",
+                lineHeight: isCenter ? "12px" : "10px",
+                fontWeight: 900,
+                textAlign: "center",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              No photo
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                left: "18px",
+                right: "18px",
+                bottom: isCenter ? "16px" : "13px",
+                height: "1px",
+                background:
+                  "linear-gradient(90deg, transparent, rgba(231,222,208,0.44), transparent)",
+              }}
+            />
+          </>
+        )}
       </div>
 
-      {isRaw && !isBack && (
+      {isRaw && !isBack && !card.imageUrl && (
         <p
           style={{
             position: "absolute",
@@ -473,7 +470,7 @@ function CarouselCard({
           whiteSpace: "nowrap",
         }}
       >
-        ★ Featured Grail
+        {card.featuredLabel}
       </span>
 
       <div style={{ marginTop: isBack ? "9px" : isCenter ? "12px" : "9px" }}>
@@ -677,8 +674,193 @@ function isPublicHomeListing(listing: HomeListingRow) {
   );
 }
 
+function isActiveListing(listing: HomeListingRow) {
+  return listing.status?.toLowerCase() === "active";
+}
+
+function getListingTitle(listing: HomeListingRow) {
+  const title = listing.title?.trim();
+
+  if (title) {
+    return title;
+  }
+
+  const subject = listing.player_name?.trim() || listing.player?.trim();
+  const generatedTitle = [
+    listing.year,
+    listing.brand,
+    subject,
+    listing.card_number ? `#${listing.card_number}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
+  return generatedTitle || "GRAIL Listing";
+}
+
+function getConditionDisplay(listing: HomeListingRow) {
+  if (listing.grader && listing.grade) {
+    return `${listing.grader} ${listing.grade}`;
+  }
+
+  const condition = listing.condition?.trim();
+
+  if (condition) {
+    return condition.toLowerCase().includes("raw")
+      ? condition
+      : `Raw ${condition}`;
+  }
+
+  return listing.card_type?.toLowerCase() === "graded" ? "Graded" : "Raw";
+}
+
+function isRawListing(listing: HomeListingRow) {
+  const cardType = listing.card_type?.toLowerCase() || "";
+
+  return (
+    cardType === "raw" ||
+    Boolean(listing.condition && !(listing.grader && listing.grade))
+  );
+}
+
+function isCurrentFeaturedListing(listing: HomeListingRow, now = Date.now()) {
+  if (!listing.homepage_featured) {
+    return false;
+  }
+
+  if (!listing.homepage_featured_until) {
+    return true;
+  }
+
+  return new Date(listing.homepage_featured_until).getTime() >= now;
+}
+
+function sortNewestListing(left: HomeListingRow, right: HomeListingRow) {
+  return (
+    new Date(right.created_at || 0).getTime() -
+    new Date(left.created_at || 0).getTime()
+  );
+}
+
+function selectFeaturedListings(listings: HomeListingRow[]) {
+  const now = Date.now();
+  const activeListings = listings.filter(isActiveListing);
+  const curatedListings = activeListings
+    .filter((listing) => isCurrentFeaturedListing(listing, now))
+    .sort((left, right) => {
+      const leftOrder = left.homepage_featured_order ?? 9999;
+      const rightOrder = right.homepage_featured_order ?? 9999;
+
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+
+      return sortNewestListing(left, right);
+    });
+  const curatedIds = new Set(curatedListings.map((listing) => listing.id));
+  const recentFill = activeListings
+    .filter((listing) => !curatedIds.has(listing.id))
+    .sort(sortNewestListing);
+
+  return [...curatedListings, ...recentFill].slice(0, featuredCardLimit);
+}
+
+function mapHeroCard(
+  listing: HomeListingRow,
+  index: number,
+  profilesById: Map<string, ProfileRow>,
+): HeroCardData {
+  const profile = listing.seller_id ? profilesById.get(listing.seller_id) : undefined;
+  const sellerName = profile?.full_name || profile?.username || "GRAIL Seller";
+  const accent = featuredAccentPairs[index % featuredAccentPairs.length];
+
+  return {
+    id: listing.id,
+    href: `/cards/${listing.id}`,
+    title: getListingTitle(listing),
+    subtitle: `${sellerName} · ${listing.sport || "Card"}`,
+    condition: getConditionDisplay(listing),
+    price:
+      listing.price !== null && Number(listing.price) > 0
+        ? formatCurrency(Number(listing.price))
+        : "View listing",
+    type: isRawListing(listing) ? "raw" : "slab",
+    accent: accent.accent,
+    secondary: accent.secondary,
+    imageUrl: getListingImage(listing),
+    featuredLabel: listing.homepage_featured
+      ? "Weekly Featured"
+      : "Recent Listing",
+  };
+}
+
+async function fetchHomepageListings(includeCurationColumns: boolean) {
+  const selectColumns: string = includeCurationColumns
+    ? `
+        id,
+        seller_id,
+        title,
+        sport,
+        player,
+        player_name,
+        year,
+        brand,
+        card_number,
+        card_type,
+        grader,
+        grade,
+        condition,
+        price,
+        status,
+        is_collection_card,
+        is_public_collection,
+        homepage_featured,
+        homepage_featured_order,
+        homepage_featured_at,
+        homepage_featured_until,
+        created_at,
+        listing_images (
+          image_url,
+          image_type
+        )
+      `
+    : `
+        id,
+        seller_id,
+        title,
+        sport,
+        player,
+        player_name,
+        year,
+        brand,
+        card_number,
+        card_type,
+        grader,
+        grade,
+        condition,
+        price,
+        status,
+        is_collection_card,
+        is_public_collection,
+        created_at,
+        listing_images (
+          image_url,
+          image_type
+        )
+      `;
+
+  return supabase
+    .from("listings")
+    .select(selectColumns)
+    .or("status.eq.active,status.eq.collection,is_public_collection.eq.true")
+    .order("created_at", { ascending: false })
+    .limit(120);
+}
+
 export default function Home() {
   const [activeIndex, setActiveIndex] = useState(0);
+  const [featuredCards, setFeaturedCards] = useState<HeroCardData[]>([]);
   const [liveCollections, setLiveCollections] = useState<LiveCollection[]>([]);
   const [marketSnapshot, setMarketSnapshot] = useState<MarketSnapshot>({
     activeListings: 0,
@@ -698,34 +880,25 @@ export default function Home() {
       setHomeDataError("");
 
       try {
-        const { data: listingData, error: listingError } = await supabase
-          .from("listings")
-          .select(
-            `
-              id,
-              seller_id,
-              title,
-              sport,
-              price,
-              status,
-              is_collection_card,
-              is_public_collection,
-              created_at,
-              listing_images (
-                image_url,
-                image_type
-              )
-            `,
-          )
-          .or("status.eq.active,status.eq.collection,is_public_collection.eq.true")
-          .order("created_at", { ascending: false })
-          .limit(120);
+        let { data: listingData, error: listingError } =
+          await fetchHomepageListings(true);
 
         if (listingError) {
-          throw listingError;
+          console.warn(
+            "Homepage featured curation columns unavailable; falling back to recent active listings.",
+            listingError,
+          );
+
+          const fallbackResult = await fetchHomepageListings(false);
+          listingData = fallbackResult.data;
+          listingError = fallbackResult.error;
+
+          if (listingError) {
+            throw listingError;
+          }
         }
 
-        const publicListings = ((listingData || []) as HomeListingRow[]).filter(
+        const publicListings = ((listingData || []) as unknown as HomeListingRow[]).filter(
           isPublicHomeListing,
         );
         const sellerIds = Array.from(
@@ -813,6 +986,9 @@ export default function Home() {
             );
           })
           .slice(0, 4);
+        const mappedHeroCards = selectFeaturedListings(publicListings).map(
+          (listing, index) => mapHeroCard(listing, index, profilesById),
+        );
 
         const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
         const activeListings = publicListings.filter(
@@ -865,6 +1041,7 @@ export default function Home() {
         }
 
         if (isMounted) {
+          setFeaturedCards(mappedHeroCards);
           setLiveCollections(mappedCollections);
           setMarketSnapshot({
             activeListings: activeListings.length,
@@ -882,6 +1059,7 @@ export default function Home() {
         console.error("Homepage live data fetch error:", error);
 
         if (isMounted) {
+          setFeaturedCards([]);
           setLiveCollections([]);
           setMarketSnapshot({
             activeListings: 0,
@@ -933,15 +1111,30 @@ export default function Home() {
     ],
     [marketSnapshot],
   );
+  const activeCarouselIndex = featuredCards.length
+    ? activeIndex % featuredCards.length
+    : 0;
 
   const showPreviousCard = () => {
-    setActiveIndex((currentIndex) =>
-      currentIndex === 0 ? heroCards.length - 1 : currentIndex - 1,
-    );
+    if (featuredCards.length <= 1) {
+      return;
+    }
+
+    setActiveIndex((currentIndex) => {
+      const normalizedIndex = currentIndex % featuredCards.length;
+
+      return normalizedIndex === 0
+        ? featuredCards.length - 1
+        : normalizedIndex - 1;
+    });
   };
 
   const showNextCard = () => {
-    setActiveIndex((currentIndex) => (currentIndex + 1) % heroCards.length);
+    if (featuredCards.length <= 1) {
+      return;
+    }
+
+    setActiveIndex((currentIndex) => (currentIndex + 1) % featuredCards.length);
   };
 
   return (
@@ -1025,7 +1218,8 @@ export default function Home() {
               fontSize: "18px",
               lineHeight: "28px",
               zIndex: 6,
-              cursor: "pointer",
+              cursor: featuredCards.length > 1 ? "pointer" : "default",
+              opacity: featuredCards.length > 1 ? 1 : 0.45,
             }}
           >
             &lt;
@@ -1048,7 +1242,8 @@ export default function Home() {
               fontSize: "18px",
               lineHeight: "28px",
               zIndex: 6,
-              cursor: "pointer",
+              cursor: featuredCards.length > 1 ? "pointer" : "default",
+              opacity: featuredCards.length > 1 ? 1 : 0.45,
             }}
           >
             &gt;
@@ -1187,9 +1382,100 @@ export default function Home() {
                 }}
               />
 
-              {heroCards.map((card, index) => {
-                const slot = getCarouselSlot(index, activeIndex);
-                const isActive = index === activeIndex;
+              {isLoadingHomeData && featuredCards.length === 0 ? (
+                <article
+                  style={{
+                    position: "absolute",
+                    left: "50%",
+                    top: "50%",
+                    transform: "translate(-50%, -50%)",
+                    width: "226px",
+                    height: "348px",
+                    borderRadius: "17px",
+                    border: "1px solid rgba(231,222,208,0.22)",
+                    background:
+                      "linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.014)), rgba(5,5,6,0.82)",
+                    boxShadow:
+                      "0 24px 54px rgba(0,0,0,0.56), inset 0 1px 0 rgba(231,222,208,0.08)",
+                    color: "#C9CDD3",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "12px",
+                    lineHeight: "16px",
+                    fontWeight: 900,
+                    textAlign: "center",
+                    padding: "22px",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  Loading featured listings...
+                </article>
+              ) : null}
+
+              {!isLoadingHomeData && featuredCards.length === 0 ? (
+                <article
+                  style={{
+                    position: "absolute",
+                    left: "50%",
+                    top: "50%",
+                    transform: "translate(-50%, -50%)",
+                    width: "262px",
+                    minHeight: "190px",
+                    borderRadius: "17px",
+                    border: "1px solid rgba(231,222,208,0.22)",
+                    background:
+                      "linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.014)), rgba(5,5,6,0.82)",
+                    boxShadow:
+                      "0 24px 54px rgba(0,0,0,0.56), inset 0 1px 0 rgba(231,222,208,0.08)",
+                    color: "#fff",
+                    padding: "20px",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      height: "23px",
+                      alignItems: "center",
+                      border: "1px solid rgba(231,222,208,0.24)",
+                      borderRadius: "999px",
+                      color: "#E7DED0",
+                      padding: "0 10px",
+                      fontSize: "10px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    Featured Listings
+                  </span>
+                  <h2
+                    style={{
+                      margin: "15px 0 0",
+                      color: "#fff",
+                      fontSize: "20px",
+                      lineHeight: "24px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    Active listings will appear here.
+                  </h2>
+                  <p
+                    style={{
+                      margin: "9px 0 0",
+                      color: "#a1a1aa",
+                      fontSize: "12px",
+                      lineHeight: "17px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    No demo featured card data is shown on the homepage.
+                  </p>
+                </article>
+              ) : null}
+
+              {featuredCards.map((card, index) => {
+                const slot = getCarouselSlot(index, activeCarouselIndex, featuredCards.length);
+                const isActive = index === activeCarouselIndex;
                 const cardVariant: CarouselVariant = isActive
                   ? "center"
                   : slot.zIndex === 2
