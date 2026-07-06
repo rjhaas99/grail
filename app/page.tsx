@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Header from "./components/Header";
+import { supabase } from "../lib/supabase";
 
 type HeroCardData = {
   href: string;
@@ -13,6 +14,59 @@ type HeroCardData = {
   type: "slab" | "raw";
   accent: string;
   secondary: string;
+};
+
+type ListingImageRow = {
+  image_url: string | null;
+  image_type: string | null;
+};
+
+type HomeListingRow = {
+  id: string;
+  seller_id: string | null;
+  title: string | null;
+  sport: string | null;
+  price: number | null;
+  status: string | null;
+  is_collection_card?: boolean | null;
+  is_public_collection?: boolean | null;
+  created_at: string | null;
+  listing_images: ListingImageRow[] | null;
+};
+
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  username: string | null;
+};
+
+type OrderRow = {
+  id: string;
+  total_amount: number | null;
+  card_price: number | null;
+  status: string | null;
+  created_at: string | null;
+  completed_at?: string | null;
+};
+
+type LiveCollection = {
+  sellerId: string;
+  name: string;
+  initials: string;
+  route: string;
+  listingCount: number;
+  collectionValue: number;
+  latestListedAt: string | null;
+  imageUrl: string | null;
+  categoryLabel: string;
+};
+
+type MarketSnapshot = {
+  activeListings: number;
+  newThisWeek: number;
+  averageListPrice: number;
+  completedSales: number | null;
+  marketplaceVolume: number | null;
 };
 
 const heroCards: HeroCardData[] = [
@@ -82,9 +136,9 @@ const marketCategories = [
     accent: "#9EA4AE",
   },
   {
-    title: "Market Index",
-    href: "/market-index",
-    subtitle: "Track card values, market movement, and weekly percentage changes.",
+    title: "GRAIL Market Snapshot",
+    href: "#grail-market-snapshot",
+    subtitle: "Live activity from cards listed and sold on GRAIL.",
     accent: "#E7DED0",
   },
   {
@@ -113,41 +167,6 @@ const trustCards = [
     href: "/refund-dispute-policy",
     body: "If something is wrong, buyers and sellers can submit evidence for review.",
     badge: "Evidence review",
-  },
-];
-
-const collections = [
-  {
-    name: "Vintage Basketball Vault",
-    href: "/collections/vintage-basketball-vault",
-    value: "$128,450 value",
-    count: "342 cards",
-    change: "+12.5%",
-    accent: "#E7DED0",
-  },
-  {
-    name: "Modern Rookie Collection",
-    href: "/collections/modern-rookie-collection",
-    value: "$87,900 value",
-    count: "211 cards",
-    change: "+8.3%",
-    accent: "#C9CDD3",
-  },
-  {
-    name: "TCG Fire Collection",
-    href: "/collections/tcg-fire-collection",
-    value: "$64,250 value",
-    count: "98 cards",
-    change: "+6.1%",
-    accent: "#AEB4BC",
-  },
-  {
-    name: "Collector Collection Reserve",
-    href: "/collections/collector-collection-reserve",
-    value: "$42,700 value",
-    count: "64 cards",
-    change: "+4.8%",
-    accent: "#8D949D",
   },
 ];
 
@@ -600,8 +619,320 @@ function MiniArtwork({ accent }: { accent: string }) {
   );
 }
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatDate(value: string | null) {
+  if (!value) {
+    return "Recently active";
+  }
+
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function getInitials(name: string) {
+  return (
+    name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "GC"
+  );
+}
+
+function getProfileSlug(profile: ProfileRow | undefined, sellerId: string) {
+  const username = profile?.username?.replace(/^@/, "").trim();
+
+  return username ? encodeURIComponent(username) : sellerId;
+}
+
+function getListingImage(listing: HomeListingRow) {
+  return (
+    listing.listing_images?.find((image) => image.image_type === "front")?.image_url ||
+    listing.listing_images?.find((image) => Boolean(image.image_url))?.image_url ||
+    null
+  );
+}
+
+function isPublicHomeListing(listing: HomeListingRow) {
+  const status = listing.status?.toLowerCase();
+
+  return (
+    status === "active" ||
+    status === "collection" ||
+    (Boolean(listing.is_public_collection) &&
+      status !== "inactive" &&
+      status !== "deleted" &&
+      status !== "sold")
+  );
+}
+
 export default function Home() {
   const [activeIndex, setActiveIndex] = useState(0);
+  const [liveCollections, setLiveCollections] = useState<LiveCollection[]>([]);
+  const [marketSnapshot, setMarketSnapshot] = useState<MarketSnapshot>({
+    activeListings: 0,
+    newThisWeek: 0,
+    averageListPrice: 0,
+    completedSales: null,
+    marketplaceVolume: null,
+  });
+  const [isLoadingHomeData, setIsLoadingHomeData] = useState(true);
+  const [homeDataError, setHomeDataError] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadHomeData() {
+      setIsLoadingHomeData(true);
+      setHomeDataError("");
+
+      try {
+        const { data: listingData, error: listingError } = await supabase
+          .from("listings")
+          .select(
+            `
+              id,
+              seller_id,
+              title,
+              sport,
+              price,
+              status,
+              is_collection_card,
+              is_public_collection,
+              created_at,
+              listing_images (
+                image_url,
+                image_type
+              )
+            `,
+          )
+          .or("status.eq.active,status.eq.collection,is_public_collection.eq.true")
+          .order("created_at", { ascending: false })
+          .limit(120);
+
+        if (listingError) {
+          throw listingError;
+        }
+
+        const publicListings = ((listingData || []) as HomeListingRow[]).filter(
+          isPublicHomeListing,
+        );
+        const sellerIds = Array.from(
+          new Set(
+            publicListings
+              .map((listing) => listing.seller_id)
+              .filter((sellerId): sellerId is string => Boolean(sellerId)),
+          ),
+        );
+        const profilesById = new Map<string, ProfileRow>();
+
+        if (sellerIds.length > 0) {
+          const { data: profileData, error: profileError } = await supabase
+            .from("profiles")
+            .select("id, full_name, username")
+            .in("id", sellerIds);
+
+          if (profileError) {
+            console.error("Homepage profile fetch error:", profileError);
+          } else {
+            ((profileData || []) as ProfileRow[]).forEach((profile) => {
+              profilesById.set(profile.id, profile);
+            });
+          }
+        }
+
+        const listingsBySeller = new Map<string, HomeListingRow[]>();
+
+        publicListings.forEach((listing) => {
+          if (!listing.seller_id) {
+            return;
+          }
+
+          listingsBySeller.set(listing.seller_id, [
+            ...(listingsBySeller.get(listing.seller_id) || []),
+            listing,
+          ]);
+        });
+
+        const mappedCollections = Array.from(listingsBySeller.entries())
+          .map(([sellerId, sellerListings]) => {
+            const profile = profilesById.get(sellerId);
+            const name = profile?.full_name || profile?.username || "GRAIL Seller";
+            const latestListing = sellerListings
+              .slice()
+              .sort(
+                (left, right) =>
+                  new Date(right.created_at || 0).getTime() -
+                  new Date(left.created_at || 0).getTime(),
+              )[0];
+            const totalValue = sellerListings.reduce(
+              (sum, listing) => sum + Number(listing.price || 0),
+              0,
+            );
+            const sportsCount = sellerListings.filter((listing) =>
+              `${listing.sport || ""}`.toLowerCase().includes("sport"),
+            ).length;
+            const categoryLabel =
+              sportsCount === sellerListings.length
+                ? "Sports"
+                : sportsCount === 0
+                  ? "TCG"
+                  : "Sports + TCG";
+
+            return {
+              sellerId,
+              name,
+              initials: getInitials(name),
+              route: `/collections/${getProfileSlug(profile, sellerId)}`,
+              listingCount: sellerListings.length,
+              collectionValue: totalValue,
+              latestListedAt: latestListing?.created_at || null,
+              imageUrl: latestListing ? getListingImage(latestListing) : null,
+              categoryLabel,
+            } satisfies LiveCollection;
+          })
+          .sort((left, right) => {
+            if (right.listingCount !== left.listingCount) {
+              return right.listingCount - left.listingCount;
+            }
+
+            return (
+              new Date(right.latestListedAt || 0).getTime() -
+              new Date(left.latestListedAt || 0).getTime()
+            );
+          })
+          .slice(0, 4);
+
+        const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const activeListings = publicListings.filter(
+          (listing) => listing.status?.toLowerCase() === "active",
+        );
+        const pricedActiveListings = activeListings.filter(
+          (listing) => listing.price !== null && Number(listing.price) > 0,
+        );
+        const averageListPrice = pricedActiveListings.length
+          ? Math.round(
+              pricedActiveListings.reduce(
+                (sum, listing) => sum + Number(listing.price || 0),
+                0,
+              ) / pricedActiveListings.length,
+            )
+          : 0;
+        let completedSales: number | null = null;
+        let marketplaceVolume: number | null = null;
+
+        try {
+          const { data: orderData, error: orderError } = await supabase
+            .from("orders")
+            .select("id, total_amount, card_price, status, created_at, completed_at")
+            .limit(1000);
+
+          if (orderError) {
+            throw orderError;
+          }
+
+          const orders = (orderData || []) as OrderRow[];
+          if (orders.length > 0) {
+            const completedOrders = orders.filter((order) => {
+              const status = order.status?.toLowerCase();
+              return (
+                status === "paid" ||
+                status === "complete" ||
+                status === "completed" ||
+                Boolean(order.completed_at)
+              );
+            });
+
+            completedSales = completedOrders.length;
+            marketplaceVolume = completedOrders.reduce(
+              (sum, order) => sum + Number(order.total_amount || order.card_price || 0),
+              0,
+            );
+          }
+        } catch (orderError) {
+          console.warn("Homepage orders snapshot unavailable:", orderError);
+        }
+
+        if (isMounted) {
+          setLiveCollections(mappedCollections);
+          setMarketSnapshot({
+            activeListings: activeListings.length,
+            newThisWeek: publicListings.filter(
+              (listing) =>
+                listing.created_at &&
+                new Date(listing.created_at).getTime() >= oneWeekAgo,
+            ).length,
+            averageListPrice,
+            completedSales,
+            marketplaceVolume,
+          });
+        }
+      } catch (error) {
+        console.error("Homepage live data fetch error:", error);
+
+        if (isMounted) {
+          setLiveCollections([]);
+          setMarketSnapshot({
+            activeListings: 0,
+            newThisWeek: 0,
+            averageListPrice: 0,
+            completedSales: null,
+            marketplaceVolume: null,
+          });
+          setHomeDataError("Live marketplace data is unavailable right now.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingHomeData(false);
+        }
+      }
+    }
+
+    loadHomeData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const snapshotStats = useMemo(
+    () => [
+      { label: "Active listings", value: String(marketSnapshot.activeListings) },
+      { label: "New this week", value: String(marketSnapshot.newThisWeek) },
+      {
+        label: "Completed sales",
+        value:
+          marketSnapshot.completedSales === null
+            ? "Pending"
+            : String(marketSnapshot.completedSales),
+      },
+      {
+        label: "Marketplace volume",
+        value:
+          marketSnapshot.marketplaceVolume === null
+            ? "Pending"
+            : formatCurrency(marketSnapshot.marketplaceVolume),
+      },
+      {
+        label: "Average list price",
+        value: marketSnapshot.averageListPrice
+          ? formatCurrency(marketSnapshot.averageListPrice)
+          : "Pending",
+      },
+    ],
+    [marketSnapshot],
+  );
 
   const showPreviousCard = () => {
     setActiveIndex((currentIndex) =>
@@ -1114,6 +1445,144 @@ export default function Home() {
           </div>
         </section>
 
+        <section id="grail-market-snapshot" style={{ marginTop: "24px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "space-between",
+              marginBottom: "14px",
+              gap: "18px",
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  margin: 0,
+                  color: "#fff",
+                  fontSize: "28px",
+                  lineHeight: "34px",
+                  fontWeight: 900,
+                }}
+              >
+                GRAIL Market Snapshot
+              </h2>
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  color: "#a1a1aa",
+                  fontSize: "13px",
+                  lineHeight: "18px",
+                  fontWeight: 800,
+                }}
+              >
+                Live activity from cards listed and sold on GRAIL.
+              </p>
+            </div>
+          </div>
+
+          <div
+            style={{
+              border: "1px solid rgba(231,222,208,0.16)",
+              borderRadius: "10px",
+              background:
+                "linear-gradient(180deg,rgba(255,255,255,0.034),rgba(255,255,255,0.006)), rgba(5,5,6,0.94)",
+              padding: "16px",
+              boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
+            }}
+          >
+            {isLoadingHomeData ? (
+              <p
+                style={{
+                  margin: 0,
+                  color: "#C9CDD3",
+                  fontSize: "13px",
+                  lineHeight: "18px",
+                  fontWeight: 900,
+                }}
+              >
+                Loading live marketplace data...
+              </p>
+            ) : homeDataError ? (
+              <p
+                style={{
+                  margin: 0,
+                  color: "#a1a1aa",
+                  fontSize: "13px",
+                  lineHeight: "18px",
+                  fontWeight: 800,
+                }}
+              >
+                Live marketplace data will appear here as more collectors list,
+                buy, and sell on GRAIL.
+              </p>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(5, 1fr)",
+                    gap: "10px",
+                  }}
+                >
+                  {snapshotStats.map((stat) => (
+                    <article
+                      key={stat.label}
+                      style={{
+                        border: "1px solid rgba(201,205,211,0.14)",
+                        borderRadius: "10px",
+                        background: "rgba(8,8,10,0.76)",
+                        padding: "12px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: "#C9CDD3",
+                          fontSize: "10px",
+                          lineHeight: "13px",
+                          fontWeight: 900,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {stat.label}
+                      </span>
+                      <strong
+                        style={{
+                          display: "block",
+                          marginTop: "8px",
+                          color: "#fff",
+                          fontSize: "22px",
+                          lineHeight: "26px",
+                          fontWeight: 900,
+                        }}
+                      >
+                        {stat.value}
+                      </strong>
+                    </article>
+                  ))}
+                </div>
+                {marketSnapshot.completedSales === null ||
+                marketSnapshot.marketplaceVolume === null ? (
+                  <p
+                    style={{
+                      margin: "12px 0 0",
+                      color: "#85858f",
+                      fontSize: "11px",
+                      lineHeight: "16px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    Completed sales and volume appear when public order data is
+                    available to the homepage. No external card market index is
+                    being shown here.
+                  </p>
+                ) : null}
+              </>
+            )}
+          </div>
+        </section>
+
         <section style={{ marginTop: "24px" }}>
           <div
             style={{
@@ -1123,20 +1592,33 @@ export default function Home() {
               marginBottom: "14px",
             }}
           >
-            <h2
-              style={{
-                margin: 0,
-                color: "#fff",
-                fontSize: "28px",
-                lineHeight: "34px",
-                fontWeight: 900,
-              }}
-            >
-              Trending Collections
-            </h2>
+            <div>
+              <h2
+                style={{
+                  margin: 0,
+                  color: "#fff",
+                  fontSize: "28px",
+                  lineHeight: "34px",
+                  fontWeight: 900,
+                }}
+              >
+                Live Collections
+              </h2>
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  color: "#a1a1aa",
+                  fontSize: "13px",
+                  lineHeight: "18px",
+                  fontWeight: 800,
+                }}
+              >
+                Public seller collections with live GRAIL listings.
+              </p>
+            </div>
 
             <Link
-              href="/browse"
+              href="/collections"
               style={{
                 color: "#d4d4d8",
                 textDecoration: "none",
@@ -1148,100 +1630,168 @@ export default function Home() {
             </Link>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-              gap: "14px",
-            }}
-          >
-            {collections.map((collection) => (
-              <Link
-                key={collection.name}
-                href={collection.href}
-                className="collection-card"
+          {isLoadingHomeData ? (
+            <article
+              style={{
+                minHeight: "120px",
+                border: "1px solid #1d1d22",
+                borderRadius: "10px",
+                background:
+                  "linear-gradient(180deg,rgba(255,255,255,0.026),rgba(255,255,255,0.004)), rgba(5,5,6,0.94)",
+                padding: "16px",
+                color: "#C9CDD3",
+                fontSize: "13px",
+                lineHeight: "18px",
+                fontWeight: 900,
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              Loading live collections...
+            </article>
+          ) : liveCollections.length === 0 ? (
+            <article
+              style={{
+                minHeight: "132px",
+                border: "1px solid #1d1d22",
+                borderRadius: "10px",
+                background:
+                  "linear-gradient(180deg,rgba(255,255,255,0.026),rgba(255,255,255,0.004)), rgba(5,5,6,0.94)",
+                padding: "16px",
+                boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
+              }}
+            >
+              <h3
                 style={{
-                  height: "150px",
-                  border: "1px solid #1d1d22",
-                  borderRadius: "10px",
-                  background:
-                    "linear-gradient(180deg,rgba(255,255,255,0.026),rgba(255,255,255,0.004)), rgba(5,5,6,0.94)",
-                  padding: "15px",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
+                  margin: 0,
                   color: "#fff",
-                  textDecoration: "none",
+                  fontSize: "18px",
+                  lineHeight: "22px",
+                  fontWeight: 900,
                 }}
               >
-                <div
+                Collections will appear here as collectors start listing cards.
+              </h3>
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  color: "#a1a1aa",
+                  fontSize: "13px",
+                  lineHeight: "18px",
+                  fontWeight: 800,
+                }}
+              >
+                No demo collections are shown on this section.
+              </p>
+            </article>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, 1fr)",
+                gap: "14px",
+              }}
+            >
+              {liveCollections.map((collection) => (
+                <Link
+                  key={collection.sellerId}
+                  href={collection.route}
+                  className="collection-card"
                   style={{
+                    minHeight: "170px",
+                    border: "1px solid #1d1d22",
+                    borderRadius: "10px",
+                    background:
+                      "linear-gradient(180deg,rgba(255,255,255,0.026),rgba(255,255,255,0.004)), rgba(5,5,6,0.94)",
+                    padding: "15px",
                     display: "flex",
+                    flexDirection: "column",
                     justifyContent: "space-between",
-                    gap: "14px",
+                    boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
+                    color: "#fff",
+                    textDecoration: "none",
                   }}
                 >
-                  <div>
-                    <h3
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: "14px",
+                    }}
+                  >
+                    <div>
+                      <h3
+                        style={{
+                          margin: 0,
+                          color: "#fff",
+                          fontSize: "16px",
+                          lineHeight: "20px",
+                          fontWeight: 900,
+                        }}
+                      >
+                        {collection.name}
+                      </h3>
+                      <p
+                        style={{
+                          margin: "8px 0 0",
+                          color: "#a1a1aa",
+                          fontSize: "12px",
+                          lineHeight: "16px",
+                        }}
+                      >
+                        {collection.listingCount} public cards ·{" "}
+                        {collection.categoryLabel}
+                      </p>
+                    </div>
+
+                    <div
                       style={{
-                        margin: 0,
+                        width: "62px",
+                        height: "54px",
+                        borderRadius: "9px",
+                        border: "1px solid rgba(201,205,211,0.18)",
+                        background: collection.imageUrl
+                          ? `center / cover no-repeat url("${collection.imageUrl}")`
+                          : "linear-gradient(145deg, #1f2937, #050506)",
+                        color: "#E7DED0",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "15px",
+                        fontWeight: 900,
+                        overflow: "hidden",
+                      }}
+                    >
+                      {collection.imageUrl ? null : collection.initials}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gap: "8px" }}>
+                    <strong
+                      style={{
                         color: "#fff",
-                        fontSize: "16px",
-                        lineHeight: "20px",
+                        fontSize: "20px",
+                        lineHeight: "24px",
                         fontWeight: 900,
                       }}
                     >
-                      {collection.name}
-                    </h3>
-                    <p
+                      {formatCurrency(collection.collectionValue)} listed value
+                    </strong>
+                    <span
                       style={{
-                        margin: "8px 0 0",
-                        color: "#a1a1aa",
-                        fontSize: "12px",
-                        lineHeight: "16px",
+                        color: "#C9CDD3",
+                        fontSize: "11px",
+                        lineHeight: "15px",
+                        fontWeight: 900,
                       }}
                     >
-                      {collection.count}
-                    </p>
+                      Latest listing: {formatDate(collection.latestListedAt)}
+                    </span>
                   </div>
-
-                  <MiniArtwork accent={collection.accent} />
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-end",
-                    justifyContent: "space-between",
-                    gap: "12px",
-                  }}
-                >
-                  <strong
-                    style={{
-                      color: "#fff",
-                      fontSize: "20px",
-                      lineHeight: "24px",
-                      fontWeight: 900,
-                    }}
-                  >
-                    {collection.value}
-                  </strong>
-                  <span
-                    style={{
-                      color: "#4ade80",
-                      fontSize: "12px",
-                      lineHeight: "16px",
-                      fontWeight: 900,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {collection.change} 7D
-                  </span>
-                </div>
-              </Link>
-            ))}
-          </div>
+                </Link>
+              ))}
+            </div>
+          )}
         </section>
 
         <section style={{ marginTop: "24px" }}>
