@@ -45,9 +45,15 @@ type ExistingListingRow = {
   card_type: string | null;
   grader: string | null;
   grade: string | null;
+  cert_number: string | null;
   condition: string | null;
   price: number | null;
   status: string | null;
+  psa_verified?: boolean | null;
+  psa_cert_number?: string | null;
+  psa_grade?: string | null;
+  psa_card_name?: string | null;
+  psa_verified_at?: string | null;
   listing_images: ExistingImageRow[] | null;
 };
 
@@ -73,6 +79,11 @@ type ListingDraft = {
   cardType: CardType;
   grader: string;
   grade: string;
+  certNumber?: string;
+  psaVerified?: boolean;
+  psaGrade?: string;
+  psaCardName?: string;
+  psaVerifiedAt?: string;
   condition: string;
   askingPrice: string;
   minimumOffer: string;
@@ -80,6 +91,24 @@ type ListingDraft = {
   imagePreview: string;
   createdAt: string;
   updatedAt: string;
+};
+
+type PsaVerification = {
+  verified: boolean;
+  certNumber: string;
+  grade: string;
+  cardName: string;
+  verifiedAt: string;
+};
+
+type PsaVerificationResponse = {
+  verified?: boolean;
+  certNumber?: string;
+  grade?: string;
+  cardName?: string;
+  verifiedAt?: string;
+  psaUrl?: string;
+  error?: string;
 };
 
 const storageBucket = "card-images";
@@ -276,6 +305,10 @@ export default function ListCardPage() {
   const [customSerialNumber, setCustomSerialNumber] = useState("");
   const [grader, setGrader] = useState("PSA");
   const [grade, setGrade] = useState("10");
+  const [certNumber, setCertNumber] = useState("");
+  const [psaVerification, setPsaVerification] = useState<PsaVerification | null>(null);
+  const [psaStatus, setPsaStatus] = useState<PublishStatus | null>(null);
+  const [isVerifyingPsa, setIsVerifyingPsa] = useState(false);
   const [condition, setCondition] = useState("Near Mint");
   const [askingPrice, setAskingPrice] = useState("1240");
   const [minimumOffer, setMinimumOffer] = useState("1120");
@@ -351,6 +384,23 @@ export default function ListCardPage() {
       setCardType(draft.cardType);
       setGrader(draft.grader);
       setGrade(draft.grade);
+      setCertNumber(draft.certNumber || "");
+      setPsaVerification(
+        draft.psaVerified
+          ? {
+              verified: true,
+              certNumber: draft.certNumber || "",
+              grade: draft.psaGrade || draft.grade || "",
+              cardName: draft.psaCardName || draft.title || "",
+              verifiedAt: draft.psaVerifiedAt || new Date().toISOString(),
+            }
+          : null,
+      );
+      setPsaStatus(
+        draft.psaVerified
+          ? { type: "success", text: "PSA certification verified." }
+          : null,
+      );
       setCondition(draft.condition);
       setAskingPrice(draft.askingPrice);
       setMinimumOffer(draft.minimumOffer);
@@ -415,9 +465,15 @@ export default function ListCardPage() {
               card_type,
               grader,
               grade,
+              cert_number,
               condition,
               price,
               status,
+              psa_verified,
+              psa_cert_number,
+              psa_grade,
+              psa_card_name,
+              psa_verified_at,
               listing_images (
                 image_url,
                 image_type
@@ -462,6 +518,23 @@ export default function ListCardPage() {
         setSubject(listing.player || "");
         setGrader(listing.grader || "PSA");
         setGrade(listing.grade || "10");
+        setCertNumber(listing.cert_number || listing.psa_cert_number || "");
+        setPsaVerification(
+          listing.psa_verified
+            ? {
+                verified: true,
+                certNumber: listing.psa_cert_number || listing.cert_number || "",
+                grade: listing.psa_grade || listing.grade || "",
+                cardName: listing.psa_card_name || listing.title || "",
+                verifiedAt: listing.psa_verified_at || new Date().toISOString(),
+              }
+            : null,
+        );
+        setPsaStatus(
+          listing.psa_verified
+            ? { type: "success", text: "PSA certification verified." }
+            : null,
+        );
         setCondition(listing.condition || "Near Mint");
         setAskingPrice(listing.price ? String(listing.price) : "");
         setMinimumOffer("");
@@ -531,6 +604,11 @@ export default function ListCardPage() {
     return generatedTitle;
   }
 
+  function clearPsaVerification() {
+    setPsaVerification(null);
+    setPsaStatus(null);
+  }
+
   function handlePhotoChange(imageType: ImageType, file: File | undefined) {
     if (!file) {
       return;
@@ -585,6 +663,11 @@ export default function ListCardPage() {
       cardType,
       grader,
       grade,
+      certNumber,
+      psaVerified: Boolean(psaVerification?.verified),
+      psaGrade: psaVerification?.grade || "",
+      psaCardName: psaVerification?.cardName || "",
+      psaVerifiedAt: psaVerification?.verifiedAt || "",
       condition,
       askingPrice,
       minimumOffer,
@@ -664,7 +747,105 @@ export default function ListCardPage() {
     return "";
   }
 
-  function buildListingFields() {
+  async function verifyPsaCertification(options: { silent?: boolean } = {}) {
+    const cleanCert = certNumber.replace(/[^0-9]/g, "").trim();
+
+    if (cardType !== "Graded" || grader !== "PSA") {
+      if (!options.silent) {
+        setPsaStatus({
+          type: "info",
+          text: "PSA verification is only available for graded PSA cards.",
+        });
+      }
+      return null;
+    }
+
+    if (!cleanCert) {
+      if (!options.silent) {
+        setPsaStatus({
+          type: "error",
+          text: "Enter a PSA cert number before verifying.",
+        });
+      }
+      return null;
+    }
+
+    setIsVerifyingPsa(true);
+    if (!options.silent) {
+      setPsaStatus({ type: "info", text: "Verifying PSA certification..." });
+    }
+
+    try {
+      const response = await fetch("/api/psa/verify-cert", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ certNumber: cleanCert }),
+      });
+      const payload = (await response.json()) as PsaVerificationResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error || "PSA verification failed.");
+      }
+
+      if (!payload.verified) {
+        setPsaVerification(null);
+        setPsaStatus({
+          type: "error",
+          text: payload.error || "Unable to verify PSA certification.",
+        });
+        return null;
+      }
+
+      const verification = {
+        verified: true,
+        certNumber: payload.certNumber || cleanCert,
+        grade: payload.grade || "",
+        cardName: payload.cardName || "",
+        verifiedAt: payload.verifiedAt || new Date().toISOString(),
+      } satisfies PsaVerification;
+
+      setPsaVerification(verification);
+      setPsaStatus({
+        type: "success",
+        text: "PSA certification verified.",
+      });
+      return verification;
+    } catch (error) {
+      console.error("PSA verification error:", error);
+      setPsaVerification(null);
+      setPsaStatus({
+        type: "error",
+        text: error instanceof Error && error.message
+          ? error.message
+          : "Unable to verify PSA certification.",
+      });
+      return null;
+    } finally {
+      setIsVerifyingPsa(false);
+    }
+  }
+
+  async function getPsaVerificationForSave() {
+    const cleanCert = certNumber.replace(/[^0-9]/g, "").trim();
+    const isPsaCard = cardType === "Graded" && grader === "PSA" && cleanCert;
+
+    if (!isPsaCard) {
+      return null;
+    }
+
+    if (psaVerification?.certNumber === cleanCert) {
+      return psaVerification;
+    }
+
+    return verifyPsaCertification({ silent: true });
+  }
+
+  function buildListingFields(verification: PsaVerification | null = psaVerification) {
+    const cleanCert = certNumber.replace(/[^0-9]/g, "").trim();
+    const shouldStorePsa = cardType === "Graded" && grader === "PSA" && cleanCert;
+
     return {
       title: buildTitle(),
       sport: clean(category),
@@ -675,9 +856,17 @@ export default function ListCardPage() {
       card_type: cardType,
       grader: cardType === "Graded" ? clean(grader) : null,
       grade: cardType === "Graded" ? clean(grade) : null,
+      cert_number: cardType === "Graded" ? clean(cleanCert) : null,
       condition: cardType === "Raw" ? clean(condition) : null,
       price: isCollectionMode ? null : Number(askingPrice),
       collection_note: serialDisplay ? `Serial Number: ${serialDisplay}` : null,
+      psa_verified: shouldStorePsa ? Boolean(verification?.verified) : false,
+      psa_cert_number: shouldStorePsa ? cleanCert : null,
+      psa_grade: shouldStorePsa ? verification?.grade || null : null,
+      psa_card_name: shouldStorePsa ? verification?.cardName || null : null,
+      psa_verified_at: shouldStorePsa && verification?.verifiedAt
+        ? verification.verifiedAt
+        : null,
     };
   }
 
@@ -811,9 +1000,10 @@ export default function ListCardPage() {
     setIsPublishing(true);
 
     try {
+      const verifiedPsa = await getPsaVerificationForSave();
       const { data, error } = await supabase
         .from("listings")
-        .update(buildListingFields())
+        .update(buildListingFields(verifiedPsa))
         .eq("id", editListingId)
         .eq("seller_id", currentSession.user.id)
         .select("id")
@@ -881,11 +1071,12 @@ export default function ListCardPage() {
     setIsPublishing(true);
 
     try {
+      const verifiedPsa = await getPsaVerificationForSave();
       const { data, error } = await supabase
         .from("listings")
         .insert({
           seller_id: currentSession.user.id,
-          ...buildListingFields(),
+          ...buildListingFields(verifiedPsa),
           status: isCollectionMode ? "collection" : "active",
           is_collection_card: isCollectionMode,
           is_public_collection: isCollectionMode,
@@ -968,6 +1159,9 @@ export default function ListCardPage() {
     setSubject("");
     setGrader("PSA");
     setGrade("10");
+    setCertNumber("");
+    setPsaVerification(null);
+    setPsaStatus(null);
     setCondition("Near Mint");
     setAskingPrice("");
     setMinimumOffer("");
@@ -1162,9 +1356,10 @@ export default function ListCardPage() {
                   <span>Card type</span>
                   <select
                     value={cardType}
-                    onChange={(event) =>
-                      setCardType(event.target.value as CardType)
-                    }
+                    onChange={(event) => {
+                      setCardType(event.target.value as CardType);
+                      clearPsaVerification();
+                    }}
                   >
                     <option>Raw</option>
                     <option>Graded</option>
@@ -1188,7 +1383,10 @@ export default function ListCardPage() {
                       <span>Grader</span>
                       <select
                         value={grader}
-                        onChange={(event) => setGrader(event.target.value)}
+                        onChange={(event) => {
+                          setGrader(event.target.value);
+                          clearPsaVerification();
+                        }}
                       >
                         {graders.map((item) => (
                           <option key={item}>{item}</option>
@@ -1206,6 +1404,47 @@ export default function ListCardPage() {
                         ))}
                       </select>
                     </label>
+                    <label>
+                      <span>Certification Number</span>
+                      <input
+                        value={certNumber}
+                        inputMode="numeric"
+                        placeholder={grader === "PSA" ? "PSA cert number" : "Optional cert number"}
+                        onChange={(event) => {
+                          setCertNumber(event.target.value);
+                          clearPsaVerification();
+                        }}
+                      />
+                    </label>
+                    {grader === "PSA" ? (
+                      <div className="psa-verification-box">
+                        <div>
+                          <span>PSA Certification</span>
+                          <strong>
+                            {psaVerification?.verified
+                              ? "PSA Certified"
+                              : "Not verified yet"}
+                          </strong>
+                          {psaVerification?.cardName ? (
+                            <p>{psaVerification.cardName}</p>
+                          ) : (
+                            <p>Verify the cert before or during save.</p>
+                          )}
+                          {psaStatus ? (
+                            <p className={`psa-status ${psaStatus.type}`}>
+                              {psaStatus.text}
+                            </p>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isVerifyingPsa || !certNumber.trim()}
+                          onClick={() => void verifyPsaCertification()}
+                        >
+                          {isVerifyingPsa ? "Verifying..." : "Verify PSA"}
+                        </button>
+                      </div>
+                    ) : null}
                   </>
                 )}
               </div>
@@ -1476,6 +1715,16 @@ export default function ListCardPage() {
                     {cardType === "Graded" ? "Grade" : "Condition"}{" "}
                     <strong>{cardType === "Graded" ? `${grader} ${grade}` : condition}</strong>
                   </span>
+                  {cardType === "Graded" && grader === "PSA" ? (
+                    <span>
+                      PSA Cert{" "}
+                      <strong>
+                        {psaVerification?.verified
+                          ? `Verified ${psaVerification.certNumber}`
+                          : certNumber || "Not verified"}
+                      </strong>
+                    </span>
+                  ) : null}
                   <span>Seller <strong>{session?.user.email || "GRAIL Seller"}</strong></span>
                 </div>
                 <ActionCircles showBuy={!isCollectionMode} />
@@ -1537,6 +1786,12 @@ const pageStyles = `
   input, select { border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; min-height: 42px; padding: 0 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none; }
   input:disabled { color: #85858f; cursor: not-allowed; }
   label small { color: #85858f; font-size: 11px; line-height: 15px; font-weight: 800; }
+  .psa-verification-box { grid-column: 1 / -1; border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+  .psa-verification-box span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+  .psa-verification-box strong { display: block; margin-top: 5px; color: #fff; font-size: 14px; line-height: 18px; font-weight: 900; }
+  .psa-verification-box p { margin: 5px 0 0; color: #a1a1aa; font-size: 12px; line-height: 17px; font-weight: 800; }
+  .psa-verification-box .psa-status.success { color: #E7DED0; }
+  .psa-verification-box .psa-status.error { color: #fca5a5; }
   button, .action-panel a, .view-card { min-height: 40px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055); color: #fff; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 12px; font-weight: 900; cursor: pointer; }
   button:hover, .action-panel a:hover { border-color: rgba(231,222,208,0.62); background: rgba(231,222,208,0.11); }
   button:disabled { cursor: not-allowed; opacity: 0.45; }
@@ -1570,5 +1825,5 @@ const pageStyles = `
   .seller-trust-grid span { border: 1px solid rgba(201,205,211,0.14); border-radius: 10px; background: rgba(201,205,211,0.04); color: #C9CDD3; padding: 10px; font-size: 11px; line-height: 16px; font-weight: 800; }
   .seller-trust-links { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
   .seller-trust-links a { min-height: 30px; border: 1px solid rgba(231,222,208,0.22); border-radius: 8px; background: rgba(231,222,208,0.055); color: #E7DED0; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 11px; font-weight: 900; }
-  @media (max-width: 1100px) { .page-shell { width: min(1240px, calc(100vw - 32px)); } .list-layout, .field-grid, .field-grid.three, .upload-grid, .preview-modal-body, .preview-detail-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success { align-items: flex-start; flex-direction: column; } }
+  @media (max-width: 1100px) { .page-shell { width: min(1240px, calc(100vw - 32px)); } .list-layout, .field-grid, .field-grid.three, .upload-grid, .preview-modal-body, .preview-detail-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success, .psa-verification-box { align-items: flex-start; flex-direction: column; } }
 `;
