@@ -54,6 +54,14 @@ type ExistingListingRow = {
   psa_grade?: string | null;
   psa_card_name?: string | null;
   psa_verified_at?: string | null;
+  estimated_value?: number | null;
+  sportscardspro_id?: string | null;
+  sportscardspro_product_name?: string | null;
+  sportscardspro_set_name?: string | null;
+  sportscardspro_estimated_value?: number | null;
+  sportscardspro_price_field?: string | null;
+  sportscardspro_source_url?: string | null;
+  sportscardspro_fetched_at?: string | null;
   listing_images: ExistingImageRow[] | null;
 };
 
@@ -84,6 +92,13 @@ type ListingDraft = {
   psaGrade?: string;
   psaCardName?: string;
   psaVerifiedAt?: string;
+  sportsCardsProId?: string;
+  sportsCardsProProductName?: string;
+  sportsCardsProSetName?: string;
+  sportsCardsProEstimatedValue?: number | null;
+  sportsCardsProPriceField?: string;
+  sportsCardsProSourceUrl?: string;
+  sportsCardsProFetchedAt?: string;
   condition: string;
   askingPrice: string;
   minimumOffer: string;
@@ -108,6 +123,31 @@ type PsaVerificationResponse = {
   cardName?: string;
   verifiedAt?: string;
   psaUrl?: string;
+  error?: string;
+};
+
+type SportsCardsProCandidate = {
+  sportsCardsProId: string;
+  productName: string;
+  setName: string;
+};
+
+type SportsCardsProValue = {
+  sportsCardsProId: string;
+  productName: string;
+  setName: string;
+  estimatedValue: number | null;
+  priceFieldUsed: string;
+  sourceUrl: string;
+  fetchedAt: string;
+};
+
+type SportsCardsProSearchResponse = {
+  candidates?: SportsCardsProCandidate[];
+  error?: string;
+};
+
+type SportsCardsProValueResponse = Partial<SportsCardsProValue> & {
   error?: string;
 };
 
@@ -313,6 +353,16 @@ export default function ListCardPage() {
   const [askingPrice, setAskingPrice] = useState("1240");
   const [minimumOffer, setMinimumOffer] = useState("1120");
   const [marketValue, setMarketValue] = useState("1320");
+  const [sportsCardsProCandidates, setSportsCardsProCandidates] = useState<
+    SportsCardsProCandidate[]
+  >([]);
+  const [sportsCardsProValue, setSportsCardsProValue] =
+    useState<SportsCardsProValue | null>(null);
+  const [sportsCardsProStatus, setSportsCardsProStatus] =
+    useState<PublishStatus | null>(null);
+  const [isSearchingSportsCardsPro, setIsSearchingSportsCardsPro] = useState(false);
+  const [isFetchingSportsCardsProValue, setIsFetchingSportsCardsProValue] =
+    useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<
     Partial<Record<ImageType, SelectedPhoto>>
   >({});
@@ -405,6 +455,26 @@ export default function ListCardPage() {
       setAskingPrice(draft.askingPrice);
       setMinimumOffer(draft.minimumOffer);
       setMarketValue(draft.marketValue);
+      setSportsCardsProValue(
+        draft.sportsCardsProId && draft.sportsCardsProEstimatedValue
+          ? {
+              sportsCardsProId: draft.sportsCardsProId,
+              productName: draft.sportsCardsProProductName || draft.title || "",
+              setName: draft.sportsCardsProSetName || "",
+              estimatedValue: draft.sportsCardsProEstimatedValue,
+              priceFieldUsed: draft.sportsCardsProPriceField || "",
+              sourceUrl:
+                draft.sportsCardsProSourceUrl ||
+                "https://www.sportscardspro.com",
+              fetchedAt: draft.sportsCardsProFetchedAt || new Date().toISOString(),
+            }
+          : null,
+      );
+      setSportsCardsProStatus(
+        draft.sportsCardsProId && draft.sportsCardsProEstimatedValue
+          ? { type: "success", text: "SportsCardsPro estimate loaded." }
+          : null,
+      );
       setDraftImagePreview(draft.imagePreview);
       setStatus({ type: "info", text: "Draft loaded." });
     }, 0);
@@ -474,6 +544,14 @@ export default function ListCardPage() {
               psa_grade,
               psa_card_name,
               psa_verified_at,
+              estimated_value,
+              sportscardspro_id,
+              sportscardspro_product_name,
+              sportscardspro_set_name,
+              sportscardspro_estimated_value,
+              sportscardspro_price_field,
+              sportscardspro_source_url,
+              sportscardspro_fetched_at,
               listing_images (
                 image_url,
                 image_type
@@ -538,7 +616,35 @@ export default function ListCardPage() {
         setCondition(listing.condition || "Near Mint");
         setAskingPrice(listing.price ? String(listing.price) : "");
         setMinimumOffer("");
-        setMarketValue("");
+        setMarketValue(
+          listing.sportscardspro_estimated_value
+            ? String(listing.sportscardspro_estimated_value)
+            : listing.estimated_value
+              ? String(listing.estimated_value)
+              : "",
+        );
+        setSportsCardsProValue(
+          listing.sportscardspro_id && listing.sportscardspro_estimated_value
+            ? {
+                sportsCardsProId: listing.sportscardspro_id,
+                productName: listing.sportscardspro_product_name || listing.title || "",
+                setName: listing.sportscardspro_set_name || "",
+                estimatedValue: listing.sportscardspro_estimated_value,
+                priceFieldUsed: listing.sportscardspro_price_field || "",
+                sourceUrl:
+                  listing.sportscardspro_source_url ||
+                  "https://www.sportscardspro.com",
+                fetchedAt:
+                  listing.sportscardspro_fetched_at || new Date().toISOString(),
+              }
+            : null,
+        );
+        setSportsCardsProStatus(
+          listing.sportscardspro_id && listing.sportscardspro_estimated_value
+            ? { type: "success", text: "SportsCardsPro estimate loaded." }
+            : null,
+        );
+        setSportsCardsProCandidates([]);
         setSelectedPhotos({});
         setDraftImagePreview("");
         setExistingImageUrls(nextImageUrls);
@@ -668,6 +774,13 @@ export default function ListCardPage() {
       psaGrade: psaVerification?.grade || "",
       psaCardName: psaVerification?.cardName || "",
       psaVerifiedAt: psaVerification?.verifiedAt || "",
+      sportsCardsProId: sportsCardsProValue?.sportsCardsProId || "",
+      sportsCardsProProductName: sportsCardsProValue?.productName || "",
+      sportsCardsProSetName: sportsCardsProValue?.setName || "",
+      sportsCardsProEstimatedValue: sportsCardsProValue?.estimatedValue ?? null,
+      sportsCardsProPriceField: sportsCardsProValue?.priceFieldUsed || "",
+      sportsCardsProSourceUrl: sportsCardsProValue?.sourceUrl || "",
+      sportsCardsProFetchedAt: sportsCardsProValue?.fetchedAt || "",
       condition,
       askingPrice,
       minimumOffer,
@@ -842,9 +955,199 @@ export default function ListCardPage() {
     return verifyPsaCertification({ silent: true });
   }
 
+  function buildSportsCardsProPayload() {
+    return {
+      category,
+      year,
+      brand: setName,
+      player: subject,
+      cardNumber,
+      cardType,
+      grader,
+      grade,
+    };
+  }
+
+  async function getAuthenticatedHeaders() {
+    const {
+      data: { session: currentSession },
+    } = await supabase.auth.getSession();
+
+    if (!currentSession?.access_token) {
+      return null;
+    }
+
+    return {
+      authorization: `Bearer ${currentSession.access_token}`,
+      "content-type": "application/json",
+    };
+  }
+
+  async function findSportsCardsProMarketValue() {
+    setSportsCardsProStatus(null);
+    setSportsCardsProCandidates([]);
+    setSportsCardsProValue(null);
+
+    if (!year.trim() && !setName.trim() && !subject.trim() && !cardNumber.trim()) {
+      setSportsCardsProStatus({
+        type: "error",
+        text: "Add card details before searching SportsCardsPro.",
+      });
+      return;
+    }
+
+    const headers = await getAuthenticatedHeaders();
+
+    if (!headers) {
+      setSportsCardsProStatus({
+        type: "error",
+        text: "Sign in to find SportsCardsPro market values.",
+      });
+      return;
+    }
+
+    setIsSearchingSportsCardsPro(true);
+    setSportsCardsProStatus({
+      type: "info",
+      text: "Searching SportsCardsPro...",
+    });
+
+    try {
+      const response = await fetch("/api/sportscardspro/search", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(buildSportsCardsProPayload()),
+      });
+      const payload = (await response.json()) as SportsCardsProSearchResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error || "SportsCardsPro search failed.");
+      }
+
+      const candidates = payload.candidates || [];
+      setSportsCardsProCandidates(candidates);
+
+      if (payload.error) {
+        setSportsCardsProStatus({ type: "error", text: payload.error });
+        return;
+      }
+
+      if (candidates.length === 0) {
+        setSportsCardsProStatus({
+          type: "info",
+          text: "No SportsCardsPro matches found.",
+        });
+        return;
+      }
+
+      setSportsCardsProStatus({
+        type: "success",
+        text: "Select the matching SportsCardsPro card.",
+      });
+    } catch (error) {
+      console.error("SportsCardsPro search error:", error);
+      setSportsCardsProStatus({
+        type: "error",
+        text: error instanceof Error
+          ? error.message
+          : "SportsCardsPro search is unavailable right now.",
+      });
+    } finally {
+      setIsSearchingSportsCardsPro(false);
+    }
+  }
+
+  async function selectSportsCardsProCandidate(candidate: SportsCardsProCandidate) {
+    const headers = await getAuthenticatedHeaders();
+
+    if (!headers) {
+      setSportsCardsProStatus({
+        type: "error",
+        text: "Sign in to retrieve SportsCardsPro market values.",
+      });
+      return;
+    }
+
+    setIsFetchingSportsCardsProValue(true);
+    setSportsCardsProStatus({
+      type: "info",
+      text: "Retrieving SportsCardsPro value...",
+    });
+
+    try {
+      const response = await fetch("/api/sportscardspro/value", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          sportsCardsProId: candidate.sportsCardsProId,
+          cardType,
+          grader,
+          grade,
+        }),
+      });
+      const payload = (await response.json()) as SportsCardsProValueResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error || "SportsCardsPro value failed.");
+      }
+
+      if (payload.error || payload.estimatedValue === null || payload.estimatedValue === undefined) {
+        setSportsCardsProValue(null);
+        setSportsCardsProStatus({
+          type: "error",
+          text: payload.error || "SportsCardsPro has no value for this grade.",
+        });
+        return;
+      }
+
+      const value = {
+        sportsCardsProId: payload.sportsCardsProId || candidate.sportsCardsProId,
+        productName: payload.productName || candidate.productName,
+        setName: payload.setName || candidate.setName,
+        estimatedValue: payload.estimatedValue,
+        priceFieldUsed: payload.priceFieldUsed || "",
+        sourceUrl: payload.sourceUrl || "https://www.sportscardspro.com",
+        fetchedAt: payload.fetchedAt || new Date().toISOString(),
+      } satisfies SportsCardsProValue;
+
+      setSportsCardsProValue(value);
+      setMarketValue(String(value.estimatedValue));
+      setSportsCardsProStatus({
+        type: "success",
+        text: "SportsCardsPro estimate selected.",
+      });
+    } catch (error) {
+      console.error("SportsCardsPro value error:", error);
+      setSportsCardsProValue(null);
+      setSportsCardsProStatus({
+        type: "error",
+        text: error instanceof Error
+          ? error.message
+          : "SportsCardsPro value is unavailable right now.",
+      });
+    } finally {
+      setIsFetchingSportsCardsProValue(false);
+    }
+  }
+
+  function useSportsCardsProAskingPrice() {
+    if (sportsCardsProValue?.estimatedValue) {
+      setAskingPrice(String(sportsCardsProValue.estimatedValue));
+      setStatus({
+        type: "success",
+        text: "SportsCardsPro estimate copied to asking price.",
+      });
+    }
+  }
+
   function buildListingFields(verification: PsaVerification | null = psaVerification) {
     const cleanCert = certNumber.replace(/[^0-9]/g, "").trim();
     const shouldStorePsa = cardType === "Graded" && grader === "PSA" && cleanCert;
+    const manualMarketValue = Number(marketValue);
+    const savedEstimatedValue =
+      Number.isFinite(manualMarketValue) && manualMarketValue > 0
+        ? manualMarketValue
+        : sportsCardsProValue?.estimatedValue || null;
 
     return {
       title: buildTitle(),
@@ -859,6 +1162,7 @@ export default function ListCardPage() {
       cert_number: cardType === "Graded" ? clean(cleanCert) : null,
       condition: cardType === "Raw" ? clean(condition) : null,
       price: isCollectionMode ? null : Number(askingPrice),
+      estimated_value: savedEstimatedValue,
       collection_note: serialDisplay ? `Serial Number: ${serialDisplay}` : null,
       psa_verified: shouldStorePsa ? Boolean(verification?.verified) : false,
       psa_cert_number: shouldStorePsa ? cleanCert : null,
@@ -867,6 +1171,13 @@ export default function ListCardPage() {
       psa_verified_at: shouldStorePsa && verification?.verifiedAt
         ? verification.verifiedAt
         : null,
+      sportscardspro_id: sportsCardsProValue?.sportsCardsProId || null,
+      sportscardspro_product_name: sportsCardsProValue?.productName || null,
+      sportscardspro_set_name: sportsCardsProValue?.setName || null,
+      sportscardspro_estimated_value: sportsCardsProValue?.estimatedValue || null,
+      sportscardspro_price_field: sportsCardsProValue?.priceFieldUsed || null,
+      sportscardspro_source_url: sportsCardsProValue?.sourceUrl || null,
+      sportscardspro_fetched_at: sportsCardsProValue?.fetchedAt || null,
     };
   }
 
@@ -1166,6 +1477,9 @@ export default function ListCardPage() {
     setAskingPrice("");
     setMinimumOffer("");
     setMarketValue("");
+    setSportsCardsProCandidates([]);
+    setSportsCardsProValue(null);
+    setSportsCardsProStatus(null);
     setSelectedPhotos({});
     setDraftImagePreview("");
     setExistingImageUrls({});
@@ -1481,6 +1795,77 @@ export default function ListCardPage() {
                   />
                 </label>
               </div>
+              <div className="market-value-box">
+                <div className="market-value-header">
+                  <div>
+                    <span>SportsCardsPro Market Value</span>
+                    <strong>
+                      {sportsCardsProValue?.estimatedValue
+                        ? formatCurrency(sportsCardsProValue.estimatedValue)
+                        : "No estimate selected"}
+                    </strong>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={
+                      isSearchingSportsCardsPro || isFetchingSportsCardsProValue
+                    }
+                    onClick={() => void findSportsCardsProMarketValue()}
+                  >
+                    {isSearchingSportsCardsPro ? "Searching..." : "Find Market Value"}
+                  </button>
+                </div>
+
+                {sportsCardsProStatus ? (
+                  <p className={`market-status ${sportsCardsProStatus.type}`}>
+                    {sportsCardsProStatus.text}
+                  </p>
+                ) : null}
+
+                {sportsCardsProCandidates.length > 0 ? (
+                  <div className="market-results">
+                    {sportsCardsProCandidates.map((candidate) => (
+                      <button
+                        key={candidate.sportsCardsProId}
+                        type="button"
+                        disabled={isFetchingSportsCardsProValue}
+                        onClick={() => void selectSportsCardsProCandidate(candidate)}
+                      >
+                        <strong>{candidate.productName}</strong>
+                        <span>{candidate.setName || "SportsCardsPro product"}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {sportsCardsProValue?.estimatedValue ? (
+                  <div className="market-value-detail">
+                    <p>
+                      Estimated Market Value{" "}
+                      <strong>{formatCurrency(sportsCardsProValue.estimatedValue)}</strong>
+                    </p>
+                    <p>
+                      Source:{" "}
+                      <Link
+                        href={sportsCardsProValue.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        SportsCardsPro
+                      </Link>{" "}
+                      · Last updated:{" "}
+                      {new Date(sportsCardsProValue.fetchedAt).toLocaleDateString()}
+                    </p>
+                    <p>
+                      Estimate only. Verify the exact card, parallel, condition,
+                      and grade before pricing.
+                    </p>
+                    <button type="button" onClick={useSportsCardsProAskingPrice}>
+                      Use as Asking Price
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <p>Grail tag is based on market value, not asking price.</p>
               <p>
                 Offers are available on every GRAIL listing. Sellers can set a
@@ -1792,6 +2177,23 @@ const pageStyles = `
   .psa-verification-box p { margin: 5px 0 0; color: #a1a1aa; font-size: 12px; line-height: 17px; font-weight: 800; }
   .psa-verification-box .psa-status.success { color: #E7DED0; }
   .psa-verification-box .psa-status.error { color: #fca5a5; }
+  .market-value-box { margin-top: 14px; border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); padding: 12px; display: grid; gap: 12px; }
+  .market-value-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+  .market-value-header span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+  .market-value-header strong { display: block; margin-top: 5px; color: #fff; font-size: 18px; line-height: 22px; font-weight: 900; }
+  .market-status { margin: 0; color: #C9CDD3; font-size: 12px; line-height: 17px; font-weight: 800; }
+  .market-status.success { color: #E7DED0; }
+  .market-status.error { color: #fca5a5; }
+  .market-results { display: grid; gap: 8px; }
+  .market-results button { min-height: auto; padding: 10px; display: grid; justify-content: stretch; justify-items: start; text-align: left; }
+  .market-results strong { color: #fff; font-size: 13px; line-height: 17px; font-weight: 900; }
+  .market-results span { margin-top: 3px; color: #a1a1aa; font-size: 11px; line-height: 15px; font-weight: 800; }
+  .market-value-detail { border-top: 1px solid rgba(201,205,211,0.12); padding-top: 12px; display: grid; gap: 8px; }
+  .market-value-detail p { margin: 0; color: #a1a1aa; font-size: 12px; line-height: 17px; font-weight: 800; }
+  .market-value-detail strong { color: #fff; font-size: 15px; font-weight: 900; }
+  .market-value-detail a { color: #E7DED0; font-weight: 900; text-decoration: none; }
+  .market-value-detail a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .market-value-detail button { justify-self: start; }
   button, .action-panel a, .view-card { min-height: 40px; border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055); color: #fff; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 12px; font-weight: 900; cursor: pointer; }
   button:hover, .action-panel a:hover { border-color: rgba(231,222,208,0.62); background: rgba(231,222,208,0.11); }
   button:disabled { cursor: not-allowed; opacity: 0.45; }
@@ -1825,5 +2227,5 @@ const pageStyles = `
   .seller-trust-grid span { border: 1px solid rgba(201,205,211,0.14); border-radius: 10px; background: rgba(201,205,211,0.04); color: #C9CDD3; padding: 10px; font-size: 11px; line-height: 16px; font-weight: 800; }
   .seller-trust-links { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
   .seller-trust-links a { min-height: 30px; border: 1px solid rgba(231,222,208,0.22); border-radius: 8px; background: rgba(231,222,208,0.055); color: #E7DED0; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 11px; font-weight: 900; }
-  @media (max-width: 1100px) { .page-shell { width: min(1240px, calc(100vw - 32px)); } .list-layout, .field-grid, .field-grid.three, .upload-grid, .preview-modal-body, .preview-detail-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success, .psa-verification-box { align-items: flex-start; flex-direction: column; } }
+  @media (max-width: 1100px) { .page-shell { width: min(1240px, calc(100vw - 32px)); } .list-layout, .field-grid, .field-grid.three, .upload-grid, .preview-modal-body, .preview-detail-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success, .psa-verification-box, .market-value-header { align-items: flex-start; flex-direction: column; } }
 `;

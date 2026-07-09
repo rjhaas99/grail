@@ -711,12 +711,14 @@ function CardArtwork({
   condition,
   title,
   imageUrl,
+  preload = false,
 }: {
   accent: string;
   category: string;
   condition: string;
   title: string;
   imageUrl?: string | null;
+  preload?: boolean;
 }) {
   const isRaw =
     condition.toLowerCase().includes("raw") ||
@@ -732,6 +734,8 @@ function CardArtwork({
           alt={title}
           width={160}
           height={210}
+          preload={preload}
+          loading={preload ? undefined : "lazy"}
           unoptimized
         />
       ) : (
@@ -2268,6 +2272,8 @@ function BrowseContent() {
           }
 
           .uploaded-card-image {
+            width: auto;
+            height: auto;
             max-width: calc(100% - 18px);
             max-height: calc(100% - 18px);
             border-radius: 8px;
@@ -3247,7 +3253,7 @@ function BrowseContent() {
               </div>
             ) : visibleListings.length > 0 ? (
               <div className={`listing-grid ${viewMode}-view`}>
-                {visibleListings.map((listing) => {
+                {visibleListings.map((listing, listingIndex) => {
                   const tag = getListingTag(listing);
                   const isOwnerListing =
                     Boolean(currentUserId) && listing.sellerId === currentUserId;
@@ -3281,6 +3287,7 @@ function BrowseContent() {
                           category={listing.category}
                           condition={listing.condition}
                           imageUrl={listing.imageUrl}
+                          preload={listingIndex === 0}
                           title={listing.title}
                         />
                       </Link>

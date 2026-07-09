@@ -43,6 +43,13 @@ type MockCard = MockListing & {
   psaGrade?: string | null;
   psaCardName?: string | null;
   psaVerifiedAt?: string | null;
+  sportsCardsProId?: string | null;
+  sportsCardsProProductName?: string | null;
+  sportsCardsProSetName?: string | null;
+  sportsCardsProEstimatedValue?: number | null;
+  sportsCardsProPriceField?: string | null;
+  sportsCardsProSourceUrl?: string | null;
+  sportsCardsProFetchedAt?: string | null;
 };
 
 type LocalMockOffer = {
@@ -87,6 +94,14 @@ type SupabaseListingRow = {
   psa_grade?: string | null;
   psa_card_name?: string | null;
   psa_verified_at?: string | null;
+  estimated_value?: number | null;
+  sportscardspro_id?: string | null;
+  sportscardspro_product_name?: string | null;
+  sportscardspro_set_name?: string | null;
+  sportscardspro_estimated_value?: number | null;
+  sportscardspro_price_field?: string | null;
+  sportscardspro_source_url?: string | null;
+  sportscardspro_fetched_at?: string | null;
   created_at: string | null;
   listing_images: ListingImageRow[] | null;
 };
@@ -340,6 +355,11 @@ function mapSupabaseCard(
       Boolean(listing.is_public_collection));
   const displayPrice = isCollectionOnly ? 0 : isSold ? soldPrice : price;
   const offerBasis = price;
+  const sportsCardsProEstimatedValue = listing.sportscardspro_estimated_value
+    ? Number(listing.sportscardspro_estimated_value)
+    : 0;
+  const estimatedMarketValue = sportsCardsProEstimatedValue ||
+    Number(listing.estimated_value || 0);
   const sellerSlug = getSellerSlug(profile, listing.seller_id);
   const sellerName = profile?.full_name || profile?.username || "GRAIL Seller";
   const isGraded = Boolean(listing.grader && listing.grade) ||
@@ -390,7 +410,7 @@ function mapSupabaseCard(
           ? formatCurrency(price)
           : "Price not listed",
       askingPrice: displayPrice,
-      marketValue: 0,
+      marketValue: estimatedMarketValue,
       minimumOffer: offerBasis ? Math.round(offerBasis * 0.85) : 0,
       minOffer: offerBasis ? Math.round(offerBasis * 0.85) : 0,
       watchCount: 0,
@@ -430,6 +450,13 @@ function mapSupabaseCard(
       psaGrade: listing.psa_grade || listing.grade,
       psaCardName: listing.psa_card_name,
       psaVerifiedAt: listing.psa_verified_at,
+      sportsCardsProId: listing.sportscardspro_id,
+      sportsCardsProProductName: listing.sportscardspro_product_name,
+      sportsCardsProSetName: listing.sportscardspro_set_name,
+      sportsCardsProEstimatedValue: sportsCardsProEstimatedValue || null,
+      sportsCardsProPriceField: listing.sportscardspro_price_field,
+      sportsCardsProSourceUrl: listing.sportscardspro_source_url,
+      sportsCardsProFetchedAt: listing.sportscardspro_fetched_at,
       priceHistory: {
         thirtyDay: "N/A",
         ninetyDay: "N/A",
@@ -688,6 +715,14 @@ export default function CardDetailPage() {
               psa_grade,
               psa_card_name,
               psa_verified_at,
+              estimated_value,
+              sportscardspro_id,
+              sportscardspro_product_name,
+              sportscardspro_set_name,
+              sportscardspro_estimated_value,
+              sportscardspro_price_field,
+              sportscardspro_source_url,
+              sportscardspro_fetched_at,
               created_at,
               listing_images (
                 image_url,
@@ -1172,6 +1207,9 @@ export default function CardDetailPage() {
   const soldPriceDisplay = soldPrice > 0
     ? `Sold · ${formatCurrency(soldPrice)}`
     : "Sold";
+  const hasSportsCardsProValue = Boolean(
+    card.sportsCardsProEstimatedValue && card.sportsCardsProEstimatedValue > 0,
+  );
   const salePriceDisplay = isSold
     ? soldPriceDisplay
     : isCollectionOnly
@@ -1284,10 +1322,24 @@ export default function CardDetailPage() {
                   <em>{marketDifference}</em>
                 </p>
               )}
-              <p className="market-data-note">
-                Market data integration planned: Card Ladder / Sports Card
-                Investor style price tracking.
-              </p>
+              {hasSportsCardsProValue ? (
+                <p className="market-data-note">
+                  Estimated market value provided by{" "}
+                  <Link
+                    href={card.sportsCardsProSourceUrl || "https://www.sportscardspro.com"}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    SportsCardsPro
+                  </Link>
+                  .
+                </p>
+              ) : (
+                <p className="market-data-note">
+                  Market data integration planned: Card Ladder / Sports Card
+                  Investor style price tracking.
+                </p>
+              )}
 
               <div className="purchase-trust-panel">
                 <span>GRAIL Protected Checkout</span>
@@ -1464,6 +1516,40 @@ export default function CardDetailPage() {
               <DetailRow label="Condition Notes" value={card.details.notes} />
             </div>
           </article>
+
+          {hasSportsCardsProValue ? (
+            <article className="panel content-panel sportspro-panel">
+              <h2>Estimated Market Value</h2>
+              <strong>{formatCurrency(card.sportsCardsProEstimatedValue || 0)}</strong>
+              <p>Estimated market value provided by SportsCardsPro.</p>
+              <p>
+                Market estimates may vary by parallel, grade, condition, and
+                recent sales.
+              </p>
+              <div className="sportspro-meta">
+                <DetailRow
+                  label="Source"
+                  value={card.sportsCardsProProductName || "SportsCardsPro"}
+                />
+                <DetailRow
+                  label="Last Updated"
+                  value={
+                    card.sportsCardsProFetchedAt
+                      ? new Date(card.sportsCardsProFetchedAt).toLocaleDateString()
+                      : "Recently"
+                  }
+                />
+              </div>
+              <Link
+                className="sportspro-link"
+                href={card.sportsCardsProSourceUrl || "https://www.sportscardspro.com"}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Source: SportsCardsPro
+              </Link>
+            </article>
+          ) : null}
 
           <article className="panel content-panel price-history-panel">
             <h2>Price History</h2>
@@ -2359,6 +2445,17 @@ const pageStyles = `
     line-height: 16px;
   }
 
+  .market-data-note a {
+    color: #E7DED0;
+    font-weight: 900;
+    text-decoration: none;
+  }
+
+  .market-data-note a:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
   .purchase-buttons {
     margin-top: 16px;
     display: grid;
@@ -2727,6 +2824,46 @@ const pageStyles = `
   }
 
   .psa-link {
+    margin-top: 12px;
+    min-height: 34px;
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 8px;
+    background: rgba(8,8,10,0.58);
+    color: #E7DED0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .sportspro-panel > strong {
+    display: block;
+    margin-top: 12px;
+    color: #fff;
+    font-size: 28px;
+    line-height: 32px;
+    font-weight: 900;
+  }
+
+  .sportspro-panel p {
+    margin: 8px 0 0;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 17px;
+    font-weight: 800;
+  }
+
+  .sportspro-meta {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .sportspro-link {
     margin-top: 12px;
     min-height: 34px;
     border: 1px solid rgba(231,222,208,0.28);
