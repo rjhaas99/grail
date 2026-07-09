@@ -17,7 +17,29 @@ type BrowseListing = MockListing & {
   imageUrl?: string | null;
   sellerId?: string | null;
   createdAt?: string | null;
+  sportsCardsProEstimatedValue?: number | null;
+  sportsCardsProSourceUrl?: string | null;
+  valueBadge?: ListingValueBadge | null;
   source: "supabase" | "mock";
+};
+
+type BrowseSortMode =
+  | "newest"
+  | "hot"
+  | "best-value"
+  | "closest-to-market"
+  | "highest-premium"
+  | "price-low-high"
+  | "price-high-low";
+
+type ListingValueClass = "value" | "fair" | "premium";
+
+type ListingValueBadge = {
+  classification: ListingValueClass;
+  label: "VALUE" | "FAIR" | "PREMIUM";
+  icon: "↓" | "≈" | "↑";
+  percentageDifference: number;
+  title: string;
 };
 
 type LocalMockOffer = {
@@ -58,6 +80,9 @@ type SupabaseListingRow = {
   created_at: string | null;
   is_collection_card?: boolean | null;
   is_public_collection?: boolean | null;
+  estimated_value?: number | null;
+  sportscardspro_estimated_value?: number | null;
+  sportscardspro_source_url?: string | null;
   listing_images: ListingImageRow[] | null;
 };
 
@@ -128,6 +153,15 @@ const priceFilters = [
 ];
 
 const gradeCompanies = ["PSA", "BGS", "CGC", "SGC", "Other"];
+
+const sortOptions: { value: BrowseSortMode; label: string }[] = [
+  { value: "newest", label: "Newly Listed" },
+  { value: "best-value", label: "Best Value" },
+  { value: "closest-to-market", label: "Closest to Market" },
+  { value: "highest-premium", label: "Highest Premium" },
+  { value: "price-low-high", label: "Price: Low to High" },
+  { value: "price-high-low", label: "Price: High to Low" },
+];
 
 const psaGradeOptions = [
   "10",
@@ -354,6 +388,70 @@ function getConditionDisplay(listing: SupabaseListingRow) {
   return listing.card_type?.toLowerCase() === "graded" ? "Graded" : "Raw";
 }
 
+function getSavedMarketValue(listing: SupabaseListingRow) {
+  const sportsCardsProValue = Number(listing.sportscardspro_estimated_value || 0);
+
+  return sportsCardsProValue > 0 ? sportsCardsProValue : 0;
+}
+
+function getListingValueBadge(
+  askingPrice: number,
+  estimatedMarketValue: number,
+): ListingValueBadge | null {
+  if (askingPrice <= 0 || estimatedMarketValue <= 0) {
+    return null;
+  }
+
+  const percentageDifference =
+    ((askingPrice - estimatedMarketValue) / estimatedMarketValue) * 100;
+
+  if (percentageDifference < -10) {
+    return {
+      classification: "value",
+      label: "VALUE",
+      icon: "↓",
+      percentageDifference,
+      title:
+        "Asking price is more than 10% below the saved estimated market value.",
+    };
+  }
+
+  if (percentageDifference <= 10) {
+    return {
+      classification: "fair",
+      label: "FAIR",
+      icon: "≈",
+      percentageDifference,
+      title: "Asking price is within 10% of the saved estimated market value.",
+    };
+  }
+
+  return {
+    classification: "premium",
+    label: "PREMIUM",
+    icon: "↑",
+    percentageDifference,
+    title:
+      "Asking price is more than 10% above the saved estimated market value.",
+  };
+}
+
+function getValueDifference(listing: BrowseListing) {
+  if (
+    listing.price <= 0 ||
+    !listing.sportsCardsProEstimatedValue ||
+    listing.sportsCardsProEstimatedValue <= 0
+  ) {
+    return null;
+  }
+
+  return (
+    ((listing.price - listing.sportsCardsProEstimatedValue) /
+      listing.sportsCardsProEstimatedValue) *
+    100
+  );
+}
+
 function mapSupabaseListing(
   listing: SupabaseListingRow,
   index: number,
@@ -379,6 +477,7 @@ function mapSupabaseListing(
       Boolean(listing.is_collection_card) ||
       Boolean(listing.is_public_collection));
   const displayPrice = isCollectionOnly ? 0 : price;
+  const savedMarketValue = getSavedMarketValue(listing);
   const sellerName = profile?.full_name || profile?.username || "GRAIL Seller";
   const sellerSlug = getSellerSlug(profile, listing.seller_id);
   const isGraded = Boolean(listing.grader && listing.grade) ||
@@ -411,7 +510,10 @@ function mapSupabaseListing(
         ? formatCurrency(price)
         : "Price not listed",
     askingPrice: displayPrice,
-    marketValue: 0,
+    marketValue: savedMarketValue,
+    sportsCardsProEstimatedValue: listing.sportscardspro_estimated_value || null,
+    sportsCardsProSourceUrl: listing.sportscardspro_source_url || null,
+    valueBadge: getListingValueBadge(displayPrice, savedMarketValue),
     minimumOffer: displayPrice ? Math.round(displayPrice * 0.85) : 0,
     minOffer: displayPrice ? Math.round(displayPrice * 0.85) : 0,
     watchCount: 0,
@@ -872,7 +974,7 @@ function BrowseContent() {
   const [rawSelected, setRawSelected] = useState(false);
   const [newListingsOnly, setNewListingsOnly] = useState(false);
   const [multiListingSellersOnly, setMultiListingSellersOnly] = useState(false);
-  const [sortMode, setSortMode] = useState<"newest" | "hot">("newest");
+  const [sortMode, setSortMode] = useState<BrowseSortMode>("newest");
   const [localSearchQuery, setLocalSearchQuery] = useState("");
   const [hasLocalSearch, setHasLocalSearch] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "compact">("grid");
@@ -946,6 +1048,9 @@ function BrowseContent() {
               created_at,
               is_collection_card,
               is_public_collection,
+              estimated_value,
+              sportscardspro_estimated_value,
+              sportscardspro_source_url,
               listing_images (
                 image_url,
                 image_type
@@ -1095,7 +1200,7 @@ function BrowseContent() {
     rawSelected ||
     newListingsOnly ||
     multiListingSellersOnly ||
-    sortMode === "hot";
+    sortMode !== "newest";
   const visibleListings = useMemo(
     () =>
       listings
@@ -1158,12 +1263,52 @@ function BrowseContent() {
           return true;
         })
         .sort((first, second) => {
+          const firstValueDifference = getValueDifference(first);
+          const secondValueDifference = getValueDifference(second);
+          const firstHasValue = firstValueDifference !== null;
+          const secondHasValue = secondValueDifference !== null;
+
           if (sortMode === "hot") {
             return (
               second.watchCount +
               second.views * 0.1 -
               (first.watchCount + first.views * 0.1)
             );
+          }
+
+          if (sortMode === "best-value") {
+            if (firstHasValue && !secondHasValue) return -1;
+            if (!firstHasValue && secondHasValue) return 1;
+            if (firstHasValue && secondHasValue) {
+              return (firstValueDifference ?? 0) - (secondValueDifference ?? 0);
+            }
+          }
+
+          if (sortMode === "closest-to-market") {
+            if (firstHasValue && !secondHasValue) return -1;
+            if (!firstHasValue && secondHasValue) return 1;
+            if (firstHasValue && secondHasValue) {
+              return (
+                Math.abs(firstValueDifference ?? 0) -
+                Math.abs(secondValueDifference ?? 0)
+              );
+            }
+          }
+
+          if (sortMode === "highest-premium") {
+            if (firstHasValue && !secondHasValue) return -1;
+            if (!firstHasValue && secondHasValue) return 1;
+            if (firstHasValue && secondHasValue) {
+              return (secondValueDifference ?? 0) - (firstValueDifference ?? 0);
+            }
+          }
+
+          if (sortMode === "price-low-high") {
+            return first.price - second.price;
+          }
+
+          if (sortMode === "price-high-low") {
+            return second.price - first.price;
           }
 
           return second.listedOrder - first.listedOrder;
@@ -1516,7 +1661,7 @@ function BrowseContent() {
             border-radius: 10px;
             background: rgba(5, 5, 6, 0.86);
             display: grid;
-            grid-template-columns: 1fr auto auto auto auto;
+            grid-template-columns: 1fr auto auto auto auto auto;
             align-items: center;
             gap: 12px;
             padding: 10px;
@@ -1586,6 +1731,38 @@ function BrowseContent() {
             color: #fff;
           }
 
+          .sort-select {
+            height: 36px;
+            border: 1px solid #24242a;
+            border-radius: 8px;
+            background: #08080a;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 10px;
+            box-sizing: border-box;
+          }
+
+          .sort-select span {
+            color: #85858f;
+            font-size: 10px;
+            line-height: 12px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+          }
+
+          .sort-select select {
+            border: 0;
+            outline: 0;
+            background: transparent;
+            color: #f4f4f5;
+            font: inherit;
+            font-size: 12px;
+            font-weight: 900;
+            cursor: pointer;
+          }
+
           .view-toggle {
             display: inline-flex;
             border: 1px solid #24242a;
@@ -1606,6 +1783,40 @@ function BrowseContent() {
             font-weight: 900;
             white-space: nowrap;
             padding: 0 4px;
+          }
+
+          .value-info-note {
+            margin-top: 10px;
+            border: 1px solid rgba(201,205,211,0.14);
+            border-radius: 10px;
+            background: rgba(201,205,211,0.04);
+            padding: 10px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+          }
+
+          .value-info-note p {
+            margin: 0;
+            color: #a1a1aa;
+            font-size: 11px;
+            line-height: 16px;
+            font-weight: 800;
+          }
+
+          .value-info-note a {
+            color: #E7DED0;
+            font-size: 11px;
+            line-height: 14px;
+            font-weight: 900;
+            white-space: nowrap;
+            text-decoration: none;
+          }
+
+          .value-info-note a:hover {
+            text-decoration: underline;
+            text-underline-offset: 3px;
           }
 
           .dashboard {
@@ -2023,6 +2234,8 @@ function BrowseContent() {
             min-height: 22px;
             display: flex;
             align-items: center;
+            gap: 7px;
+            flex-wrap: wrap;
           }
 
           .art-link {
@@ -2297,6 +2510,45 @@ function BrowseContent() {
           .badge-collection {
             border-color: rgba(201,205,211,0.38);
             background: rgba(201,205,211,0.08);
+            color: #C9CDD3;
+          }
+
+          .value-badge {
+            min-height: 22px;
+            border: 1px solid rgba(201,205,211,0.26);
+            border-radius: 999px;
+            background: rgba(8,8,10,0.7);
+            color: #C9CDD3;
+            padding: 0 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 10px;
+            line-height: 12px;
+            font-weight: 900;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            white-space: nowrap;
+          }
+
+          .value-badge-value {
+            border-color: rgba(201,205,211,0.48);
+            background:
+              linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.015)),
+              rgba(201,205,211,0.08);
+            color: #f4f4f5;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
+          }
+
+          .value-badge-fair {
+            border-color: rgba(231,222,208,0.48);
+            background: rgba(231,222,208,0.09);
+            color: #E7DED0;
+          }
+
+          .value-badge-premium {
+            border-color: rgba(141,148,157,0.34);
+            background: rgba(5,5,6,0.82);
             color: #C9CDD3;
           }
 
@@ -2808,6 +3060,20 @@ function BrowseContent() {
               align-items: stretch;
             }
 
+            .sort-select {
+              width: 100%;
+              justify-content: space-between;
+            }
+
+            .value-info-note {
+              align-items: flex-start;
+              flex-direction: column;
+            }
+
+            .value-info-note a {
+              white-space: normal;
+            }
+
             .view-toggle {
               width: 100%;
             }
@@ -2877,6 +3143,21 @@ function BrowseContent() {
             Hot Cards
           </button>
 
+          <label className="sort-select">
+            <span>Sort</span>
+            <select
+              value={sortMode === "hot" ? "newest" : sortMode}
+              onChange={(event) => setSortMode(event.target.value as BrowseSortMode)}
+              aria-label="Sort listings"
+            >
+              {sortOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <div className="view-toggle" aria-label="View mode">
             <button
               type="button"
@@ -2899,6 +3180,17 @@ function BrowseContent() {
           </div>
 
           <div className="results-count">{resultLabel}</div>
+        </section>
+
+        <section className="value-info-note">
+          <p>
+            Market-value badges compare the asking price with the listing&apos;s
+            saved SportsCardsPro estimate. Estimates may vary by grade, parallel,
+            condition, and recent market activity.
+          </p>
+          <Link href="https://www.sportscardspro.com" target="_blank" rel="noreferrer">
+            Market estimates powered by SportsCardsPro
+          </Link>
         </section>
 
         <section className="dashboard">
@@ -2968,6 +3260,15 @@ function BrowseContent() {
                         <span className={`badge badge-${tag.toLowerCase()}`}>
                           {tag}
                         </span>
+                        {listing.valueBadge ? (
+                          <span
+                            className={`value-badge value-badge-${listing.valueBadge.classification}`}
+                            title={listing.valueBadge.title}
+                          >
+                            <span aria-hidden="true">{listing.valueBadge.icon}</span>
+                            {listing.valueBadge.label}
+                          </span>
+                        ) : null}
                       </div>
 
                       <Link
