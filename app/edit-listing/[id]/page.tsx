@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Header from "../../components/Header";
 import RequireAuth from "../../components/RequireAuth";
@@ -49,13 +49,7 @@ export default function EditListingPage() {
   const [price, setPrice] = useState("");
   const [status, setStatus] = useState("active");
 
-  useEffect(() => {
-    if (listingId) {
-      loadListing();
-    }
-  }, [listingId]);
-
-  async function loadListing() {
+  const loadListing = useCallback(async () => {
     setLoading(true);
     setMessage("");
 
@@ -110,7 +104,14 @@ export default function EditListingPage() {
     setStatus(listingData.status || "active");
 
     setLoading(false);
-  }
+  }, [listingId, router]);
+
+  useEffect(() => {
+    if (listingId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadListing();
+    }
+  }, [listingId, loadListing]);
 
   function clean(value: string) {
     const trimmed = value.trim();

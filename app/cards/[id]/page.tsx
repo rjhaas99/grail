@@ -38,6 +38,11 @@ type MockCard = MockListing & {
   imageUrls?: Partial<Record<PhotoView, string>>;
   sellerId?: string | null;
   soldPrice?: number;
+  psaVerified?: boolean;
+  psaCertNumber?: string | null;
+  psaGrade?: string | null;
+  psaCardName?: string | null;
+  psaVerifiedAt?: string | null;
 };
 
 type LocalMockOffer = {
@@ -71,11 +76,17 @@ type SupabaseListingRow = {
   card_type: string | null;
   grader: string | null;
   grade: string | null;
+  cert_number: string | null;
   condition: string | null;
   price: number | null;
   status: string | null;
   is_collection_card?: boolean | null;
   is_public_collection?: boolean | null;
+  psa_verified?: boolean | null;
+  psa_cert_number?: string | null;
+  psa_grade?: string | null;
+  psa_card_name?: string | null;
+  psa_verified_at?: string | null;
   created_at: string | null;
   listing_images: ListingImageRow[] | null;
 };
@@ -408,9 +419,17 @@ function mapSupabaseCard(
         subject: listing.player || "Unknown",
         grader: listing.grader || "Raw",
         grade: listing.grade || listing.condition || "Raw",
-        certNumber: "Not available",
+        certNumber:
+          listing.psa_cert_number ||
+          listing.cert_number ||
+          "Not available",
         notes: "Live Supabase listing.",
       },
+      psaVerified: Boolean(listing.psa_verified),
+      psaCertNumber: listing.psa_cert_number || listing.cert_number,
+      psaGrade: listing.psa_grade || listing.grade,
+      psaCardName: listing.psa_card_name,
+      psaVerifiedAt: listing.psa_verified_at,
       priceHistory: {
         thirtyDay: "N/A",
         ninetyDay: "N/A",
@@ -658,11 +677,17 @@ export default function CardDetailPage() {
               card_type,
               grader,
               grade,
+              cert_number,
               condition,
               price,
               status,
               is_collection_card,
               is_public_collection,
+              psa_verified,
+              psa_cert_number,
+              psa_grade,
+              psa_card_name,
+              psa_verified_at,
               created_at,
               listing_images (
                 image_url,
@@ -1398,6 +1423,36 @@ export default function CardDetailPage() {
 
           <article className="panel content-panel">
             <h2>Card Details</h2>
+            {card.psaCertNumber ? (
+              <div className="psa-certified-panel">
+                <strong>
+                  {card.psaVerified
+                    ? "✅ PSA Certified"
+                    : "Unable to verify PSA certification."}
+                </strong>
+                <div className="detail-list">
+                  <DetailRow label="PSA Cert" value={card.psaCertNumber} />
+                  <DetailRow
+                    label="Grade"
+                    value={card.psaGrade || card.details.grade}
+                  />
+                  {card.psaVerified ? (
+                    <DetailRow
+                      label="Verification"
+                      value="Certification verified through PSA."
+                    />
+                  ) : null}
+                </div>
+                <Link
+                  className="psa-link"
+                  href={`https://www.psacard.com/cert/${encodeURIComponent(card.psaCertNumber)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  View on PSA
+                </Link>
+              </div>
+            ) : null}
             <div className="detail-list">
               <DetailRow label="Year" value={card.details.year} />
               <DetailRow label="Set" value={card.details.set} />
@@ -2653,6 +2708,38 @@ const pageStyles = `
     margin-top: 14px;
     display: grid;
     gap: 8px;
+  }
+
+  .psa-certified-panel {
+    margin-top: 14px;
+    border: 1px solid rgba(231,222,208,0.2);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    padding: 12px;
+  }
+
+  .psa-certified-panel > strong {
+    display: block;
+    color: #fff;
+    font-size: 13px;
+    line-height: 17px;
+    font-weight: 900;
+  }
+
+  .psa-link {
+    margin-top: 12px;
+    min-height: 34px;
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 8px;
+    background: rgba(8,8,10,0.58);
+    color: #E7DED0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 900;
   }
 
   .seller-badge {

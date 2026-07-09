@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Header from "../../components/Header";
 import { supabase } from "../../../lib/supabase";
@@ -54,13 +54,7 @@ export default function SellerPublicProfilePage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    if (sellerId) {
-      loadSellerProfile();
-    }
-  }, [sellerId]);
-
-  async function loadSellerProfile() {
+  const loadSellerProfile = useCallback(async () => {
     setLoading(true);
     setMessage("");
 
@@ -130,7 +124,14 @@ export default function SellerPublicProfilePage() {
     }
 
     setLoading(false);
-  }
+  }, [sellerId]);
+
+  useEffect(() => {
+    if (sellerId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadSellerProfile();
+    }
+  }, [sellerId, loadSellerProfile]);
 
   function formatPrice(price: number | null) {
     if (!price) return "Price not listed";
