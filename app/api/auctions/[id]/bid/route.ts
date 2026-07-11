@@ -101,15 +101,6 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  const minimumNextBid = getMinimumNextBid(listing);
-
-  if (bidAmount < minimumNextBid) {
-    return NextResponse.json(
-      { error: `Minimum next bid is $${minimumNextBid.toFixed(2)}.` },
-      { status: 400 },
-    );
-  }
-
   const { data: previousBidData } = await supabase
     .from("auction_bids")
     .select("id, bidder_id, amount")
@@ -120,6 +111,25 @@ export async function POST(request: Request, context: RouteContext) {
     .limit(1)
     .maybeSingle();
   const previousBid = previousBidData as BidRow | null;
+
+  if (previousBid?.bidder_id === user.id) {
+    return NextResponse.json(
+      {
+        error: "You already have the highest bid.",
+        isCurrentUserHighestBidder: true,
+      },
+      { status: 409 },
+    );
+  }
+
+  const minimumNextBid = getMinimumNextBid(listing);
+
+  if (bidAmount < minimumNextBid) {
+    return NextResponse.json(
+      { error: `Minimum next bid is $${minimumNextBid.toFixed(2)}.` },
+      { status: 400 },
+    );
+  }
 
   const { data: bidData, error: insertError } = await supabase
     .from("auction_bids")
@@ -245,5 +255,7 @@ export async function POST(request: Request, context: RouteContext) {
     currentBid: Number(updated.auction_current_bid || bidAmount),
     bidCount: Number(updated.auction_bid_count || expectedBidCount + 1),
     reserveStatus: updated.auction_reserve_met_at ? "Reserve Met" : "Reserve Not Met",
+    isCurrentUserHighestBidder: true,
+    currentUserBidState: "highest",
   });
 }

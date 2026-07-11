@@ -447,7 +447,9 @@ function mapSupabaseCard(
   const price = Number(listing.price || 0);
   const status = listing.status?.toLowerCase() || "";
   const isAuction = listing.sale_format === "auction";
-  const isSold = status === "sold";
+  const isSold = isAuction
+    ? status === "sold" && listing.auction_status === "paid"
+    : status === "sold";
   const soldPrice = isSold
     ? Number(order?.card_price || order?.total_amount || listing.price || 0)
     : 0;
@@ -763,6 +765,10 @@ export default function CardDetailPage() {
   const [bidStatus, setBidStatus] = useState<PublishStatus | null>(null);
   const [isPlacingBid, setIsPlacingBid] = useState(false);
   const [isStartingAuctionCheckout, setIsStartingAuctionCheckout] = useState(false);
+  const [highestBidState, setHighestBidState] = useState({
+    listingId: "",
+    isHighest: false,
+  });
   const [ownerActionStatus, setOwnerActionStatus] = useState("");
   const card = mockCard ?? realCard;
   const availablePhotoViews: PhotoView[] = card?.imageUrls
@@ -773,6 +779,12 @@ export default function CardDetailPage() {
   const activePhoto = visiblePhotoViews.includes(selectedPhoto)
     ? selectedPhoto
     : visiblePhotoViews[0];
+  const auctionCardId = card?.saleFormat === "auction" ? card.id : "";
+  const isCurrentUserHighestBidder = Boolean(
+    auctionCardId &&
+      highestBidState.listingId === auctionCardId &&
+      highestBidState.isHighest,
+  );
 
   function goBack() {
     if (typeof window !== "undefined" && window.history.length > 1) {
@@ -917,7 +929,10 @@ export default function CardDetailPage() {
           }
         }
 
-        if (listingStatus === "sold") {
+        if (
+          listingStatus === "sold" &&
+          (listing.sale_format !== "auction" || listing.auction_status === "paid")
+        ) {
           const { data: orderData, error: orderError } = await supabase
             .from("orders")
             .select("total_amount, card_price")
@@ -959,6 +974,93 @@ export default function CardDetailPage() {
       isMounted = false;
     };
   }, [cardId, mockCard]);
+
+  useEffect(() => {
+    if (!auctionCardId) {
+      return;
+    }
+
+    let isMounted = true;
+    let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+    async function refreshAuctionStatus() {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const headers: HeadersInit = session?.access_token
+          ? { authorization: `Bearer ${session.access_token}` }
+          : {};
+        const response = await fetch(`/api/auctions/${auctionCardId}`, {
+          headers,
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as {
+          auctionStatus?: string | null;
+          endsAt?: string | null;
+          currentBid?: number;
+          bidCount?: number;
+          reserveStatus?: string;
+          winnerId?: string | null;
+          paymentDueAt?: string | null;
+          isCurrentUserHighestBidder?: boolean;
+        };
+
+        if (!isMounted) {
+          return;
+        }
+
+        setHighestBidState({
+          listingId: auctionCardId,
+          isHighest: Boolean(payload.isCurrentUserHighestBidder),
+        });
+        setRealCard((current) => {
+          if (!current || current.id !== auctionCardId) {
+            return current;
+          }
+
+          const currentBid = Number(payload.currentBid || 0);
+          const displayBid = currentBid || Number(current.auctionStartingBid || 0);
+
+          return {
+            ...current,
+            auctionStatus: payload.auctionStatus ?? current.auctionStatus,
+            auctionEndsAt: payload.endsAt ?? current.auctionEndsAt,
+            auctionCurrentBid: currentBid,
+            auctionBidCount: payload.bidCount ?? current.auctionBidCount,
+            auctionReserveMetAt:
+              payload.reserveStatus === "Reserve Met"
+                ? current.auctionReserveMetAt || new Date().toISOString()
+                : null,
+            auctionWinnerId: payload.winnerId ?? current.auctionWinnerId,
+            auctionPaymentDueAt:
+              payload.paymentDueAt ?? current.auctionPaymentDueAt,
+            price: displayBid,
+            askingPrice: displayBid,
+            priceDisplay: currentBid
+              ? `Current Bid ${formatCurrencyWithCents(currentBid)}`
+              : `Starting Bid ${formatCurrencyWithCents(current.auctionStartingBid || 0)}`,
+          };
+        });
+      } catch (error) {
+        console.error("Card detail auction status refresh error:", error);
+      }
+    }
+
+    refreshAuctionStatus();
+    refreshTimer = setInterval(refreshAuctionStatus, 15000);
+
+    return () => {
+      isMounted = false;
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+      }
+    };
+  }, [auctionCardId, currentUserId]);
 
   function goToPhoto(direction: "previous" | "next") {
     setSelectedPhoto((current) => {
@@ -1185,6 +1287,11 @@ export default function CardDetailPage() {
       return;
     }
 
+    if (isCurrentUserHighestBidder) {
+      setBidStatus({ type: "info", text: "You currently have the highest bid." });
+      return;
+    }
+
     setIsPlacingBid(true);
     setBidStatus(null);
 
@@ -1201,10 +1308,15 @@ export default function CardDetailPage() {
         currentBid?: number;
         bidCount?: number;
         reserveStatus?: string;
+        isCurrentUserHighestBidder?: boolean;
+        currentUserBidState?: string;
         error?: string;
       };
 
       if (!response.ok) {
+        if (payload.isCurrentUserHighestBidder || payload.currentUserBidState === "highest") {
+          setHighestBidState({ listingId: card.id, isHighest: true });
+        }
         throw new Error(payload.error || "Bid could not be placed.");
       }
 
@@ -1227,6 +1339,10 @@ export default function CardDetailPage() {
           : current,
       );
       setBidAmount("");
+      setHighestBidState({
+        listingId: card.id,
+        isHighest: Boolean(payload.isCurrentUserHighestBidder),
+      });
       setBidStatus({ type: "success", text: "Bid placed." });
     } catch (error) {
       console.error("Card detail auction bid error:", error);
@@ -1486,11 +1602,47 @@ export default function CardDetailPage() {
   const isAuctionAwaitingPayment = card.auctionStatus === "awaiting_payment";
   const isAuctionWinner =
     Boolean(currentUserId) && card.auctionWinnerId === currentUserId;
-  const isSold = card.tag === "Sold" || card.listingStatus?.toLowerCase() === "sold";
+  const listingStatusLower = card.listingStatus?.toLowerCase() || "";
+  const isPaidAuctionSale =
+    isAuction && listingStatusLower === "sold" && card.auctionStatus === "paid";
+  const isSold = isAuction
+    ? isPaidAuctionSale
+    : card.tag === "Sold" || listingStatusLower === "sold";
   const soldPrice = card.soldPrice || card.askingPrice || card.price;
   const soldPriceDisplay = soldPrice > 0
     ? `Sold · ${formatCurrency(soldPrice)}`
     : "Sold";
+  const auctionPanelStatus = isAuction
+    ? card.auctionStatus === "active"
+      ? "Auction"
+      : card.auctionStatus === "awaiting_payment"
+        ? "Awaiting Payment"
+        : card.auctionStatus === "ended_reserve_not_met"
+          ? "Reserve Not Met"
+          : card.auctionStatus === "payment_expired"
+            ? "Payment Expired"
+            : card.auctionStatus === "paid"
+              ? "Sold"
+              : "Auction Ended"
+    : "";
+  const auctionEndedMessage =
+    card.auctionStatus === "awaiting_payment"
+      ? isAuctionWinner
+        ? "You won this auction. Complete payment to finish the order."
+        : "Auction ended. Awaiting winner payment."
+      : card.auctionStatus === "ended_reserve_not_met"
+        ? "Auction Ended — Reserve Not Met."
+        : card.auctionStatus === "payment_expired"
+          ? "Auction payment window expired."
+          : "Auction Ended.";
+  const auctionSummaryText =
+    card.auctionStatus === "active"
+      ? `${formatTimeRemaining(card.auctionEndsAt)} · ${auctionReserveStatus} · ${
+          card.auctionBidCount || 0
+        } bids`
+      : `${auctionEndedMessage} · ${auctionReserveStatus} · ${
+          card.auctionBidCount || 0
+        } bids`;
   const hasSportsCardsProValue = Boolean(
     card.sportsCardsProEstimatedValue && card.sportsCardsProEstimatedValue > 0,
   );
@@ -1615,9 +1767,7 @@ export default function CardDetailPage() {
                 {isSold
                   ? "Sold"
                   : isAuction
-                    ? card.auctionStatus === "awaiting_payment"
-                      ? "Awaiting Payment"
-                      : "Auction"
+                    ? auctionPanelStatus
                     : isCollectionOnly
                       ? "In Collection"
                       : "Asking Price"}
@@ -1626,10 +1776,7 @@ export default function CardDetailPage() {
               {isSold ? (
                 <p>This card has sold. Card details and images remain available for reference.</p>
               ) : isAuction ? (
-                <p>
-                  {formatTimeRemaining(card.auctionEndsAt)} · {auctionReserveStatus} ·{" "}
-                  {card.auctionBidCount || 0} bids
-                </p>
+                <p>{auctionSummaryText}</p>
               ) : isCollectionOnly ? (
                 <p>
                   This card is in the seller&apos;s collection. The seller is
@@ -1755,20 +1902,26 @@ export default function CardDetailPage() {
                               value={bidAmount}
                               inputMode="decimal"
                               placeholder={formatCurrencyWithCents(minimumNextBid)}
+                              disabled={isCurrentUserHighestBidder}
                               onChange={(event) => setBidAmount(event.target.value)}
                             />
                           </label>
+                          {isCurrentUserHighestBidder ? (
+                            <p className="offer-note">
+                              You currently have the highest bid.
+                            </p>
+                          ) : null}
                           <button
                             type="button"
                             className="buy-button"
-                            disabled={isPlacingBid}
+                            disabled={isPlacingBid || isCurrentUserHighestBidder}
                             onClick={() => void placeBid()}
                           >
                             {isPlacingBid ? "Placing Bid..." : "Place Bid"}
                           </button>
                         </>
                       ) : (
-                        <p className="offer-note">Auction Ended.</p>
+                        <p className="offer-note">{auctionEndedMessage}</p>
                       )}
                       {bidStatus ? (
                         <p className={`bid-status ${bidStatus.type}`}>{bidStatus.text}</p>
@@ -1808,9 +1961,9 @@ export default function CardDetailPage() {
                     <p className="offer-note">
                       Minimum offer: {minimumOfferDisplay}
                     </p>
-                  ) : (
+                  ) : isSold ? (
                     <p className="offer-note">This card has sold.</p>
-                  )}
+                  ) : null}
                 </>
               )}
             </section>

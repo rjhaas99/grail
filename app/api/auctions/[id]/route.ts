@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   createServiceSupabaseClient,
   getAuctionReserveStatus,
+  getCurrentUser,
   getMinimumNextBid,
   type AuctionListingRow,
 } from "../_shared";
@@ -23,9 +24,15 @@ function anonymizeBidder(bidderId?: string | null) {
   return bidderId ? `Bidder ${bidderId.slice(0, 4)}` : "Bidder";
 }
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const listingId = String(id || "").trim();
+  let currentUserId = "";
+
+  if ((request.headers.get("authorization") || "").startsWith("Bearer ")) {
+    const { user } = await getCurrentUser(request);
+    currentUserId = user?.id || "";
+  }
 
   let supabase;
 
@@ -82,6 +89,11 @@ export async function GET(_request: Request, context: RouteContext) {
     });
   }
 
+  const highestBid = ((bidData || []) as BidRow[])[0] || null;
+  const isCurrentUserHighestBidder = Boolean(
+    currentUserId && highestBid?.bidder_id === currentUserId,
+  );
+
   return NextResponse.json({
     listingId,
     title: listing.title || "GRAIL Auction",
@@ -94,6 +106,8 @@ export async function GET(_request: Request, context: RouteContext) {
     bidCount: Number(listing.auction_bid_count || 0),
     minimumNextBid: getMinimumNextBid(listing),
     reserveStatus: getAuctionReserveStatus(listing),
+    isCurrentUserHighestBidder,
+    currentUserBidState: isCurrentUserHighestBidder ? "highest" : "none",
     winnerId: listing.auction_winner_id || null,
     paymentDueAt: listing.auction_payment_due_at || null,
     recentBids: ((bidData || []) as BidRow[]).map((bid) => ({
