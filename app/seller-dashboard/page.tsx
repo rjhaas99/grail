@@ -5,6 +5,12 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
 import { mockSellerDashboardData } from "../lib/mockData";
+import {
+  calculateProgression,
+  getNextProgressionLevel,
+  xpGuideItems,
+  type ProgressionSummary,
+} from "../lib/progression";
 
 type OfferStatus = "Pending" | "Accepted" | "Countered" | "Declined";
 type OrderStatus = "Processing" | "Shipped" | "Paid";
@@ -316,6 +322,44 @@ export default function SellerDashboardPage() {
   const [collapsedEvidenceUploads, setCollapsedEvidenceUploads] = useState<Record<string, boolean>>({});
   const [uploadingEvidenceId, setUploadingEvidenceId] = useState("");
   const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
+  const [progression, setProgression] = useState<ProgressionSummary>(calculateProgression(0));
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadProgression() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/progression", {
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+          },
+        });
+        const payload = (await response.json()) as {
+          progression?: ProgressionSummary;
+        };
+
+        if (isMounted && payload.progression) {
+          setProgression(payload.progression);
+        }
+      } catch (error) {
+        console.warn("Seller dashboard progression load skipped:", error);
+      }
+    }
+
+    loadProgression();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -930,6 +974,15 @@ export default function SellerDashboardPage() {
           : "Finish Stripe Express onboarding to enable seller payouts.";
   const shouldShowPayoutButton = !isLoadingPayoutStatus && (!payoutConnected || payoutIncomplete);
   const payoutButtonLabel = payoutConnected ? "Continue Payout Setup" : "Set Up Payouts";
+  const upcomingProgressionLevel = getNextProgressionLevel(progression.level);
+  const unlockedProgressionRewards = [
+    `Level ${progression.level} profile badge`,
+    `${progression.title} rank title`,
+    "Achievement display",
+  ];
+  const nextProgressionReward = upcomingProgressionLevel
+    ? `Level ${upcomingProgressionLevel.level} ${upcomingProgressionLevel.title}`
+    : "All Phase 1 progression levels unlocked";
 
   return (
     <main className="dashboard-page">
@@ -1246,23 +1299,66 @@ export default function SellerDashboardPage() {
               {payoutMessage ? <p className="payout-message">{payoutMessage}</p> : null}
             </section>
 
-            <section className="panel sidebar-panel">
-              <h2>Seller Rewards</h2>
-              <p>Current level: {mockSellerDashboardData.rewards.currentLevel}</p>
-              <div className="progress-block">
-                <div>
-                  <span>Progress to Level 5</span>
-                  <strong>{mockSellerDashboardData.rewards.progressToNext}%</strong>
+            <section className="panel sidebar-panel progression-card">
+              <div className="progression-card-header">
+                <div
+                  className="progression-mini-badge"
+                  style={{ borderColor: progression.border, color: progression.accent }}
+                >
+                  {progression.icon}
                 </div>
-                <div className="progress-track">
-                  <span style={{ width: `${mockSellerDashboardData.rewards.progressToNext}%` }} />
+                <div>
+                  <h2>GRAIL Progression</h2>
+                  <p>Level {progression.level} {progression.title}</p>
                 </div>
               </div>
-              <StatCard label="Completed Sales" value={String(mockSellerDashboardData.rewards.completedSales)} />
-              <StatCard label="Fast Shipping Streak" value={mockSellerDashboardData.rewards.fastShippingStreak} />
-              <StatCard label="Response Score" value={mockSellerDashboardData.rewards.responseScore} />
-              <StatCard label="Buyer Rating" value={mockSellerDashboardData.rewards.buyerRating} />
-              <p>Higher seller rewards can boost visibility on Browse.</p>
+              <div className="progress-block">
+                <div>
+                  <span>
+                    {upcomingProgressionLevel
+                      ? `Progress to ${upcomingProgressionLevel.title}`
+                      : "Progress complete"}
+                  </span>
+                  <strong>{progression.progressPercentage}%</strong>
+                </div>
+                <div className="progress-track">
+                  <span style={{ width: `${progression.progressPercentage}%` }} />
+                </div>
+              </div>
+              <div className="progression-stat-list">
+                <span>Current XP</span>
+                <strong>{progression.xp.toLocaleString()}</strong>
+                <span>Lifetime XP</span>
+                <strong>{progression.xp.toLocaleString()}</strong>
+                <span>Achievements</span>
+                <strong>{progression.achievementsCount}</strong>
+                <span>Upcoming Level</span>
+                <strong>
+                  {upcomingProgressionLevel
+                    ? `Level ${upcomingProgressionLevel.level}`
+                    : "Max"}
+                </strong>
+              </div>
+              <div className="progression-reward-list">
+                <span>Unlocked rewards</span>
+                {unlockedProgressionRewards.map((reward) => (
+                  <em key={reward}>{reward}</em>
+                ))}
+              </div>
+              <div className="progression-xp-guide">
+                <span>How to earn XP</span>
+                {xpGuideItems.map((item) => (
+                  <div key={item.source}>
+                    <strong>{item.label}</strong>
+                    <em>+{item.xp} XP</em>
+                    <small>{item.status === "live" ? "Live" : "Coming soon"}</small>
+                  </div>
+                ))}
+              </div>
+              <p>
+                Next reward: {nextProgressionReward}. Phase 1 progression is badge and rank
+                status only.
+              </p>
             </section>
 
             <section className="panel sidebar-panel">
@@ -1730,6 +1826,130 @@ const pageStyles = `
     height: 100%;
     border-radius: inherit;
     background: linear-gradient(90deg, #C9CDD3, #E7DED0);
+  }
+
+  .progression-card-header {
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 11px;
+    align-items: center;
+  }
+
+  .progression-mini-badge {
+    width: 48px;
+    height: 48px;
+    border: 1px solid rgba(201,205,211,0.34);
+    border-radius: 14px;
+    background:
+      radial-gradient(circle at 50% 18%, rgba(255,255,255,0.16), transparent 42%),
+      linear-gradient(145deg, rgba(231,222,208,0.11), rgba(8,8,10,0.92));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    font-weight: 900;
+  }
+
+  .progression-stat-list {
+    border: 1px solid rgba(201,205,211,0.16);
+    border-radius: 10px;
+    background: rgba(8,8,10,0.72);
+    padding: 10px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 12px;
+    align-items: baseline;
+  }
+
+  .progression-stat-list span,
+  .progression-reward-list span {
+    color: #85858f;
+    font-size: 10px;
+    line-height: 13px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .progression-stat-list strong {
+    color: #fff;
+    font-size: 13px;
+    line-height: 16px;
+    font-weight: 900;
+    text-align: right;
+  }
+
+  .progression-reward-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .progression-reward-list span {
+    width: 100%;
+  }
+
+  .progression-reward-list em {
+    border: 1px solid rgba(231,222,208,0.2);
+    border-radius: 999px;
+    background: rgba(231,222,208,0.055);
+    color: #E7DED0;
+    min-height: 25px;
+    padding: 0 9px;
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    line-height: 13px;
+    font-style: normal;
+    font-weight: 900;
+  }
+
+  .progression-xp-guide {
+    border: 1px solid rgba(201,205,211,0.14);
+    border-radius: 10px;
+    background: rgba(8,8,10,0.72);
+    padding: 10px;
+    display: grid;
+    gap: 7px;
+  }
+
+  .progression-xp-guide > span {
+    color: #85858f;
+    font-size: 10px;
+    line-height: 13px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .progression-xp-guide div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px 8px;
+    align-items: center;
+  }
+
+  .progression-xp-guide strong {
+    color: #fff;
+    font-size: 12px;
+    line-height: 15px;
+    font-weight: 900;
+  }
+
+  .progression-xp-guide em {
+    color: #E7DED0;
+    font-size: 11px;
+    line-height: 14px;
+    font-style: normal;
+    font-weight: 900;
+  }
+
+  .progression-xp-guide small {
+    grid-column: 1 / -1;
+    color: #85858f;
+    font-size: 10px;
+    line-height: 13px;
+    font-weight: 800;
   }
 
   .sidebar-panel {

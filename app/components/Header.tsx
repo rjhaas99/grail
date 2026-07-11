@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabase";
+import { calculateProgression, type ProgressionSummary } from "../lib/progression";
 
 type Profile = {
   full_name: string | null;
@@ -42,6 +43,7 @@ export default function Header() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [progression, setProgression] = useState<ProgressionSummary>(calculateProgression(0));
   const [searchQuery, setSearchQuery] = useState("");
 
   const accountName =
@@ -130,10 +132,33 @@ export default function Header() {
     return data ?? null;
   }
 
+  async function getProgression(accessToken?: string | null) {
+    if (!accessToken) {
+      return calculateProgression(0);
+    }
+
+    try {
+      const response = await fetch("/api/progression", {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+        },
+      });
+      const payload = (await response.json()) as {
+        progression?: ProgressionSummary;
+      };
+
+      return payload.progression ?? calculateProgression(0);
+    } catch (error) {
+      console.warn("Header progression load skipped:", error);
+      return calculateProgression(0);
+    }
+  }
+
   async function handleSignOut() {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    setProgression(calculateProgression(0));
     closeMenus();
     router.refresh();
   }
@@ -157,7 +182,10 @@ export default function Header() {
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       const nextUser = session?.user ?? null;
-      const nextProfile = await getProfile(nextUser);
+      const [nextProfile, nextProgression] = await Promise.all([
+        getProfile(nextUser),
+        getProgression(session?.access_token),
+      ]);
 
       if (!active) {
         return;
@@ -165,14 +193,20 @@ export default function Header() {
 
       setUser(nextUser);
       setProfile(nextProfile);
+      setProgression(nextProgression);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const nextUser = session?.user ?? null;
+      const [nextProfile, nextProgression] = await Promise.all([
+        getProfile(nextUser),
+        getProgression(session?.access_token),
+      ]);
       setUser(nextUser);
-      setProfile(await getProfile(nextUser));
+      setProfile(nextProfile);
+      setProgression(nextProgression);
     });
 
     return () => {
@@ -559,6 +593,25 @@ export default function Header() {
               >
                 {accountName}
               </span>
+              <span
+                title={`Level ${progression.level} ${progression.title}`}
+                style={{
+                  border: `1px solid ${progression.border}`,
+                  borderRadius: "999px",
+                  background: "rgba(231,222,208,0.055)",
+                  color: progression.accent,
+                  minWidth: "26px",
+                  height: "20px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "10px",
+                  fontWeight: 900,
+                  flexShrink: 0,
+                }}
+              >
+                L{progression.level}
+              </span>
             </button>
 
             {accountOpen && (
@@ -600,8 +653,42 @@ export default function Header() {
                       fontWeight: 700,
                     }}
                   >
-                    Level 1 Collector
+                    Level {progression.level} {progression.title}
                   </p>
+                  <div
+                    style={{
+                      marginTop: "9px",
+                      height: "6px",
+                      borderRadius: "999px",
+                      background: "rgba(201,205,211,0.12)",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: "block",
+                        width: `${progression.progressPercentage}%`,
+                        height: "100%",
+                        borderRadius: "inherit",
+                        background: `linear-gradient(90deg, ${progression.accent}, #E7DED0)`,
+                      }}
+                    />
+                  </div>
+                  <Link
+                    href="/profile#xp-guide"
+                    onClick={closeMenus}
+                    style={{
+                      marginTop: "9px",
+                      color: "#E7DED0",
+                      display: "inline-flex",
+                      fontSize: "11px",
+                      lineHeight: "14px",
+                      fontWeight: 900,
+                      textDecoration: "none",
+                    }}
+                  >
+                    How XP works
+                  </Link>
                 </div>
 
                 <div

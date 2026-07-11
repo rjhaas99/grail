@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { useEffect, useMemo, useState } from "react";
 import Header from "../components/Header";
+import type { XpSource } from "../lib/progression";
 import { supabase } from "../../lib/supabase";
 
 type CardType = "Raw" | "Graded";
@@ -1401,6 +1402,32 @@ export default function ListCardPage() {
     };
   }
 
+  async function awardProgressionXp(source: XpSource, accessToken: string, listingId: string) {
+    try {
+      const response = await fetch("/api/progression", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ source, listingId }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        console.warn("Progression XP award skipped:", {
+          source,
+          error: payload.error || response.statusText,
+        });
+      }
+    } catch (error) {
+      console.warn("Progression XP award skipped:", {
+        source,
+        error,
+      });
+    }
+  }
+
   async function saveListingChanges() {
     setStatus(null);
     setPublishedListingId("");
@@ -1572,6 +1599,21 @@ export default function ListCardPage() {
         });
         window.location.assign(payload.url);
         return;
+      }
+
+      await awardProgressionXp("list_card", currentSession.access_token, createdListing.id);
+
+      if (
+        imageResult.uploadedCount > 0 &&
+        imageResult.failedUploads.length === 0 &&
+        !imageResult.hasImageInsertError &&
+        !imageResult.hasPublicUrlError
+      ) {
+        await awardProgressionXp(
+          "quality_listing_photos",
+          currentSession.access_token,
+          createdListing.id,
+        );
       }
 
       if (
