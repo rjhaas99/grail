@@ -9,6 +9,7 @@ import { supabase } from "../../lib/supabase";
 
 type CardType = "Raw" | "Graded";
 type ListingMode = "sale" | "collection";
+type SaleFormat = "fixed" | "auction";
 type StatusType = "success" | "error" | "info";
 type ImageType =
   | "front"
@@ -49,6 +50,12 @@ type ExistingListingRow = {
   condition: string | null;
   price: number | null;
   status: string | null;
+  sale_format?: string | null;
+  auction_status?: string | null;
+  auction_starting_bid?: number | null;
+  auction_reserve_price?: number | null;
+  auction_duration_days?: number | null;
+  reserve_fee_status?: string | null;
   psa_verified?: boolean | null;
   psa_cert_number?: string | null;
   psa_grade?: string | null;
@@ -255,6 +262,21 @@ function formatCurrency(value: string | number) {
   }).format(number);
 }
 
+function formatCurrencyWithCents(value: string | number) {
+  const number = Number(value);
+  if (!number) return "$0.00";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(number);
+}
+
+function calculateReserveFee(reservePrice: number) {
+  return Math.round(Math.min(100, Math.max(1, reservePrice * 0.05)) * 100) / 100;
+}
+
 function clean(value: string) {
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
@@ -333,6 +355,12 @@ export default function ListCardPage() {
     Partial<Record<ImageType, string>>
   >({});
   const [listingMode, setListingMode] = useState<ListingMode>("sale");
+  const [saleFormat, setSaleFormat] = useState<SaleFormat>("fixed");
+  const [auctionStartingBid, setAuctionStartingBid] = useState("0.99");
+  const [auctionReserveEnabled, setAuctionReserveEnabled] = useState(false);
+  const [auctionReservePrice, setAuctionReservePrice] = useState("");
+  const [auctionDurationDays, setAuctionDurationDays] = useState("7");
+  const [reserveFeeAcknowledged, setReserveFeeAcknowledged] = useState(false);
   const [isAutoTitle, setIsAutoTitle] = useState(true);
   const [category, setCategory] = useState("Sports");
   const [cardType, setCardType] = useState<CardType>("Graded");
@@ -539,6 +567,12 @@ export default function ListCardPage() {
               condition,
               price,
               status,
+              sale_format,
+              auction_status,
+              auction_starting_bid,
+              auction_reserve_price,
+              auction_duration_days,
+              reserve_fee_status,
               psa_verified,
               psa_cert_number,
               psa_grade,
@@ -588,6 +622,18 @@ export default function ListCardPage() {
 
         setCategory(listing.sport || "Sports");
         setCardType(nextCardType);
+        setSaleFormat(listing.sale_format === "auction" ? "auction" : "fixed");
+        setAuctionStartingBid(
+          listing.auction_starting_bid ? String(listing.auction_starting_bid) : "0.99",
+        );
+        setAuctionReserveEnabled(Boolean(listing.auction_reserve_price));
+        setAuctionReservePrice(
+          listing.auction_reserve_price ? String(listing.auction_reserve_price) : "",
+        );
+        setAuctionDurationDays(
+          listing.auction_duration_days ? String(listing.auction_duration_days) : "7",
+        );
+        setReserveFeeAcknowledged(listing.reserve_fee_status === "paid");
         setTitle(listing.title || "");
         setIsAutoTitle(false);
         setYear(listing.year || "");
@@ -673,6 +719,12 @@ export default function ListCardPage() {
   const gradeOptions = grader === "PSA" ? psaGrades : standardGrades;
   const isEditMode = Boolean(editListingId);
   const isCollectionMode = listingMode === "collection";
+  const isAuctionMode = !isCollectionMode && saleFormat === "auction";
+  const auctionReserveNumber = Number(auctionReservePrice);
+  const reserveFeeAmount =
+    isAuctionMode && auctionReserveEnabled && Number.isFinite(auctionReserveNumber) && auctionReserveNumber > 0
+      ? calculateReserveFee(auctionReserveNumber)
+      : 0;
   const serialDisplay =
     serialNumber === "Custom"
       ? customSerialNumber.trim()
@@ -757,7 +809,7 @@ export default function ListCardPage() {
       "Untitled Draft";
 
     return {
-      id: existingDraft?.id || `draft-${Date.now()}`,
+      id: existingDraft?.id || `draft-${now.replace(/[^0-9]/g, "")}`,
       title: draftTitle,
       category,
       subject,
@@ -837,7 +889,11 @@ export default function ListCardPage() {
       return "Card type is required.";
     }
 
-    if (!isCollectionMode && (!askingPrice || Number.isNaN(priceNumber) || priceNumber <= 0)) {
+    if (
+      !isCollectionMode &&
+      !isAuctionMode &&
+      (!askingPrice || Number.isNaN(priceNumber) || priceNumber <= 0)
+    ) {
       return "Asking price must be a positive number.";
     }
 
@@ -845,8 +901,36 @@ export default function ListCardPage() {
       return "Minimum offer must be a positive number.";
     }
 
-    if (!isCollectionMode && minimumOffer.trim() && minimumOfferNumber > priceNumber) {
+    if (
+      !isCollectionMode &&
+      !isAuctionMode &&
+      minimumOffer.trim() &&
+      minimumOfferNumber > priceNumber
+    ) {
       return "Minimum offer must be less than or equal to asking price.";
+    }
+
+    if (isAuctionMode) {
+      const startingBid = Number(auctionStartingBid);
+      const duration = Number(auctionDurationDays);
+
+      if (!Number.isFinite(startingBid) || startingBid < 0.99) {
+        return "Auction starting bid must be at least $0.99.";
+      }
+
+      if (![1, 3, 5, 7].includes(duration)) {
+        return "Choose a valid auction duration.";
+      }
+
+      if (auctionReserveEnabled) {
+        if (!Number.isFinite(auctionReserveNumber) || auctionReserveNumber <= startingBid) {
+          return "Hidden reserve must be greater than the starting bid.";
+        }
+
+        if (!reserveFeeAcknowledged) {
+          return "Acknowledge the Reserve Commitment Fee refund rules before publishing.";
+        }
+      }
     }
 
     if (cardType === "Raw" && !condition.trim()) {
@@ -1144,6 +1228,14 @@ export default function ListCardPage() {
     const cleanCert = certNumber.replace(/[^0-9]/g, "").trim();
     const shouldStorePsa = cardType === "Graded" && grader === "PSA" && cleanCert;
     const manualMarketValue = Number(marketValue);
+    const auctionStartsAt = isAuctionMode && !auctionReserveEnabled
+      ? new Date()
+      : null;
+    const auctionEndsAt = auctionStartsAt
+      ? new Date(
+          auctionStartsAt.getTime() + Number(auctionDurationDays) * 24 * 60 * 60 * 1000,
+        ).toISOString()
+      : null;
     const savedEstimatedValue =
       Number.isFinite(manualMarketValue) && manualMarketValue > 0
         ? manualMarketValue
@@ -1161,7 +1253,32 @@ export default function ListCardPage() {
       grade: cardType === "Graded" ? clean(grade) : null,
       cert_number: cardType === "Graded" ? clean(cleanCert) : null,
       condition: cardType === "Raw" ? clean(condition) : null,
-      price: isCollectionMode ? null : Number(askingPrice),
+      price: isCollectionMode || isAuctionMode ? null : Number(askingPrice),
+      sale_format: isAuctionMode ? "auction" : "fixed",
+      auction_status: isAuctionMode
+        ? auctionReserveEnabled
+          ? "scheduled"
+          : "active"
+        : null,
+      auction_duration_days: isAuctionMode ? Number(auctionDurationDays) : null,
+      auction_starts_at: auctionStartsAt ? auctionStartsAt.toISOString() : null,
+      auction_ends_at: auctionEndsAt,
+      auction_starting_bid: isAuctionMode ? Number(auctionStartingBid) : null,
+      auction_reserve_price:
+        isAuctionMode && auctionReserveEnabled ? Number(auctionReservePrice) : null,
+      auction_reserve_met_at: null,
+      auction_current_bid: isAuctionMode ? null : null,
+      auction_bid_count: isAuctionMode ? 0 : 0,
+      auction_winner_id: null,
+      auction_ended_at: null,
+      auction_payment_due_at: null,
+      reserve_fee_amount:
+        isAuctionMode && auctionReserveEnabled ? reserveFeeAmount : null,
+      reserve_fee_status: isAuctionMode
+        ? auctionReserveEnabled
+          ? "payment_required"
+          : "none"
+        : "none",
       estimated_value: savedEstimatedValue,
       collection_note: serialDisplay ? `Serial Number: ${serialDisplay}` : null,
       psa_verified: shouldStorePsa ? Boolean(verification?.verified) : false,
@@ -1201,7 +1318,8 @@ export default function ListCardPage() {
       if (!photo) continue;
 
       const safeFileName = sanitizeFileName(photo.file.name);
-      const filePath = `listings/${listingId}/${entry.imageType}-${Date.now()}-${safeFileName}`;
+      const uploadTimestamp = new Date().toISOString().replace(/[^0-9]/g, "");
+      const filePath = `listings/${listingId}/${entry.imageType}-${uploadTimestamp}-${safeFileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from(storageBucket)
@@ -1388,7 +1506,11 @@ export default function ListCardPage() {
         .insert({
           seller_id: currentSession.user.id,
           ...buildListingFields(verifiedPsa),
-          status: isCollectionMode ? "collection" : "active",
+          status: isCollectionMode
+            ? "collection"
+            : isAuctionMode && auctionReserveEnabled
+              ? "pending_reserve_fee"
+              : "active",
           is_collection_card: isCollectionMode,
           is_public_collection: isCollectionMode,
         })
@@ -1408,20 +1530,48 @@ export default function ListCardPage() {
       const imageResult = await uploadListingImages(createdListing.id);
 
       setPublishedListingId(createdListing.id);
-      try {
-        await fetch("/api/notifications/system", {
+
+      if (!(isAuctionMode && auctionReserveEnabled)) {
+        try {
+          await fetch("/api/notifications/system", {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${currentSession.access_token}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              kind: "listing_live",
+              listingId: createdListing.id,
+            }),
+          });
+        } catch (notificationError) {
+          console.warn("Listing live notification skipped:", notificationError);
+        }
+      }
+
+      if (isAuctionMode && auctionReserveEnabled) {
+        const response = await fetch("/api/auctions/reserve-fee/checkout", {
           method: "POST",
           headers: {
             authorization: `Bearer ${currentSession.access_token}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({
-            kind: "listing_live",
-            listingId: createdListing.id,
-          }),
+          body: JSON.stringify({ listingId: createdListing.id }),
         });
-      } catch (notificationError) {
-        console.warn("Listing live notification skipped:", notificationError);
+        const payload = (await response.json()) as { url?: string; error?: string; detail?: string };
+
+        if (!response.ok || !payload.url) {
+          throw new Error(
+            payload.detail || payload.error || "Reserve Commitment Fee checkout could not be started.",
+          );
+        }
+
+        setStatus({
+          type: "info",
+          text: "Auction created. Redirecting to Reserve Commitment Fee checkout...",
+        });
+        window.location.assign(payload.url);
+        return;
       }
 
       if (
@@ -1438,7 +1588,11 @@ export default function ListCardPage() {
 
       setStatus({
         type: "success",
-        text: isCollectionMode ? "Card added to collection." : "Listing published.",
+        text: isCollectionMode
+          ? "Card added to collection."
+          : isAuctionMode
+            ? "Auction published."
+            : "Listing published.",
       });
     } catch (error) {
       console.error("Publish listing error:", error);
@@ -1460,6 +1614,13 @@ export default function ListCardPage() {
 
     setCategory("Sports");
     setCardType("Graded");
+    setListingMode("sale");
+    setSaleFormat("fixed");
+    setAuctionStartingBid("0.99");
+    setAuctionReserveEnabled(false);
+    setAuctionReservePrice("");
+    setAuctionDurationDays("7");
+    setReserveFeeAcknowledged(false);
     setTitle("");
     setIsAutoTitle(true);
     setYear("");
@@ -1766,15 +1927,43 @@ export default function ListCardPage() {
 
             <section className="panel form-section">
               <h2>Pricing</h2>
+              {!isCollectionMode ? (
+                <div className="sale-format-toggle" aria-label="Sale format">
+                  <button
+                    type="button"
+                    className={saleFormat === "fixed" ? "active" : ""}
+                    onClick={() => setSaleFormat("fixed")}
+                  >
+                    Fixed Price
+                  </button>
+                  <button
+                    type="button"
+                    className={saleFormat === "auction" ? "active" : ""}
+                    onClick={() => setSaleFormat("auction")}
+                  >
+                    Auction
+                  </button>
+                </div>
+              ) : null}
               <div className="field-grid three">
                 <label>
-                  <span>Asking price</span>
+                  <span>{isAuctionMode ? "Starting bid" : "Asking price"}</span>
                   <input
-                    value={askingPrice}
+                    value={isAuctionMode ? auctionStartingBid : askingPrice}
                     inputMode="decimal"
                     disabled={isCollectionMode}
-                    placeholder={isCollectionMode ? "In Collection" : undefined}
-                    onChange={(event) => setAskingPrice(event.target.value)}
+                    placeholder={
+                      isCollectionMode
+                        ? "In Collection"
+                        : isAuctionMode
+                          ? "0.99"
+                          : undefined
+                    }
+                    onChange={(event) =>
+                      isAuctionMode
+                        ? setAuctionStartingBid(event.target.value)
+                        : setAskingPrice(event.target.value)
+                    }
                   />
                 </label>
                 <label>
@@ -1795,6 +1984,83 @@ export default function ListCardPage() {
                   />
                 </label>
               </div>
+              {isAuctionMode ? (
+                <div className="auction-box">
+                  <div className="field-grid three">
+                    <label>
+                      <span>Auction duration</span>
+                      <select
+                        value={auctionDurationDays}
+                        onChange={(event) => setAuctionDurationDays(event.target.value)}
+                      >
+                        <option value="1">1 day</option>
+                        <option value="3">3 days</option>
+                        <option value="5">5 days</option>
+                        <option value="7">7 days</option>
+                      </select>
+                    </label>
+                    <label className="toggle-field">
+                      <span>Hidden reserve</span>
+                      <button
+                        type="button"
+                        className={auctionReserveEnabled ? "active" : ""}
+                        onClick={() => {
+                          setAuctionReserveEnabled((current) => !current);
+                          setReserveFeeAcknowledged(false);
+                        }}
+                      >
+                        {auctionReserveEnabled ? "On" : "No Reserve"}
+                      </button>
+                    </label>
+                    <label>
+                      <span>Reserve price</span>
+                      <input
+                        value={auctionReservePrice}
+                        inputMode="decimal"
+                        disabled={!auctionReserveEnabled}
+                        placeholder={auctionReserveEnabled ? "Hidden reserve" : "No reserve"}
+                        onChange={(event) => setAuctionReservePrice(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <p>
+                    Auctions may start at any amount at or above $0.99.
+                    No-reserve auctions are free to create and must sell to the
+                    highest valid bidder.
+                  </p>
+                  {auctionReserveEnabled ? (
+                    <div className="reserve-fee-note">
+                      <strong>
+                        Reserve Commitment Fee: {formatCurrencyWithCents(reserveFeeAmount)}
+                      </strong>
+                      <p>
+                        Reserve auctions require a Reserve Commitment Fee equal
+                        to 5% of the hidden reserve price, with a $1 minimum
+                        and $100 maximum. The fee is refunded if the reserve is
+                        met and the auction successfully sells. It is retained
+                        if the reserve is not met or the seller cancels.
+                      </p>
+                      <label className="reserve-acknowledgement">
+                        <input
+                          type="checkbox"
+                          checked={reserveFeeAcknowledged}
+                          onChange={(event) =>
+                            setReserveFeeAcknowledged(event.target.checked)
+                          }
+                        />
+                        <span>
+                          The Reserve Commitment Fee is refunded only if the
+                          reserve is met and the auction successfully sells.
+                        </span>
+                      </label>
+                    </div>
+                  ) : (
+                    <p className="reserve-fee-note">
+                      This auction will publicly show <strong>No Reserve</strong>.
+                    </p>
+                  )}
+                </div>
+              ) : null}
               <div className="market-value-box">
                 <div className="market-value-header">
                   <div>
@@ -1950,8 +2216,14 @@ export default function ListCardPage() {
               <h3>{previewTitle}</h3>
               <p>{subtitle}</p>
               <p>Seller: {session?.user.email || "GRAIL Seller"}</p>
-              <strong>{isCollectionMode ? "In Collection" : formatCurrency(askingPrice)}</strong>
-              <ActionCircles showBuy={!isCollectionMode} />
+              <strong>
+                {isCollectionMode
+                  ? "In Collection"
+                  : isAuctionMode
+                    ? `Starting Bid ${formatCurrencyWithCents(auctionStartingBid)}`
+                    : formatCurrency(askingPrice)}
+              </strong>
+              <ActionCircles showBuy={!isCollectionMode && !isAuctionMode} />
               <button
                 type="button"
                 className="view-card"
@@ -2004,11 +2276,17 @@ export default function ListCardPage() {
                     ? "Saving..."
                     : isCollectionMode
                       ? "Adding..."
-                      : "Publishing..."
+                      : isAuctionMode && auctionReserveEnabled
+                        ? "Opening Reserve Commitment Fee..."
+                        : "Publishing..."
                   : isEditMode
                     ? "Save Changes"
                   : isCollectionMode
                     ? "Add to Collection"
+                  : isAuctionMode && auctionReserveEnabled
+                      ? "Pay Reserve Commitment Fee & Publish"
+                    : isAuctionMode
+                      ? "Publish Auction"
                     : "Publish Listing"}
               </button>
               <div className="listing-legal">
@@ -2093,7 +2371,16 @@ export default function ListCardPage() {
                 <h3>{previewTitle}</h3>
                 <p>{subtitle}</p>
                 <div className="preview-detail-grid">
-                  <span>{isCollectionMode ? "Status" : "Asking Price"} <strong>{isCollectionMode ? "In Collection" : formatCurrency(askingPrice)}</strong></span>
+                  <span>
+                    {isCollectionMode ? "Status" : isAuctionMode ? "Auction" : "Asking Price"}{" "}
+                    <strong>
+                      {isCollectionMode
+                        ? "In Collection"
+                        : isAuctionMode
+                          ? `Starting Bid ${formatCurrencyWithCents(auctionStartingBid)}`
+                          : formatCurrency(askingPrice)}
+                    </strong>
+                  </span>
                   <span>Minimum Offer <strong>{minimumOffer ? formatCurrency(minimumOffer) : "Not set"}</strong></span>
                   <span>Card Type <strong>{cardType}</strong></span>
                   <span>
@@ -2112,7 +2399,7 @@ export default function ListCardPage() {
                   ) : null}
                   <span>Seller <strong>{session?.user.email || "GRAIL Seller"}</strong></span>
                 </div>
-                <ActionCircles showBuy={!isCollectionMode} />
+                <ActionCircles showBuy={!isCollectionMode && !isAuctionMode} />
                 <button type="button" className="view-card" disabled>
                   View Card Preview
                 </button>
@@ -2171,6 +2458,15 @@ const pageStyles = `
   input, select { border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; min-height: 42px; padding: 0 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none; }
   input:disabled { color: #85858f; cursor: not-allowed; }
   label small { color: #85858f; font-size: 11px; line-height: 15px; font-weight: 800; }
+  .sale-format-toggle { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .sale-format-toggle button.active, .toggle-field button.active { background: rgba(231,222,208,0.14); border-color: rgba(231,222,208,0.58); color: #E7DED0; }
+  .auction-box { margin-top: 14px; border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); padding: 12px; display: grid; gap: 12px; }
+  .auction-box p { margin: 0; color: #a1a1aa; font-size: 12px; line-height: 17px; font-weight: 800; }
+  .reserve-fee-note { border: 1px solid rgba(231,222,208,0.18); border-radius: 10px; background: rgba(231,222,208,0.055); padding: 12px; display: grid; gap: 8px; }
+  .reserve-fee-note strong { color: #E7DED0; font-size: 13px; line-height: 18px; font-weight: 900; }
+  .reserve-acknowledgement { display: flex; align-items: flex-start; gap: 9px; }
+  .reserve-acknowledgement input { width: 16px; height: 16px; min-height: 0; margin-top: 2px; padding: 0; flex: 0 0 auto; }
+  .reserve-acknowledgement span { color: #C9CDD3; font-size: 12px; line-height: 17px; font-weight: 800; }
   .psa-verification-box { grid-column: 1 / -1; border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
   .psa-verification-box span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
   .psa-verification-box strong { display: block; margin-top: 5px; color: #fff; font-size: 14px; line-height: 18px; font-weight: 900; }

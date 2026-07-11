@@ -26,8 +26,22 @@ type OrderInsert = {
 type ListingRow = {
   id: string;
   seller_id: string | null;
+  title?: string | null;
   price: number | null;
   status: string | null;
+  sale_format?: string | null;
+  auction_status?: string | null;
+  auction_reserve_price?: number | null;
+  auction_current_bid?: number | null;
+  auction_winner_id?: string | null;
+  auction_duration_days?: number | null;
+  auction_reserve_met_at?: string | null;
+  reserve_fee_amount?: number | null;
+  reserve_fee_status?: string | null;
+  stripe_reserve_fee_checkout_session_id?: string | null;
+  stripe_reserve_fee_payment_intent_id?: string | null;
+  stripe_reserve_fee_charge_id?: string | null;
+  stripe_reserve_fee_refund_id?: string | null;
 };
 
 type ExistingOrderRow = {
@@ -36,6 +50,8 @@ type ExistingOrderRow = {
   stripe_charge_id: string | null;
   refund_status: string | null;
 };
+
+type CheckoutMetadata = Record<string, string>;
 
 function getRequiredEnv(name: string) {
   const value = process.env[name];
@@ -61,6 +77,14 @@ function createServiceSupabaseClient() {
 
 function roundCurrency(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function calculateReserveFee(reservePrice: number) {
+  return roundCurrency(Math.min(100, Math.max(1, reservePrice * 0.05)));
+}
+
+function addDays(value: Date, days: number) {
+  return new Date(value.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
 function getPaymentIntentId(session: Stripe.Checkout.Session) {
@@ -93,6 +117,38 @@ function describePaymentIntent(
   }
 
   return paymentIntent.id;
+}
+
+async function resolveCheckoutMetadata(
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
+) {
+  const sessionMetadata = session.metadata || {};
+  let paymentIntentMetadata: CheckoutMetadata = {};
+
+  try {
+    const resolvedSession = await stripe.checkout.sessions.retrieve(session.id, {
+      expand: ["payment_intent"],
+    });
+
+    if (
+      resolvedSession.payment_intent &&
+      typeof resolvedSession.payment_intent !== "string"
+    ) {
+      paymentIntentMetadata = resolvedSession.payment_intent.metadata || {};
+    }
+  } catch (error) {
+    console.error("Stripe webhook metadata resolution error:", {
+      error,
+      stripeSessionId: session.id,
+      sessionMetadataType: sessionMetadata.type || null,
+    });
+  }
+
+  return {
+    ...paymentIntentMetadata,
+    ...sessionMetadata,
+  };
 }
 
 async function resolveStripePaymentData(
@@ -177,19 +233,261 @@ async function resolveStripePaymentData(
   };
 }
 
+async function refundReserveFeeIfNeeded(
+  stripe: Stripe,
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+  listingId: string,
+) {
+  const { data, error } = await supabase
+    .from("listings")
+    .select(
+      "id, seller_id, title, sale_format, auction_reserve_met_at, reserve_fee_status, stripe_reserve_fee_payment_intent_id, stripe_reserve_fee_charge_id, stripe_reserve_fee_refund_id",
+    )
+    .eq("id", listingId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Auction Reserve Commitment Fee refund listing fetch error:", {
+      error,
+      errorMessage: error.message,
+      listingId,
+    });
+    return;
+  }
+
+  const listing = data as ListingRow | null;
+
+  if (!listing || listing.sale_format !== "auction") {
+    return;
+  }
+
+  if (
+    listing.reserve_fee_status === "refunded" ||
+    listing.stripe_reserve_fee_refund_id ||
+    !listing.auction_reserve_met_at
+  ) {
+    return;
+  }
+
+  if (listing.reserve_fee_status !== "paid" && listing.reserve_fee_status !== "refund_pending") {
+    return;
+  }
+
+  if (!listing.stripe_reserve_fee_payment_intent_id && !listing.stripe_reserve_fee_charge_id) {
+    console.warn("Auction Reserve Commitment Fee refund skipped; missing Stripe payment data.", {
+      listingId,
+      reserveFeeStatus: listing.reserve_fee_status,
+    });
+    await supabase
+      .from("listings")
+      .update({ reserve_fee_status: "refund_pending" })
+      .eq("id", listingId);
+    return;
+  }
+
+  try {
+    const refund = await stripe.refunds.create({
+      ...(listing.stripe_reserve_fee_payment_intent_id
+        ? { payment_intent: listing.stripe_reserve_fee_payment_intent_id }
+        : { charge: listing.stripe_reserve_fee_charge_id || undefined }),
+      metadata: {
+        type: "auction_reserve_fee_refund",
+        listingId,
+        source: "grail",
+      },
+    });
+    const refundedAt = new Date().toISOString();
+    const { error: updateError } = await supabase
+      .from("listings")
+      .update({
+        stripe_reserve_fee_refund_id: refund.id,
+        reserve_fee_status: "refunded",
+        reserve_fee_refunded_at: refundedAt,
+      })
+      .eq("id", listingId)
+      .is("stripe_reserve_fee_refund_id", null);
+
+    if (updateError) {
+      console.error("Auction Reserve Commitment Fee refund save error:", {
+        error: updateError,
+        errorMessage: updateError.message,
+        listingId,
+        refundId: refund.id,
+      });
+    } else {
+      await createSystemNotifications(supabase, [
+        {
+          userId: listing.seller_id,
+          title: "Reserve Commitment Fee refunded",
+          body: "Your reserve was met and the auction sold, so the Reserve Commitment Fee was refunded.",
+          linkUrl: `/cards/${listingId}`,
+        },
+      ]);
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Reserve Commitment Fee refund failed.";
+    console.error("Auction Reserve Commitment Fee Stripe refund error:", {
+      error,
+      errorMessage: detail,
+      listingId,
+      paymentIntentId: listing.stripe_reserve_fee_payment_intent_id,
+      chargeId: listing.stripe_reserve_fee_charge_id,
+    });
+    await supabase
+      .from("listings")
+      .update({ reserve_fee_status: "refund_pending" })
+      .eq("id", listingId);
+  }
+}
+
+async function handleAuctionReserveFeeCompleted(
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
+  metadata: CheckoutMetadata,
+) {
+  const listingId = metadata.listingId || "";
+  const sellerId = metadata.sellerId || "";
+  const reservePrice = Number(metadata.reservePrice || 0);
+  const { paymentIntentId, latestChargeId } = await resolveStripePaymentData(
+    stripe,
+    session,
+  );
+
+  if (!listingId || !sellerId || reservePrice <= 0) {
+    throw new Error("Reserve Commitment Fee checkout is missing metadata.");
+  }
+
+  console.info("Stripe webhook recognized Reserve Commitment Fee checkout:", {
+    stripeSessionId: session.id,
+    listingId,
+    sellerId,
+  });
+
+  const supabase = createServiceSupabaseClient();
+  const { data, error } = await supabase
+    .from("listings")
+    .select(
+      "id, seller_id, title, sale_format, status, auction_status, auction_duration_days, auction_reserve_price, reserve_fee_status, stripe_reserve_fee_checkout_session_id",
+    )
+    .eq("id", listingId)
+    .eq("seller_id", sellerId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Reserve Commitment Fee webhook listing fetch error:", {
+      error,
+      errorMessage: error.message,
+      listingId,
+      sellerId,
+      stripeSessionId: session.id,
+    });
+    throw error;
+  }
+
+  const listing = data as ListingRow | null;
+
+  if (!listing || listing.sale_format !== "auction") {
+    throw new Error("Reserve Commitment Fee webhook could not find the auction listing.");
+  }
+
+  if (
+    listing.reserve_fee_status === "paid" &&
+    (listing.stripe_reserve_fee_checkout_session_id === session.id ||
+      (listing.status === "active" && listing.auction_status === "active"))
+  ) {
+    console.info("Reserve Commitment Fee webhook duplicate handled:", {
+      stripeSessionId: session.id,
+      listingId,
+      listingStatus: listing.status,
+      auctionStatus: listing.auction_status,
+    });
+    return;
+  }
+
+  const durationDays = Math.max(Number(listing.auction_duration_days || 7), 1);
+  const startsAt = new Date();
+  const endsAt = addDays(startsAt, durationDays);
+  const feeAmount = calculateReserveFee(Number(listing.auction_reserve_price || reservePrice));
+
+  const { error: updateError } = await supabase
+    .from("listings")
+    .update({
+      status: "active",
+      auction_status: "active",
+      auction_starts_at: startsAt.toISOString(),
+      auction_ends_at: endsAt,
+      auction_current_bid: null,
+      auction_bid_count: 0,
+      auction_winner_id: null,
+      auction_ended_at: null,
+      auction_payment_due_at: null,
+      reserve_fee_amount: feeAmount,
+      reserve_fee_status: "paid",
+      stripe_reserve_fee_checkout_session_id: session.id,
+      stripe_reserve_fee_payment_intent_id: paymentIntentId,
+      stripe_reserve_fee_charge_id: latestChargeId || null,
+      reserve_fee_paid_at: startsAt.toISOString(),
+    })
+    .eq("id", listingId)
+    .eq("seller_id", sellerId);
+
+  if (updateError) {
+    console.error("Reserve Commitment Fee webhook auction activation error:", {
+      error: updateError,
+      errorMessage: updateError.message,
+      listingId,
+      sellerId,
+      stripeSessionId: session.id,
+      paymentIntentId,
+      latestChargeId,
+    });
+    throw updateError;
+  }
+
+  console.info("Reserve auction activated after Reserve Commitment Fee payment:", {
+    stripeSessionId: session.id,
+    listingId,
+    sellerId,
+    reserveFeeAmount: feeAmount,
+    auctionStartsAt: startsAt.toISOString(),
+    auctionEndsAt: endsAt,
+  });
+
+  await createSystemNotifications(supabase, [
+    {
+      userId: sellerId,
+      title: "Auction is live",
+      body: "Your reserve auction is live on GRAIL.",
+      linkUrl: `/cards/${listingId}`,
+    },
+  ]);
+}
+
 async function handleCheckoutSessionCompleted(
   stripe: Stripe,
   session: Stripe.Checkout.Session,
+  metadata: CheckoutMetadata,
 ) {
-  const listingId = session.metadata?.listingId || "";
-  const sellerId = session.metadata?.sellerId || "";
-  const buyerId = session.metadata?.buyerId || session.client_reference_id || null;
+  const sessionType = metadata.type || "";
+  const isAuctionSale = sessionType === "auction_sale";
+  const isFixedPriceSale = sessionType === "fixed_price_sale";
+  const listingId = metadata.listingId || "";
+  const sellerId = metadata.sellerId || "";
+  const buyerId = metadata.buyerId || session.client_reference_id || null;
   const totalAmount = Number(session.amount_total || 0) / 100;
   const subtotalAmount = Number(session.amount_subtotal || 0) / 100;
   const { paymentIntentId, latestChargeId } = await resolveStripePaymentData(
     stripe,
     session,
   );
+
+  if (sessionType === "auction_reserve_fee") {
+    throw new Error("Reserve Commitment Fee sessions cannot enter sale handling.");
+  }
+
+  if (!isAuctionSale && !isFixedPriceSale) {
+    throw new Error("Checkout session type is missing or unsupported for sale handling.");
+  }
 
   if (!listingId || !sellerId) {
     throw new Error("Stripe session is missing listingId or sellerId metadata.");
@@ -218,7 +516,9 @@ async function handleCheckoutSessionCompleted(
 
   const { data: listingData, error: listingError } = await supabase
     .from("listings")
-    .select("id, seller_id, price, status")
+    .select(
+      "id, seller_id, price, status, sale_format, auction_status, auction_current_bid, auction_winner_id, auction_duration_days, auction_reserve_met_at, reserve_fee_amount, reserve_fee_status, stripe_reserve_fee_payment_intent_id, stripe_reserve_fee_charge_id, stripe_reserve_fee_refund_id",
+    )
     .eq("id", listingId)
     .eq("seller_id", sellerId)
     .maybeSingle();
@@ -235,6 +535,34 @@ async function handleCheckoutSessionCompleted(
 
   if (!listingData) {
     throw new Error("Stripe webhook could not find the paid listing.");
+  }
+
+  const listing = listingData as ListingRow;
+
+  if (listing.sale_format === "auction" && !isAuctionSale) {
+    console.error("Stripe webhook refused auction listing in normal sale branch:", {
+      stripeSessionId: session.id,
+      listingId,
+      sellerId,
+      sessionType: sessionType || null,
+      listingStatus: listing.status,
+      auctionStatus: listing.auction_status,
+    });
+    throw new Error("Auction listings require auction_sale checkout metadata.");
+  }
+
+  if (listing.sale_format !== "auction" && isAuctionSale) {
+    throw new Error("Auction sale webhook metadata does not match an auction listing.");
+  }
+
+  if (isAuctionSale) {
+    if (listing.auction_winner_id && buyerId && listing.auction_winner_id !== buyerId) {
+      throw new Error("Auction sale buyer does not match the recorded winner.");
+    }
+
+    if (listing.auction_status !== "awaiting_payment" && listing.status !== "sold") {
+      throw new Error("Auction sale is not awaiting winner payment.");
+    }
   }
 
   if (existingOrder) {
@@ -275,7 +603,11 @@ async function handleCheckoutSessionCompleted(
 
     const { error: listingUpdateError } = await supabase
       .from("listings")
-      .update({ status: "sold" })
+      .update(
+        isAuctionSale
+          ? { status: "sold", auction_status: "paid" }
+          : { status: "sold" },
+      )
       .eq("id", listingId)
       .eq("seller_id", sellerId);
 
@@ -298,12 +630,20 @@ async function handleCheckoutSessionCompleted(
       updatedPaymentFields: Object.keys(orderPaymentPatch),
     });
 
+    if (isAuctionSale) {
+      await refundReserveFeeIfNeeded(stripe, supabase, listingId);
+    }
+
     return;
   }
 
-  const listing = listingData as ListingRow;
   const listingPrice = Number(listing.price || 0);
-  const cardPrice = listingPrice > 0 ? listingPrice : subtotalAmount || totalAmount;
+  const auctionPrice = Number(listing.auction_current_bid || 0);
+  const cardPrice = isAuctionSale && auctionPrice > 0
+    ? auctionPrice
+    : listingPrice > 0
+      ? listingPrice
+      : subtotalAmount || totalAmount;
   const buyerFee = Math.max(totalAmount - cardPrice, 0);
   const platformFee = roundCurrency(cardPrice * 0.075);
   const processingFee = roundCurrency(buyerFee);
@@ -351,7 +691,11 @@ async function handleCheckoutSessionCompleted(
 
   const { error: listingUpdateError } = await supabase
     .from("listings")
-    .update({ status: "sold" })
+    .update(
+      isAuctionSale
+        ? { status: "sold", auction_status: "paid" }
+        : { status: "sold" },
+    )
     .eq("id", listingId)
     .eq("seller_id", sellerId);
 
@@ -376,17 +720,25 @@ async function handleCheckoutSessionCompleted(
   await createSystemNotifications(supabase, [
     {
       userId: sellerId,
-      title: "Your item sold",
-      body: "Your card sold. Add tracking from your Seller Dashboard.",
+      title: isAuctionSale ? "Winner payment received" : "Your item sold",
+      body: isAuctionSale
+        ? "The winning bidder paid. Add tracking from your Seller Dashboard."
+        : "Your card sold. Add tracking from your Seller Dashboard.",
       linkUrl: "/seller-dashboard",
     },
     {
       userId: buyerId,
-      title: "Order confirmed",
-      body: "Your GRAIL order was placed successfully.",
+      title: isAuctionSale ? "Auction payment confirmed" : "Order confirmed",
+      body: isAuctionSale
+        ? "Your winning auction payment was placed successfully."
+        : "Your GRAIL order was placed successfully.",
       linkUrl: "/orders",
     },
   ]);
+
+  if (isAuctionSale) {
+    await refundReserveFeeIfNeeded(stripe, supabase, listingId);
+  }
 }
 
 export async function POST(request: Request) {
@@ -431,11 +783,53 @@ export async function POST(request: Request) {
   }
 
   try {
-    await handleCheckoutSessionCompleted(
-      stripe,
-      event.data.object as Stripe.Checkout.Session,
-    );
+    const session = event.data.object as Stripe.Checkout.Session;
+    const metadata = await resolveCheckoutMetadata(stripe, session);
+    const sessionType = metadata.type || "";
 
+    console.info("Stripe checkout.session.completed received:", {
+      stripeSessionId: session.id,
+      metadataType: sessionType || null,
+    });
+
+    if (sessionType === "auction_reserve_fee") {
+      console.info("Stripe webhook selected Reserve Commitment Fee branch:", {
+        stripeSessionId: session.id,
+      });
+      await handleAuctionReserveFeeCompleted(stripe, session, metadata);
+      console.info("Stripe webhook skipped normal sale handling for Reserve Commitment Fee:", {
+        stripeSessionId: session.id,
+      });
+      return NextResponse.json({ received: true });
+    }
+
+    if (sessionType === "auction_sale") {
+      console.info("Stripe webhook selected auction sale branch:", {
+        stripeSessionId: session.id,
+      });
+      await handleCheckoutSessionCompleted(stripe, session, metadata);
+      return NextResponse.json({ received: true });
+    }
+
+    if (sessionType === "fixed_price_sale") {
+      console.info("Stripe webhook selected fixed-price sale branch:", {
+        stripeSessionId: session.id,
+      });
+      await handleCheckoutSessionCompleted(stripe, session, metadata);
+      return NextResponse.json({ received: true });
+    }
+
+    if (sessionType) {
+      console.info("Stripe webhook ignored unsupported checkout session type:", {
+        stripeSessionId: session.id,
+        sessionType,
+      });
+      return NextResponse.json({ received: true });
+    }
+
+    console.info("Stripe webhook ignored checkout.session.completed with missing metadata type:", {
+      stripeSessionId: session.id,
+    });
     return NextResponse.json({ received: true });
   } catch (error) {
     console.error("Stripe webhook handling error:", error);

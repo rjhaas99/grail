@@ -17,6 +17,7 @@ type CheckoutListing = {
   card_number: string | null;
   price: number | null;
   status: string | null;
+  sale_format?: string | null;
 };
 
 function buildListingTitle(listing: CheckoutListing) {
@@ -81,7 +82,8 @@ export async function POST(request: Request) {
           brand,
           card_number,
           price,
-          status
+          status,
+          sale_format
         `,
       )
       .eq("id", listingId)
@@ -100,10 +102,18 @@ export async function POST(request: Request) {
 
     const listing = data as CheckoutListing;
     const price = Number(listing.price || 0);
+    const saleFormat = listing.sale_format || "fixed";
 
     if (listing.status !== "active") {
       return NextResponse.json(
         { error: "This card is open to offers, not Buy Now." },
+        { status: 400 },
+      );
+    }
+
+    if (saleFormat === "auction") {
+      return NextResponse.json(
+        { error: "Auction listings use winner checkout, not Buy Now." },
         { status: 400 },
       );
     }
@@ -144,6 +154,13 @@ export async function POST(request: Request) {
     const stripe = new Stripe(stripeSecretKey);
     const title = buildListingTitle(listing);
     const unitAmount = Math.round(price * 100);
+    const stripeMetadata = {
+      type: "fixed_price_sale",
+      listingId: listing.id,
+      sellerId: listing.seller_id || "",
+      buyerId,
+      source: "grail",
+    };
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -162,11 +179,9 @@ export async function POST(request: Request) {
       client_reference_id: buyerId || undefined,
       success_url: `${siteUrl}/checkout/${listing.id}?success=true&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteUrl}/checkout/${listing.id}?canceled=true`,
-      metadata: {
-        listingId: listing.id,
-        sellerId: listing.seller_id || "",
-        buyerId,
-        source: "grail",
+      metadata: stripeMetadata,
+      payment_intent_data: {
+        metadata: stripeMetadata,
       },
     });
 

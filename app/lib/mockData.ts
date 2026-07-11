@@ -1,4 +1,11 @@
-export type ListingTag = "Graded" | "Raw" | "Hot" | "Grail" | "Collection" | "Sold";
+export type ListingTag =
+  | "Graded"
+  | "Raw"
+  | "Hot"
+  | "Grail"
+  | "Collection"
+  | "Sold"
+  | "Auction";
 export type CardCategory = "Sports" | "TCG";
 export type OfferStatus =
   | "Pending"

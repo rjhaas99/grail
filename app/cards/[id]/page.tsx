@@ -34,6 +34,10 @@ const reportReasons = [
 
 type PhotoView = (typeof photoViews)[number];
 type ReportReason = (typeof reportReasons)[number];
+type PublishStatus = {
+  type: "success" | "error" | "info";
+  text: string;
+};
 type MockCard = MockListing & {
   imageUrls?: Partial<Record<PhotoView, string>>;
   sellerId?: string | null;
@@ -50,6 +54,17 @@ type MockCard = MockListing & {
   sportsCardsProPriceField?: string | null;
   sportsCardsProSourceUrl?: string | null;
   sportsCardsProFetchedAt?: string | null;
+  saleFormat?: "fixed" | "auction";
+  auctionStatus?: string | null;
+  auctionStartsAt?: string | null;
+  auctionEndsAt?: string | null;
+  auctionStartingBid?: number | null;
+  auctionCurrentBid?: number | null;
+  auctionBidCount?: number | null;
+  auctionReserveMetAt?: string | null;
+  auctionWinnerId?: string | null;
+  auctionPaymentDueAt?: string | null;
+  reserveFeeStatus?: string | null;
 };
 
 type LocalMockOffer = {
@@ -102,6 +117,17 @@ type SupabaseListingRow = {
   sportscardspro_price_field?: string | null;
   sportscardspro_source_url?: string | null;
   sportscardspro_fetched_at?: string | null;
+  sale_format?: string | null;
+  auction_status?: string | null;
+  auction_starts_at?: string | null;
+  auction_ends_at?: string | null;
+  auction_starting_bid?: number | null;
+  auction_current_bid?: number | null;
+  auction_bid_count?: number | null;
+  auction_reserve_met_at?: string | null;
+  auction_winner_id?: string | null;
+  auction_payment_due_at?: string | null;
+  reserve_fee_status?: string | null;
   created_at: string | null;
   listing_images: ListingImageRow[] | null;
 };
@@ -138,6 +164,83 @@ function formatCurrency(value: number) {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function formatCurrencyWithCents(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value || 0);
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) {
+    return "Not set";
+  }
+
+  return new Date(value).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatTimeRemaining(value?: string | null) {
+  if (!value) {
+    return "Ending time not set";
+  }
+
+  const remaining = new Date(value).getTime() - Date.now();
+
+  if (remaining <= 0) {
+    return "Auction ended";
+  }
+
+  const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
+  const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+  const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+
+  if (days > 0) {
+    return `${days}d ${hours}h remaining`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m remaining`;
+  }
+
+  return `${Math.max(minutes, 1)}m remaining`;
+}
+
+function getBidIncrement(currentBid: number) {
+  if (currentBid < 100) return 1;
+  if (currentBid < 500) return 5;
+  if (currentBid < 1000) return 10;
+  if (currentBid < 5000) return 25;
+  return 50;
+}
+
+function getMinimumNextBid(card: MockCard) {
+  const currentBid = Number(card.auctionCurrentBid || 0);
+
+  if (currentBid > 0) {
+    return currentBid + getBidIncrement(currentBid);
+  }
+
+  return Math.max(Number(card.auctionStartingBid || 0), 0.99);
+}
+
+function getAuctionReserveStatus(card: MockCard) {
+  const hasReserve = card.reserveFeeStatus && card.reserveFeeStatus !== "none";
+
+  if (!hasReserve) {
+    return "No Reserve";
+  }
+
+  return card.auctionReserveMetAt ? "Reserve Met" : "Reserve Not Met";
 }
 
 function readLocalMockOffers() {
@@ -343,6 +446,7 @@ function mapSupabaseCard(
   const condition = getConditionDisplay(listing);
   const price = Number(listing.price || 0);
   const status = listing.status?.toLowerCase() || "";
+  const isAuction = listing.sale_format === "auction";
   const isSold = status === "sold";
   const soldPrice = isSold
     ? Number(order?.card_price || order?.total_amount || listing.price || 0)
@@ -364,7 +468,17 @@ function mapSupabaseCard(
   const sellerName = profile?.full_name || profile?.username || "GRAIL Seller";
   const isGraded = Boolean(listing.grader && listing.grade) ||
     listing.card_type?.toLowerCase() === "graded";
-  const tag = isSold ? "Sold" : isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw";
+  const auctionCurrentBid = Number(listing.auction_current_bid || 0);
+  const auctionStartingBid = Number(listing.auction_starting_bid || 0);
+  const tag = isSold
+    ? "Sold"
+    : isAuction
+      ? "Auction"
+      : isCollectionOnly
+        ? "Collection"
+        : isGraded
+          ? "Graded"
+          : "Raw";
   const route = `/cards/${listing.id}`;
   const title =
     listing.title ||
@@ -399,17 +513,21 @@ function mapSupabaseCard(
       sellerLevel: "GRAIL Seller",
       sellerRoute: `/collections/${sellerSlug}`,
       sellerHref: `/collections/${sellerSlug}`,
-      price: displayPrice,
+      price: isAuction ? auctionCurrentBid || auctionStartingBid : displayPrice,
       priceDisplay: isSold
         ? soldPrice
           ? `Sold · ${formatCurrency(soldPrice)}`
           : "Sold"
+        : isAuction
+        ? auctionCurrentBid
+          ? `Current Bid ${formatCurrencyWithCents(auctionCurrentBid)}`
+          : `Starting Bid ${formatCurrencyWithCents(auctionStartingBid)}`
         : isCollectionOnly
         ? "Open to Offers"
         : price
           ? formatCurrency(price)
           : "Price not listed",
-      askingPrice: displayPrice,
+      askingPrice: isAuction ? auctionCurrentBid || auctionStartingBid : displayPrice,
       marketValue: estimatedMarketValue,
       minimumOffer: offerBasis ? Math.round(offerBasis * 0.85) : 0,
       minOffer: offerBasis ? Math.round(offerBasis * 0.85) : 0,
@@ -457,6 +575,17 @@ function mapSupabaseCard(
       sportsCardsProPriceField: listing.sportscardspro_price_field,
       sportsCardsProSourceUrl: listing.sportscardspro_source_url,
       sportsCardsProFetchedAt: listing.sportscardspro_fetched_at,
+      saleFormat: isAuction ? "auction" : "fixed",
+      auctionStatus: listing.auction_status,
+      auctionStartsAt: listing.auction_starts_at,
+      auctionEndsAt: listing.auction_ends_at,
+      auctionStartingBid,
+      auctionCurrentBid,
+      auctionBidCount: listing.auction_bid_count || 0,
+      auctionReserveMetAt: listing.auction_reserve_met_at,
+      auctionWinnerId: listing.auction_winner_id,
+      auctionPaymentDueAt: listing.auction_payment_due_at,
+      reserveFeeStatus: listing.reserve_fee_status,
       priceHistory: {
         thirtyDay: "N/A",
         ninetyDay: "N/A",
@@ -630,6 +759,10 @@ export default function CardDetailPage() {
   const [reportError, setReportError] = useState("");
   const [reportSuccess, setReportSuccess] = useState(false);
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [bidAmount, setBidAmount] = useState("");
+  const [bidStatus, setBidStatus] = useState<PublishStatus | null>(null);
+  const [isPlacingBid, setIsPlacingBid] = useState(false);
+  const [isStartingAuctionCheckout, setIsStartingAuctionCheckout] = useState(false);
   const [ownerActionStatus, setOwnerActionStatus] = useState("");
   const card = mockCard ?? realCard;
   const availablePhotoViews: PhotoView[] = card?.imageUrls
@@ -723,6 +856,17 @@ export default function CardDetailPage() {
               sportscardspro_price_field,
               sportscardspro_source_url,
               sportscardspro_fetched_at,
+              sale_format,
+              auction_status,
+              auction_starts_at,
+              auction_ends_at,
+              auction_starting_bid,
+              auction_current_bid,
+              auction_bid_count,
+              auction_reserve_met_at,
+              auction_winner_id,
+              auction_payment_due_at,
+              reserve_fee_status,
               created_at,
               listing_images (
                 image_url,
@@ -1005,6 +1149,137 @@ export default function CardDetailPage() {
     }
   }
 
+  async function placeBid() {
+    if (!card || card.saleFormat !== "auction") {
+      return;
+    }
+
+    const amount = Number(bidAmount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setBidStatus({ type: "error", text: "Enter a valid bid amount." });
+      return;
+    }
+
+    const minimumBid = getMinimumNextBid(card);
+
+    if (amount < minimumBid) {
+      setBidStatus({
+        type: "error",
+        text: `Minimum next bid is ${formatCurrencyWithCents(minimumBid)}.`,
+      });
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setBidStatus({ type: "error", text: "Sign in to place a bid." });
+      return;
+    }
+
+    if (card.sellerId === session.user.id) {
+      setBidStatus({ type: "error", text: "You cannot bid on your own auction." });
+      return;
+    }
+
+    setIsPlacingBid(true);
+    setBidStatus(null);
+
+    try {
+      const response = await fetch(`/api/auctions/${card.id}/bid`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ amount }),
+      });
+      const payload = (await response.json()) as {
+        currentBid?: number;
+        bidCount?: number;
+        reserveStatus?: string;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Bid could not be placed.");
+      }
+
+      setRealCard((current) =>
+        current
+          ? {
+              ...current,
+              auctionCurrentBid: payload.currentBid || amount,
+              auctionBidCount: payload.bidCount ?? current.auctionBidCount,
+              auctionReserveMetAt:
+                payload.reserveStatus === "Reserve Met"
+                  ? new Date().toISOString()
+                  : current.auctionReserveMetAt,
+              price: payload.currentBid || amount,
+              askingPrice: payload.currentBid || amount,
+              priceDisplay: `Current Bid ${formatCurrencyWithCents(
+                payload.currentBid || amount,
+              )}`,
+            }
+          : current,
+      );
+      setBidAmount("");
+      setBidStatus({ type: "success", text: "Bid placed." });
+    } catch (error) {
+      console.error("Card detail auction bid error:", error);
+      setBidStatus({
+        type: "error",
+        text: error instanceof Error ? error.message : "Bid could not be placed.",
+      });
+    } finally {
+      setIsPlacingBid(false);
+    }
+  }
+
+  async function startAuctionCheckout() {
+    if (!card || card.saleFormat !== "auction") {
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setBidStatus({ type: "error", text: "Sign in to pay for this auction." });
+      return;
+    }
+
+    setIsStartingAuctionCheckout(true);
+    setBidStatus(null);
+
+    try {
+      const response = await fetch(`/api/auctions/${card.id}/checkout`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const payload = (await response.json()) as { url?: string; error?: string; detail?: string };
+
+      if (!response.ok || !payload.url) {
+        throw new Error(payload.detail || payload.error || "Auction checkout could not be started.");
+      }
+
+      window.location.href = payload.url;
+    } catch (error) {
+      console.error("Card detail auction checkout error:", error);
+      setBidStatus({
+        type: "error",
+        text: error instanceof Error ? error.message : "Auction checkout could not be started.",
+      });
+      setIsStartingAuctionCheckout(false);
+    }
+  }
+
   async function submitMessage() {
     if (!card) {
       return;
@@ -1202,6 +1477,15 @@ export default function CardDetailPage() {
       card.tag === "Collection" ||
       card.listingStatus?.toLowerCase() === "collection",
   );
+  const isAuction = card.saleFormat === "auction";
+  const auctionCurrentBid = Number(card.auctionCurrentBid || 0);
+  const auctionStartingBid = Number(card.auctionStartingBid || 0);
+  const auctionDisplayPrice = auctionCurrentBid || auctionStartingBid;
+  const minimumNextBid = isAuction ? getMinimumNextBid(card) : 0;
+  const auctionReserveStatus = isAuction ? getAuctionReserveStatus(card) : "";
+  const isAuctionAwaitingPayment = card.auctionStatus === "awaiting_payment";
+  const isAuctionWinner =
+    Boolean(currentUserId) && card.auctionWinnerId === currentUserId;
   const isSold = card.tag === "Sold" || card.listingStatus?.toLowerCase() === "sold";
   const soldPrice = card.soldPrice || card.askingPrice || card.price;
   const soldPriceDisplay = soldPrice > 0
@@ -1212,6 +1496,10 @@ export default function CardDetailPage() {
   );
   const salePriceDisplay = isSold
     ? soldPriceDisplay
+    : isAuction
+    ? auctionCurrentBid
+      ? `Current Bid ${formatCurrencyWithCents(auctionCurrentBid)}`
+      : `Starting Bid ${formatCurrencyWithCents(auctionStartingBid)}`
     : isCollectionOnly
     ? "Open to Offers"
     : formatCurrency(card.askingPrice);
@@ -1294,8 +1582,24 @@ export default function CardDetailPage() {
               <div className="stat-grid">
                 <DetailRow label="Market Value" value={formatCurrency(card.marketValue)} />
                 <DetailRow
-                  label={isSold ? "Sale Status" : isCollectionOnly ? "Collection Status" : "Asking Price"}
-                  value={isSold ? salePriceDisplay : isCollectionOnly ? "In Collection" : salePriceDisplay}
+                  label={
+                    isSold
+                      ? "Sale Status"
+                      : isAuction
+                        ? "Auction"
+                        : isCollectionOnly
+                          ? "Collection Status"
+                          : "Asking Price"
+                  }
+                  value={
+                    isSold
+                      ? salePriceDisplay
+                      : isAuction
+                        ? salePriceDisplay
+                        : isCollectionOnly
+                          ? "In Collection"
+                          : salePriceDisplay
+                  }
                 />
                 <DetailRow label="Watch Count" value={String(card.watchCount)} />
                 <DetailRow label="View Count" value={String(card.viewCount)} />
@@ -1307,10 +1611,25 @@ export default function CardDetailPage() {
 
           <aside className="right-column">
             <section className="purchase-panel panel">
-              <span>{isSold ? "Sold" : isCollectionOnly ? "In Collection" : "Asking Price"}</span>
+              <span>
+                {isSold
+                  ? "Sold"
+                  : isAuction
+                    ? card.auctionStatus === "awaiting_payment"
+                      ? "Awaiting Payment"
+                      : "Auction"
+                    : isCollectionOnly
+                      ? "In Collection"
+                      : "Asking Price"}
+              </span>
               <strong>{salePriceDisplay}</strong>
               {isSold ? (
                 <p>This card has sold. Card details and images remain available for reference.</p>
+              ) : isAuction ? (
+                <p>
+                  {formatTimeRemaining(card.auctionEndsAt)} · {auctionReserveStatus} ·{" "}
+                  {card.auctionBidCount || 0} bids
+                </p>
               ) : isCollectionOnly ? (
                 <p>
                   This card is in the seller&apos;s collection. The seller is
@@ -1364,6 +1683,13 @@ export default function CardDetailPage() {
                       <Link href="/seller-dashboard">
                         View in Seller Dashboard
                       </Link>
+                    ) : isAuction ? (
+                      <>
+                        <Link className="buy-button" href="/seller-dashboard">
+                          Manage Auction
+                        </Link>
+                        <Link href={`/cards/${card.id}`}>View Auction</Link>
+                      </>
                     ) : isCollectionOnly ? (
                       <>
                         <Link className="buy-button" href={`/list?edit=${card.id}`}>
@@ -1394,32 +1720,91 @@ export default function CardDetailPage() {
                 </>
               ) : (
                 <>
-                  <div className="purchase-buttons">
-                    {!isCollectionOnly && !isSold ? (
-                      <Link className="buy-button" href={`/checkout/${card.id}`}>
-                        Buy Now
-                      </Link>
-                    ) : null}
-                    {!isSold ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsOfferOpen(true);
-                          setOfferAmount("");
-                          setOfferMessage("");
-                          setOfferError("");
-                          setSentOfferAmount(null);
-                        }}
-                      >
-                        Make Offer
+                  {isAuction ? (
+                    <div className="auction-bid-panel">
+                      <div className="auction-detail-grid">
+                        <span>
+                          Current bid{" "}
+                          <strong>{formatCurrencyWithCents(auctionDisplayPrice)}</strong>
+                        </span>
+                        <span>
+                          Minimum next bid{" "}
+                          <strong>{formatCurrencyWithCents(minimumNextBid)}</strong>
+                        </span>
+                        <span>
+                          Ends <strong>{formatDateTime(card.auctionEndsAt)}</strong>
+                        </span>
+                        <span>
+                          Reserve <strong>{auctionReserveStatus}</strong>
+                        </span>
+                      </div>
+                      {isAuctionAwaitingPayment && isAuctionWinner ? (
+                        <button
+                          type="button"
+                          className="buy-button"
+                          disabled={isStartingAuctionCheckout}
+                          onClick={() => void startAuctionCheckout()}
+                        >
+                          {isStartingAuctionCheckout ? "Opening Checkout..." : "Complete Payment"}
+                        </button>
+                      ) : card.auctionStatus === "active" ? (
+                        <>
+                          <label className="auction-bid-field">
+                            <span>Your bid</span>
+                            <input
+                              value={bidAmount}
+                              inputMode="decimal"
+                              placeholder={formatCurrencyWithCents(minimumNextBid)}
+                              onChange={(event) => setBidAmount(event.target.value)}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="buy-button"
+                            disabled={isPlacingBid}
+                            onClick={() => void placeBid()}
+                          >
+                            {isPlacingBid ? "Placing Bid..." : "Place Bid"}
+                          </button>
+                        </>
+                      ) : (
+                        <p className="offer-note">Auction Ended.</p>
+                      )}
+                      {bidStatus ? (
+                        <p className={`bid-status ${bidStatus.type}`}>{bidStatus.text}</p>
+                      ) : null}
+                      <button type="button" onClick={openMessageModal}>
+                        Message Seller
                       </button>
-                    ) : null}
-                    <button type="button" onClick={openMessageModal}>
-                      Message Seller
-                    </button>
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="purchase-buttons">
+                      {!isCollectionOnly && !isSold ? (
+                        <Link className="buy-button" href={`/checkout/${card.id}`}>
+                          Buy Now
+                        </Link>
+                      ) : null}
+                      {!isSold ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsOfferOpen(true);
+                            setOfferAmount("");
+                            setOfferMessage("");
+                            setOfferError("");
+                            setSentOfferAmount(null);
+                          }}
+                        >
+                          Make Offer
+                        </button>
+                      ) : null}
+                      <button type="button" onClick={openMessageModal}>
+                        Message Seller
+                      </button>
+                    </div>
+                  )}
 
-                  {!isSold ? (
+                  {!isSold && !isAuction ? (
                     <p className="offer-note">
                       Minimum offer: {minimumOfferDisplay}
                     </p>
@@ -2364,6 +2749,13 @@ const pageStyles = `
     box-shadow: 0 0 18px rgba(244,63,94,0.08);
   }
 
+  .tag-auction {
+    border-color: rgba(231,222,208,0.52);
+    background: rgba(231,222,208,0.095);
+    color: #E7DED0;
+    box-shadow: 0 0 18px rgba(201,205,211,0.12);
+  }
+
   .stat-grid,
   .history-grid {
     margin-top: 16px;
@@ -2462,8 +2854,81 @@ const pageStyles = `
     gap: 10px;
   }
 
+  .auction-bid-panel {
+    margin-top: 16px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .auction-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .auction-detail-grid span {
+    border: 1px solid rgba(201,205,211,0.14);
+    border-radius: 9px;
+    background: rgba(201,205,211,0.045);
+    color: #a1a1aa;
+    padding: 9px;
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: 800;
+  }
+
+  .auction-detail-grid strong {
+    margin-top: 4px;
+    color: #fff;
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .auction-bid-field {
+    display: grid;
+    gap: 7px;
+  }
+
+  .auction-bid-field span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .auction-bid-field input {
+    border: 1px solid #24242a;
+    border-radius: 10px;
+    background: #08080a;
+    color: #fff;
+    min-height: 42px;
+    padding: 0 12px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    outline: none;
+  }
+
+  .bid-status {
+    margin: 0;
+    border: 1px solid rgba(201,205,211,0.18);
+    border-radius: 9px;
+    background: rgba(201,205,211,0.055);
+    padding: 9px;
+  }
+
+  .bid-status.success {
+    color: #E7DED0;
+  }
+
+  .bid-status.error {
+    color: #fca5a5;
+  }
+
   .purchase-buttons button,
   .purchase-buttons a,
+  .auction-bid-panel button,
   .offer-modal-actions button,
   .offer-modal-actions a {
     height: 44px;
@@ -2485,8 +2950,14 @@ const pageStyles = `
     color: #111;
   }
 
+  .auction-bid-panel .buy-button {
+    background: #E7DED0;
+    color: #111;
+  }
+
   .purchase-buttons button:hover,
   .purchase-buttons a:hover,
+  .auction-bid-panel button:hover,
   .offer-modal-actions button:hover {
     border-color: rgba(231,222,208,0.62);
     box-shadow: 0 0 20px rgba(201,205,211,0.14);

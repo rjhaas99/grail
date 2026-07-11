@@ -80,6 +80,19 @@ type PayoutStatus = {
   requirementsCount?: number;
   disabledReason?: string | null;
 };
+type AuctionDashboardListing = {
+  id: string;
+  title: string;
+  auctionStatus: string;
+  status: string;
+  currentBid: number;
+  startingBid: number;
+  bidCount: number;
+  endsAt?: string | null;
+  reserveStatus: string;
+  reserveFeeStatus: string;
+  href: string;
+};
 
 const listings = mockSellerDashboardData.activeListings;
 const initialOffers = mockSellerDashboardData.incomingOffers.map((offer) => ({
@@ -176,6 +189,34 @@ function formatDateTime(value?: string | null) {
   });
 }
 
+function formatAuctionTime(value?: string | null) {
+  if (!value) {
+    return "No end time";
+  }
+
+  const remaining = new Date(value).getTime() - Date.now();
+
+  if (remaining <= 0) {
+    return `Ended ${formatDateTime(value)}`;
+  }
+
+  const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
+  const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+
+  return days > 0 ? `${days}d ${hours}h remaining` : `${Math.max(hours, 1)}h remaining`;
+}
+
+function getAuctionReserveStatus(row: {
+  reserve_fee_status?: string | null;
+  auction_reserve_met_at?: string | null;
+}) {
+  if (!row.reserve_fee_status || row.reserve_fee_status === "none") {
+    return "No Reserve";
+  }
+
+  return row.auction_reserve_met_at ? "Reserve Met" : "Reserve Not Met";
+}
+
 function hasInspectionPassed(value?: string | null) {
   return Boolean(value && new Date(value).getTime() <= Date.now());
 }
@@ -260,6 +301,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
 export default function SellerDashboardPage() {
   const [offers, setOffers] = useState(initialOffers);
   const [orders, setOrders] = useState<DashboardOrder[]>(initialOrders);
+  const [auctionListings, setAuctionListings] = useState<AuctionDashboardListing[]>([]);
   const [payoutStatus, setPayoutStatus] = useState<PayoutStatus | null>(null);
   const [isLoadingPayoutStatus, setIsLoadingPayoutStatus] = useState(true);
   const [isStartingPayouts, setIsStartingPayouts] = useState(false);
@@ -404,6 +446,61 @@ export default function SellerDashboardPage() {
     }
 
     loadSellerOrders();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSellerAuctions() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.user.id) {
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("listings")
+        .select(
+          "id, title, status, auction_status, auction_ends_at, auction_starting_bid, auction_current_bid, auction_bid_count, auction_reserve_met_at, reserve_fee_status",
+        )
+        .eq("seller_id", session.user.id)
+        .eq("sale_format", "auction")
+        .order("created_at", { ascending: false })
+        .limit(25);
+
+      if (error) {
+        console.error("Seller dashboard auction fetch error:", error);
+        return;
+      }
+
+      if (!isMounted) {
+        return;
+      }
+
+      setAuctionListings(
+        (data || []).map((listing) => ({
+          id: listing.id,
+          title: listing.title || "GRAIL Auction",
+          status: listing.status || "unknown",
+          auctionStatus: listing.auction_status || "unknown",
+          currentBid: Number(listing.auction_current_bid || 0),
+          startingBid: Number(listing.auction_starting_bid || 0),
+          bidCount: Number(listing.auction_bid_count || 0),
+          endsAt: listing.auction_ends_at,
+          reserveStatus: getAuctionReserveStatus(listing),
+          reserveFeeStatus: listing.reserve_fee_status || "none",
+          href: `/cards/${listing.id}`,
+        })),
+      );
+    }
+
+    loadSellerAuctions();
 
     return () => {
       isMounted = false;
@@ -885,6 +982,43 @@ export default function SellerDashboardPage() {
                     </div>
                   </article>
                 ))}
+              </div>
+            </section>
+
+            <section className="panel dashboard-section">
+              <div className="section-heading">
+                <h2>Auctions</h2>
+                <Link href="/list">Create Auction</Link>
+              </div>
+              <div className="table-list">
+                {auctionListings.length > 0 ? (
+                  auctionListings.map((auction) => (
+                    <article key={auction.id} className="table-row listing-row auction-row">
+                      <div>
+                        <strong>{auction.title}</strong>
+                        <span>{auction.auctionStatus.replace(/_/g, " ")}</span>
+                      </div>
+                      <span>
+                        {formatCurrency(auction.currentBid || auction.startingBid)}
+                      </span>
+                      <span>{auction.bidCount} bids</span>
+                      <span>{auction.reserveStatus}</span>
+                      <span>{formatAuctionTime(auction.endsAt)}</span>
+                      <span>Commitment Fee {auction.reserveFeeStatus}</span>
+                      <div className="row-actions">
+                        <Link href={auction.href}>View Auction</Link>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <article className="table-row listing-row">
+                    <div>
+                      <strong>No auctions yet.</strong>
+                      <span>Create an auction from the List page.</span>
+                    </div>
+                    <Link href="/list">Create Auction</Link>
+                  </article>
+                )}
               </div>
             </section>
 

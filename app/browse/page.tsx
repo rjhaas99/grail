@@ -20,6 +20,14 @@ type BrowseListing = MockListing & {
   sportsCardsProEstimatedValue?: number | null;
   sportsCardsProSourceUrl?: string | null;
   valueBadge?: ListingValueBadge | null;
+  saleFormat?: "fixed" | "auction";
+  auctionStatus?: string | null;
+  auctionEndsAt?: string | null;
+  auctionStartingBid?: number | null;
+  auctionCurrentBid?: number | null;
+  auctionBidCount?: number | null;
+  auctionReserveMetAt?: string | null;
+  reserveFeeStatus?: string | null;
   source: "supabase" | "mock";
 };
 
@@ -30,7 +38,20 @@ type BrowseSortMode =
   | "closest-to-market"
   | "highest-premium"
   | "price-low-high"
-  | "price-high-low";
+  | "price-high-low"
+  | "ending-soon"
+  | "newest-auctions"
+  | "most-bids"
+  | "lowest-current-bid"
+  | "highest-current-bid";
+
+type AuctionFilter =
+  | "Fixed Price"
+  | "Auction"
+  | "Ending Soon"
+  | "Newly Listed Auctions"
+  | "Reserve Met"
+  | "No Reserve";
 
 type ListingValueClass = "value" | "fair" | "premium";
 
@@ -83,6 +104,14 @@ type SupabaseListingRow = {
   estimated_value?: number | null;
   sportscardspro_estimated_value?: number | null;
   sportscardspro_source_url?: string | null;
+  sale_format?: string | null;
+  auction_status?: string | null;
+  auction_ends_at?: string | null;
+  auction_starting_bid?: number | null;
+  auction_current_bid?: number | null;
+  auction_bid_count?: number | null;
+  auction_reserve_met_at?: string | null;
+  reserve_fee_status?: string | null;
   listing_images: ListingImageRow[] | null;
 };
 
@@ -156,11 +185,25 @@ const gradeCompanies = ["PSA", "BGS", "CGC", "SGC", "Other"];
 
 const sortOptions: { value: BrowseSortMode; label: string }[] = [
   { value: "newest", label: "Newly Listed" },
+  { value: "ending-soon", label: "Ending Soon" },
+  { value: "newest-auctions", label: "Newly Listed Auctions" },
+  { value: "most-bids", label: "Most Bids" },
+  { value: "lowest-current-bid", label: "Lowest Current Bid" },
+  { value: "highest-current-bid", label: "Highest Current Bid" },
   { value: "best-value", label: "Best Value" },
   { value: "closest-to-market", label: "Closest to Market" },
   { value: "highest-premium", label: "Highest Premium" },
   { value: "price-low-high", label: "Price: Low to High" },
   { value: "price-high-low", label: "Price: High to Low" },
+];
+
+const auctionFilters: AuctionFilter[] = [
+  "Fixed Price",
+  "Auction",
+  "Ending Soon",
+  "Newly Listed Auctions",
+  "Reserve Met",
+  "No Reserve",
 ];
 
 const psaGradeOptions = [
@@ -347,6 +390,43 @@ function formatListedDate(value: string | null) {
   });
 }
 
+function formatTimeRemaining(value?: string | null) {
+  if (!value) {
+    return "Ending time not set";
+  }
+
+  const remaining = new Date(value).getTime() - Date.now();
+
+  if (remaining <= 0) {
+    return "Auction ended";
+  }
+
+  const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
+  const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+
+  if (days > 0) {
+    return `${days}d ${hours}h left`;
+  }
+
+  return `${Math.max(hours, 1)}h left`;
+}
+
+function getAuctionReserveStatus(listing: BrowseListing | SupabaseListingRow) {
+  const mappedListing = listing as BrowseListing;
+  const rowListing = listing as SupabaseListingRow;
+  const reserveFeeStatus =
+    mappedListing.reserveFeeStatus ?? rowListing.reserve_fee_status;
+  const reserveMetAt =
+    mappedListing.auctionReserveMetAt ?? rowListing.auction_reserve_met_at;
+  const hasReserve = reserveFeeStatus && reserveFeeStatus !== "none";
+
+  if (!hasReserve) {
+    return "No Reserve";
+  }
+
+  return reserveMetAt ? "Reserve Met" : "Reserve Not Met";
+}
+
 function getImageUrl(listing: SupabaseListingRow) {
   return (
     listing.listing_images?.find((image) => image.image_type === "front")
@@ -471,12 +551,16 @@ function mapSupabaseListing(
     "Untitled Card";
   const price = Number(listing.price || 0);
   const status = listing.status?.toLowerCase() || "";
+  const isAuction = listing.sale_format === "auction";
+  const auctionCurrentBid = Number(listing.auction_current_bid || 0);
+  const auctionStartingBid = Number(listing.auction_starting_bid || 0);
+  const auctionDisplayPrice = auctionCurrentBid || auctionStartingBid;
   const isCollectionOnly =
     status !== "active" &&
     (status === "collection" ||
       Boolean(listing.is_collection_card) ||
       Boolean(listing.is_public_collection));
-  const displayPrice = isCollectionOnly ? 0 : price;
+  const displayPrice = isAuction ? auctionDisplayPrice : isCollectionOnly ? 0 : price;
   const savedMarketValue = getSavedMarketValue(listing);
   const sellerName = profile?.full_name || profile?.username || "GRAIL Seller";
   const sellerSlug = getSellerSlug(profile, listing.seller_id);
@@ -504,7 +588,11 @@ function mapSupabaseListing(
     sellerRoute: `/collections/${sellerSlug}`,
     sellerHref: `/collections/${sellerSlug}`,
     price: displayPrice,
-    priceDisplay: isCollectionOnly
+    priceDisplay: isAuction
+      ? auctionCurrentBid
+        ? `Current Bid ${formatCurrency(auctionCurrentBid)}`
+        : `Starting Bid ${formatCurrency(auctionStartingBid)}`
+      : isCollectionOnly
       ? "Open to Offers"
       : price
         ? formatCurrency(price)
@@ -521,8 +609,8 @@ function mapSupabaseListing(
     viewCount: 0,
     listedOrder: totalCount - index,
     listedDate: formatListedDate(listing.created_at),
-    tags: [isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw"],
-    tag: isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw",
+    tags: [isAuction ? "Auction" : isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw"],
+    tag: isAuction ? "Auction" : isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw",
     isGraded,
     isRaw,
     isHot: false,
@@ -533,6 +621,14 @@ function mapSupabaseListing(
     artworkTone: "live listing",
     imageUrl: getImageUrl(listing),
     createdAt: listing.created_at,
+    saleFormat: isAuction ? "auction" : "fixed",
+    auctionStatus: listing.auction_status,
+    auctionEndsAt: listing.auction_ends_at,
+    auctionStartingBid,
+    auctionCurrentBid,
+    auctionBidCount: listing.auction_bid_count || 0,
+    auctionReserveMetAt: listing.auction_reserve_met_at,
+    reserveFeeStatus: listing.reserve_fee_status,
     source: "supabase",
     cardDetailRoute: route,
     sellerCollectionRoute: `/collections/${sellerSlug}`,
@@ -662,6 +758,32 @@ function matchesCategoryFilter(listing: BrowseListing, filter: string) {
   if (filter === "Slabs") return listing.isGraded;
   if (filter === "Raw Cards") return listing.isRaw;
   if (filter === "Grail Cards") return listing.isGrail;
+
+  return true;
+}
+
+function matchesAuctionFilter(listing: BrowseListing, filter: AuctionFilter) {
+  const isAuction = listing.saleFormat === "auction";
+
+  if (filter === "Fixed Price") return !isAuction;
+  if (filter === "Auction") return isAuction;
+  if (filter === "Ending Soon") {
+    return (
+      isAuction &&
+      Boolean(listing.auctionEndsAt) &&
+      new Date(listing.auctionEndsAt || 0).getTime() <=
+        Date.now() + 24 * 60 * 60 * 1000
+    );
+  }
+  if (filter === "Newly Listed Auctions") {
+    return isAuction && isWithinLastWeek(listing.createdAt);
+  }
+  if (filter === "Reserve Met") {
+    return isAuction && getAuctionReserveStatus(listing) === "Reserve Met";
+  }
+  if (filter === "No Reserve") {
+    return isAuction && getAuctionReserveStatus(listing) === "No Reserve";
+  }
 
   return true;
 }
@@ -974,6 +1096,7 @@ function BrowseContent() {
   const [openGraders, setOpenGraders] = useState<string[]>(["PSA"]);
   const [selectedCategoryFilters, setSelectedCategoryFilters] = useState<string[]>([]);
   const [selectedPriceFilters, setSelectedPriceFilters] = useState<string[]>([]);
+  const [selectedAuctionFilters, setSelectedAuctionFilters] = useState<AuctionFilter[]>([]);
   const [selectedGradeOptions, setSelectedGradeOptions] = useState<string[]>([]);
   const [rawSelected, setRawSelected] = useState(false);
   const [newListingsOnly, setNewListingsOnly] = useState(false);
@@ -1055,6 +1178,14 @@ function BrowseContent() {
               estimated_value,
               sportscardspro_estimated_value,
               sportscardspro_source_url,
+              sale_format,
+              auction_status,
+              auction_ends_at,
+              auction_starting_bid,
+              auction_current_bid,
+              auction_bid_count,
+              auction_reserve_met_at,
+              reserve_fee_status,
               listing_images (
                 image_url,
                 image_type
@@ -1200,6 +1331,7 @@ function BrowseContent() {
     Boolean(normalizedQuery) ||
     selectedCategoryFilters.length > 0 ||
     selectedPriceFilters.length > 0 ||
+    selectedAuctionFilters.length > 0 ||
     selectedGradeOptions.length > 0 ||
     rawSelected ||
     newListingsOnly ||
@@ -1235,6 +1367,15 @@ function BrowseContent() {
             selectedPriceFilters.length > 0 &&
             !selectedPriceFilters.some((filter) =>
               matchesPriceFilter(listing.price, filter),
+            )
+          ) {
+            return false;
+          }
+
+          if (
+            selectedAuctionFilters.length > 0 &&
+            !selectedAuctionFilters.some((filter) =>
+              matchesAuctionFilter(listing, filter),
             )
           ) {
             return false;
@@ -1315,6 +1456,36 @@ function BrowseContent() {
             return second.price - first.price;
           }
 
+          if (sortMode === "ending-soon") {
+            if (first.saleFormat === "auction" && second.saleFormat !== "auction") return -1;
+            if (first.saleFormat !== "auction" && second.saleFormat === "auction") return 1;
+            return (
+              new Date(first.auctionEndsAt || "9999-12-31").getTime() -
+              new Date(second.auctionEndsAt || "9999-12-31").getTime()
+            );
+          }
+
+          if (sortMode === "newest-auctions") {
+            if (first.saleFormat === "auction" && second.saleFormat !== "auction") return -1;
+            if (first.saleFormat !== "auction" && second.saleFormat === "auction") return 1;
+            return (
+              new Date(second.createdAt || 0).getTime() -
+              new Date(first.createdAt || 0).getTime()
+            );
+          }
+
+          if (sortMode === "most-bids") {
+            return Number(second.auctionBidCount || 0) - Number(first.auctionBidCount || 0);
+          }
+
+          if (sortMode === "lowest-current-bid") {
+            return first.price - second.price;
+          }
+
+          if (sortMode === "highest-current-bid") {
+            return second.price - first.price;
+          }
+
           return second.listedOrder - first.listedOrder;
         }),
     [
@@ -1324,6 +1495,7 @@ function BrowseContent() {
       normalizedQuery,
       rawSelected,
       selectedCategoryFilters,
+      selectedAuctionFilters,
       selectedGradeOptions,
       selectedPriceFilters,
       sellerListingCounts,
@@ -1359,6 +1531,7 @@ function BrowseContent() {
     setLocalSearchQuery("");
     setSelectedCategoryFilters([]);
     setSelectedPriceFilters([]);
+    setSelectedAuctionFilters([]);
     setSelectedGradeOptions([]);
     setRawSelected(false);
     setNewListingsOnly(false);
@@ -1376,6 +1549,15 @@ function BrowseContent() {
 
   function toggleGradeFilter(grader: string, grade: string) {
     toggleStringFilter(`${grader}:${grade}`, setSelectedGradeOptions);
+  }
+
+  function toggleAuctionFilter(filter: string) {
+    const auctionFilter = filter as AuctionFilter;
+    setSelectedAuctionFilters((current) =>
+      current.includes(auctionFilter)
+        ? current.filter((item) => item !== auctionFilter)
+        : [...current, auctionFilter],
+    );
   }
 
   function openOfferModal(listing: BrowseListing) {
@@ -2519,6 +2701,12 @@ function BrowseContent() {
             color: #C9CDD3;
           }
 
+          .badge-auction {
+            border-color: rgba(231,222,208,0.5);
+            background: rgba(231,222,208,0.095);
+            color: #E7DED0;
+          }
+
           .value-badge {
             min-height: 22px;
             border: 1px solid rgba(201,205,211,0.26);
@@ -2591,6 +2779,14 @@ function BrowseContent() {
             font-size: 12px;
             line-height: 16px;
             font-weight: 700;
+          }
+
+          .auction-card-meta {
+            margin: -3px 0 0;
+            color: #C9CDD3;
+            font-size: 11px;
+            line-height: 15px;
+            font-weight: 900;
           }
 
           .seller-line {
@@ -3224,6 +3420,12 @@ function BrowseContent() {
                 toggleStringFilter(option, setSelectedPriceFilters)
               }
             />
+            <FilterGroup
+              title="Auctions"
+              options={auctionFilters}
+              selectedOptions={selectedAuctionFilters}
+              onToggleOption={toggleAuctionFilter}
+            />
             <GradeFilters
               openGraders={openGraders}
               onToggle={toggleGrader}
@@ -3258,6 +3460,7 @@ function BrowseContent() {
                   const isOwnerListing =
                     Boolean(currentUserId) && listing.sellerId === currentUserId;
                   const isCollectionOnly = tag === "Collection" || listing.isCollectionOnly;
+                  const isAuction = listing.saleFormat === "auction";
                   const canUseBuyerActions = !isOwnerListing;
 
                   return (
@@ -3300,6 +3503,13 @@ function BrowseContent() {
                       <p className="listing-meta">
                         {listing.meta}
                       </p>
+                      {isAuction ? (
+                        <p className="auction-card-meta">
+                          {formatTimeRemaining(listing.auctionEndsAt)} ·{" "}
+                          {listing.auctionBidCount || 0} bids ·{" "}
+                          {getAuctionReserveStatus(listing)}
+                        </p>
+                      ) : null}
                       <p className="seller-line">
                         Seller:{" "}
                         <Link className="seller-link" href={listing.sellerHref}>
@@ -3316,7 +3526,7 @@ function BrowseContent() {
                             <p className="owner-note">This is your listing.</p>
                           ) : canUseBuyerActions ? (
                             <div className="action-circles">
-                              {!isCollectionOnly ? (
+                              {!isCollectionOnly && !isAuction ? (
                                 <Link
                                   href={`/checkout/${listing.id}`}
                                   className="action-button"
@@ -3341,17 +3551,19 @@ function BrowseContent() {
                                   aria-hidden="true"
                                 />
                               </button>
-                              <button
-                                type="button"
-                                className="action-button"
-                                aria-label={`Make offer on ${listing.title}`}
-                                title="Make Offer"
-                                onClick={() => openOfferModal(listing)}
-                              >
-                                <span className="action-icon" aria-hidden="true">
-                                  $
-                                </span>
-                              </button>
+                              {!isAuction ? (
+                                <button
+                                  type="button"
+                                  className="action-button"
+                                  aria-label={`Make offer on ${listing.title}`}
+                                  title="Make Offer"
+                                  onClick={() => openOfferModal(listing)}
+                                >
+                                  <span className="action-icon" aria-hidden="true">
+                                    $
+                                  </span>
+                                </button>
+                              ) : null}
                             </div>
                           ) : null}
 
