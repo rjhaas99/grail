@@ -293,7 +293,15 @@ export default function ProfilePage() {
                     <div>
                       <strong>{activity.label}</strong>
                       <span>{formatActivityDate(activity.createdAt)}</span>
-                      {activity.href ? <Link href={activity.href}>View listing</Link> : null}
+                      {activity.href ? (
+                        <Link href={activity.href}>
+                          {activity.referenceType === "listing"
+                            ? "View listing"
+                            : activity.href === "/seller-dashboard"
+                              ? "View seller dashboard"
+                              : "View orders"}
+                        </Link>
+                      ) : null}
                     </div>
                     <em>+{activity.xpAmount} XP</em>
                   </div>

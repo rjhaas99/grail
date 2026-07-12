@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSystemNotifications } from "../../../../lib/serverNotifications";
+import { awardCompletedOrderProgression } from "../../../../lib/serverProgression";
 
 export const runtime = "nodejs";
 
@@ -354,6 +355,31 @@ export async function POST(request: Request) {
           linkUrl: "/orders",
         },
       ]);
+
+      try {
+        const progressionResult = await awardCompletedOrderProgression(
+          supabase,
+          order.id,
+        );
+        console.info("Manual payout progression processed:", {
+          orderId: order.id,
+          awarded: progressionResult.awarded.map((event) => ({
+            source: event.source,
+            userId: event.userId,
+            alreadyAwarded: event.alreadyAwarded,
+          })),
+          skipped: progressionResult.skipped,
+          isAuctionSale: progressionResult.isAuctionSale,
+        });
+      } catch (progressionError) {
+        console.warn("Manual payout progression skipped:", {
+          orderId: order.id,
+          error:
+            progressionError instanceof Error
+              ? progressionError.message
+              : progressionError,
+        });
+      }
 
       return NextResponse.json({
         success: true,

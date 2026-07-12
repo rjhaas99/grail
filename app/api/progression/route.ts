@@ -287,6 +287,12 @@ async function getRecentXpActivity(
     const display = getXpSourceDisplay(source);
     const referenceType = event.reference_type || null;
     const referenceId = event.reference_id || null;
+    const orderHref =
+      referenceType === "order"
+        ? ["sell_card", "first_sale_bonus"].includes(source)
+          ? "/seller-dashboard"
+          : "/orders"
+        : null;
 
     return {
       id: event.id,
@@ -297,7 +303,9 @@ async function getRecentXpActivity(
       referenceType,
       referenceId,
       href:
-        referenceType === "listing" && referenceId ? `/cards/${referenceId}` : null,
+        referenceType === "listing" && referenceId
+          ? `/cards/${referenceId}`
+          : orderHref,
     };
   });
 }

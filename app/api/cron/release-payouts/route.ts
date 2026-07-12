@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSystemNotifications } from "../../../lib/serverNotifications";
+import { awardCompletedOrderProgression } from "../../../lib/serverProgression";
 
 export const runtime = "nodejs";
 
@@ -273,6 +274,32 @@ async function releaseEligiblePayouts(request: Request) {
           linkUrl: "/orders",
         },
       ]);
+
+      try {
+        const progressionResult = await awardCompletedOrderProgression(
+          supabase,
+          order.id,
+        );
+        console.info("Cron payout progression processed:", {
+          orderId: order.id,
+          awarded: progressionResult.awarded.map((event) => ({
+            source: event.source,
+            userId: event.userId,
+            alreadyAwarded: event.alreadyAwarded,
+          })),
+          skipped: progressionResult.skipped,
+          isAuctionSale: progressionResult.isAuctionSale,
+        });
+      } catch (progressionError) {
+        console.warn("Cron payout progression skipped:", {
+          orderId: order.id,
+          error:
+            progressionError instanceof Error
+              ? progressionError.message
+              : progressionError,
+        });
+      }
+
       results.push({ orderId: order.id, status: "paid", detail: transfer.id });
     } catch (error) {
       const stripeDetail = getStripeErrorDetail(error);
