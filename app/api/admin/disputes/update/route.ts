@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSystemNotifications } from "../../../../lib/serverNotifications";
+import { releaseSellerPayoutForOrder } from "../../../../lib/releaseSellerPayout";
 
 export const runtime = "nodejs";
 
@@ -333,5 +334,21 @@ export async function POST(request: Request) {
     ]);
   }
 
-  return NextResponse.json({ order: updatedOrder });
+  let payoutResult = null;
+
+  if (action === "resolve_release_seller") {
+    payoutResult = await releaseSellerPayoutForOrder({
+      supabase: serviceSupabase,
+      orderId: order.id,
+      source: "admin_dispute",
+    });
+
+    console.info("Admin dispute release seller payout attempt:", {
+      orderId: order.id,
+      payoutStatus: payoutResult.status,
+      detail: payoutResult.detail,
+    });
+  }
+
+  return NextResponse.json({ order: updatedOrder, payout: payoutResult });
 }

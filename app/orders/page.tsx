@@ -446,6 +446,10 @@ export default function OrdersPage() {
           inspection_completed_at?: string;
           inspection_ends_at?: string;
           transfer_status?: string;
+          completed_at?: string | null;
+        };
+        payout?: {
+          status?: "paid" | "queued" | "not_ready";
         };
         error?: string;
       };
@@ -462,11 +466,16 @@ export default function OrdersPage() {
                 inspectionCompletedAt: payload.order?.inspection_completed_at,
                 inspectionEndsAt: payload.order?.inspection_ends_at,
                 transferStatus: payload.order?.transfer_status || "ready",
+                completedAt: payload.order?.completed_at || item.completedAt,
               }
             : item,
         ),
       );
-      setNotice("Order approved. Seller payout is queued for automatic release.");
+      setNotice(
+        payload.payout?.status === "paid"
+          ? "Order approved. Seller payout was sent and the order is complete."
+          : "Inspection complete. Seller payout is queued.",
+      );
     } catch (error) {
       console.error("Approve inspection error:", error);
       setNotice(

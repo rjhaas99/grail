@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createSystemNotification } from "../../../lib/serverNotifications";
+import { releaseSellerPayoutForOrder } from "../../../lib/releaseSellerPayout";
 
 export const runtime = "nodejs";
 
@@ -187,12 +188,40 @@ export async function POST(request: Request) {
     linkUrl: "/seller-dashboard",
   });
 
+  const payoutResult = await releaseSellerPayoutForOrder({
+    supabase: serviceSupabase,
+    orderId: order.id,
+    source: "buyer_approval",
+  });
+
+  if (payoutResult.status === "queued") {
+    console.info("Inspection approved; seller payout queued for retry:", {
+      orderId: order.id,
+      detail: payoutResult.detail,
+    });
+  }
+
   return NextResponse.json({
     order: {
       id: order.id,
       inspection_completed_at: now,
       inspection_ends_at: now,
-      transfer_status: "ready",
+      transfer_status:
+        payoutResult.status === "paid" || payoutResult.status === "already_paid"
+          ? "paid"
+          : "ready",
+      completed_at:
+        payoutResult.status === "paid" || payoutResult.status === "already_paid"
+          ? new Date().toISOString()
+          : null,
+    },
+    payout: {
+      status:
+        payoutResult.status === "paid" || payoutResult.status === "already_paid"
+          ? "paid"
+          : payoutResult.status === "queued"
+            ? "queued"
+            : "not_ready",
     },
   });
 }
