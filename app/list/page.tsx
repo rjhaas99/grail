@@ -82,6 +82,9 @@ type CreatedListing = {
   id: string;
 };
 
+const oneMinuteAuctionDurationDays = 1 / (24 * 60);
+const validAuctionDurationDays = [oneMinuteAuctionDurationDays, 1, 3, 5, 7];
+
 type ListingDraft = {
   id: string;
   title: string;
@@ -276,6 +279,12 @@ function formatCurrencyWithCents(value: string | number) {
 
 function calculateReserveFee(reservePrice: number) {
   return Math.round(Math.min(100, Math.max(1, reservePrice * 0.05)) * 100) / 100;
+}
+
+function isValidAuctionDuration(duration: number) {
+  return validAuctionDurationDays.some(
+    (validDuration) => Math.abs(duration - validDuration) < 0.000001,
+  );
 }
 
 function clean(value: string) {
@@ -919,7 +928,7 @@ export default function ListCardPage() {
         return "Auction starting bid must be at least $0.99.";
       }
 
-      if (![1, 3, 5, 7].includes(duration)) {
+      if (!isValidAuctionDuration(duration)) {
         return "Choose a valid auction duration.";
       }
 
@@ -2036,6 +2045,9 @@ export default function ListCardPage() {
                         onChange={(event) => setAuctionDurationDays(event.target.value)}
                       >
                         <option value="1">1 day</option>
+                        <option value={String(oneMinuteAuctionDurationDays)}>
+                          1 minute (testing only)
+                        </option>
                         <option value="3">3 days</option>
                         <option value="5">5 days</option>
                         <option value="7">7 days</option>
@@ -2070,6 +2082,13 @@ export default function ListCardPage() {
                     No-reserve auctions are free to create and must sell to the
                     highest valid bidder.
                   </p>
+                  {Math.abs(Number(auctionDurationDays) - oneMinuteAuctionDurationDays) <
+                  0.000001 ? (
+                    <p className="reserve-fee-note">
+                      <strong>Testing duration.</strong> The 1 minute auction duration is temporary
+                      and intended only for development testing.
+                    </p>
+                  ) : null}
                   {auctionReserveEnabled ? (
                     <div className="reserve-fee-note">
                       <strong>

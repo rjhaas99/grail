@@ -4,6 +4,9 @@ import Image from "next/image";
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
+import CollectorIdentityCard, {
+  type CollectorIdentityBadge,
+} from "../components/CollectorIdentityCard";
 import Header from "../components/Header";
 import PublicTrustSection from "../components/PublicTrustSection";
 import { supabase } from "../../lib/supabase";
@@ -125,6 +128,35 @@ export default function ProfilePage() {
     .join("")
     .slice(0, 2)
     .toUpperCase() || "G";
+  const currentMarketplaceEvent =
+    marketplaceRewards?.currentEvent?.eventName ||
+    marketplaceRewards?.upcomingEvent?.eventName ||
+    "None";
+  const collectorIdentityBadges: CollectorIdentityBadge[] = [
+    user?.email_confirmed_at
+      ? {
+          label: "Verified Email",
+          description: "Email confirmed through GRAIL.",
+          tone: "verified",
+        }
+      : null,
+    rewardTier?.rankName
+      ? {
+          label: rewardTier.rankName,
+          description: "Current GRAIL economy rank.",
+          tone: "prestige",
+        }
+      : null,
+    progression.achievementsCount > 0
+      ? {
+          label: "Achievement Recorded",
+          description: `${progression.achievementsCount} achievement${
+            progression.achievementsCount === 1 ? "" : "s"
+          } unlocked.`,
+          tone: "trust",
+        }
+      : null,
+  ].filter(Boolean) as CollectorIdentityBadge[];
 
   useEffect(() => {
     let isMounted = true;
@@ -286,6 +318,47 @@ export default function ProfilePage() {
             </div>
           </div>
         </section>
+
+        <CollectorIdentityCard
+          name={displayName}
+          handle={username}
+          initials={accountInitials}
+          rankTitle={progression.title}
+          levelLabel={`Level ${progression.level}`}
+          collectorSince={user?.created_at ? formatActivityDate(user.created_at) : "Recently"}
+          marketplaceEvent={currentMarketplaceEvent}
+          featuredAchievement={
+            progression.achievementsCount > 0
+              ? `${progression.achievementsCount} achievement${
+                  progression.achievementsCount === 1 ? "" : "s"
+                } unlocked`
+              : progression.title
+          }
+          profileHref={publicCollectionHref}
+          badges={collectorIdentityBadges}
+          metrics={[
+            {
+              label: "Lifetime XP",
+              value: progression.xp.toLocaleString(),
+              detail: `${progression.progressPercentage}% to next level`,
+            },
+            {
+              label: "Achievements",
+              value: progression.achievementsCount.toLocaleString(),
+            },
+            {
+              label: "GRAIL Credit",
+              value: formatCurrency(wallet.availableCredit),
+              detail: "Available",
+            },
+            {
+              label: "Reward Tier",
+              value: rewardTier?.rankName || "Pending",
+            },
+          ]}
+          narrative="Your collector identity brings together progression, trust, rewards, and public collection history."
+          showGrailPassPreview
+        />
 
         <PublicTrustSection userId={user?.id} />
 

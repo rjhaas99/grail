@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSystemNotifications } from "../../../lib/serverNotifications";
+import { getTransactionTypeFromStripeCheckoutType } from "../../../lib/transactionCheckout";
 
 export const runtime = "nodejs";
 
@@ -85,6 +86,17 @@ function calculateReserveFee(reservePrice: number) {
 
 function addDays(value: Date, days: number) {
   return new Date(value.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function normalizeAuctionDurationDays(value: number | null | undefined) {
+  const duration = Number(value || 7);
+  const oneMinuteDuration = 1 / (24 * 60);
+  const validDurations = [oneMinuteDuration, 1, 3, 5, 7];
+  const matchedDuration = validDurations.find(
+    (validDuration) => Math.abs(duration - validDuration) < 0.000001,
+  );
+
+  return matchedDuration || 7;
 }
 
 function getPaymentIntentId(session: Stripe.Checkout.Session) {
@@ -404,7 +416,7 @@ async function handleAuctionReserveFeeCompleted(
     return;
   }
 
-  const durationDays = Math.max(Number(listing.auction_duration_days || 7), 1);
+  const durationDays = normalizeAuctionDurationDays(listing.auction_duration_days);
   const startsAt = new Date();
   const endsAt = addDays(startsAt, durationDays);
   const feeAmount = calculateReserveFee(Number(listing.auction_reserve_price || reservePrice));
@@ -469,8 +481,10 @@ async function handleCheckoutSessionCompleted(
   metadata: CheckoutMetadata,
 ) {
   const sessionType = metadata.type || "";
-  const isAuctionSale = sessionType === "auction_sale";
-  const isFixedPriceSale = sessionType === "fixed_price_sale";
+  const transactionType = getTransactionTypeFromStripeCheckoutType(sessionType);
+  const isAuctionSale = transactionType === "auction";
+  const isFixedPriceSale = transactionType === "buy_now";
+  const isOfferSale = transactionType === "accepted_offer";
   const listingId = metadata.listingId || "";
   const sellerId = metadata.sellerId || "";
   const buyerId = metadata.buyerId || session.client_reference_id || null;
@@ -485,7 +499,7 @@ async function handleCheckoutSessionCompleted(
     throw new Error("Reserve Commitment Fee sessions cannot enter sale handling.");
   }
 
-  if (!isAuctionSale && !isFixedPriceSale) {
+  if (!transactionType || (!isAuctionSale && !isFixedPriceSale && !isOfferSale)) {
     throw new Error("Checkout session type is missing or unsupported for sale handling.");
   }
 
@@ -712,6 +726,7 @@ async function handleCheckoutSessionCompleted(
 
   console.info("Stripe checkout.session.completed order recorded:", {
     stripeSessionId: session.id,
+    transactionType,
     paymentIntentId,
     latestChargeId: latestChargeId || null,
     orderId: insertedOrder?.id,
@@ -786,10 +801,12 @@ export async function POST(request: Request) {
     const session = event.data.object as Stripe.Checkout.Session;
     const metadata = await resolveCheckoutMetadata(stripe, session);
     const sessionType = metadata.type || "";
+    const transactionType = getTransactionTypeFromStripeCheckoutType(sessionType);
 
     console.info("Stripe checkout.session.completed received:", {
       stripeSessionId: session.id,
       metadataType: sessionType || null,
+      transactionType,
     });
 
     if (sessionType === "auction_reserve_fee") {
@@ -803,17 +820,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ received: true });
     }
 
-    if (sessionType === "auction_sale") {
-      console.info("Stripe webhook selected auction sale branch:", {
+    if (transactionType) {
+      console.info("Stripe webhook selected unified transaction sale branch:", {
         stripeSessionId: session.id,
-      });
-      await handleCheckoutSessionCompleted(stripe, session, metadata);
-      return NextResponse.json({ received: true });
-    }
-
-    if (sessionType === "fixed_price_sale") {
-      console.info("Stripe webhook selected fixed-price sale branch:", {
-        stripeSessionId: session.id,
+        transactionType,
+        sessionType,
       });
       await handleCheckoutSessionCompleted(stripe, session, metadata);
       return NextResponse.json({ received: true });

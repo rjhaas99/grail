@@ -26,6 +26,12 @@ type SellerAccountRow = {
   payouts_enabled: boolean | null;
 };
 
+type ListingRow = {
+  id: string;
+  sale_format: string | null;
+  auction_status: string | null;
+};
+
 type StripeErrorLike = {
   message?: string;
   code?: string;
@@ -163,6 +169,35 @@ export async function releaseSellerPayoutForOrder({
 
   if (!order.seller_id) {
     return { orderId, status: "skipped", detail: "Missing seller_id." };
+  }
+
+  if (order.listing_id) {
+    const { data: listingData, error: listingError } = await supabase
+      .from("listings")
+      .select("id, sale_format, auction_status")
+      .eq("id", order.listing_id)
+      .maybeSingle();
+
+    if (listingError) {
+      console.error("Seller payout listing fetch error:", {
+        error: listingError,
+        errorMessage: listingError.message,
+        orderId,
+        listingId: order.listing_id,
+        source,
+      });
+      return { orderId, status: "failed", detail: listingError.message };
+    }
+
+    const listing = listingData as ListingRow | null;
+
+    if (listing?.sale_format === "auction" && listing.auction_status !== "paid") {
+      return {
+        orderId,
+        status: "skipped",
+        detail: "Auction winner payment has not completed.",
+      };
+    }
   }
 
   if (order.fulfillment_status !== "delivered") {

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import CollectorIdentityCard from "../../components/CollectorIdentityCard";
 import Header from "../../components/Header";
 import PublicTrustSection from "../../components/PublicTrustSection";
 import { supabase } from "../../../lib/supabase";
@@ -232,8 +233,6 @@ export default function SellerPublicProfilePage() {
                       </div>
 
                       <p className="mt-2 text-zinc-500">@{getUsername()}</p>
-
-                     <PublicTrustSection userId={profile.id} />
                     </div>
                   </div>
 
@@ -277,6 +276,60 @@ export default function SellerPublicProfilePage() {
                 </div>
               </div>
             </div>
+
+            <CollectorIdentityCard
+              name={getDisplayName()}
+              handle={getUsername()}
+              initials={getDisplayName().charAt(0).toUpperCase()}
+              eyebrow="Seller Identity"
+              rankTitle={profile.seller_level || "Level 1 Collector"}
+              collectorSince={formatDate(profile.created_at)}
+              featuredAchievement={
+                stats?.sold_cards
+                  ? `${stats.sold_cards.toLocaleString()} completed sale${
+                      stats.sold_cards === 1 ? "" : "s"
+                    }`
+                  : "Active marketplace seller"
+              }
+              profileHref={`/collections/${profile.username || profile.id}`}
+              badges={[
+                ...(profile.verified
+                  ? [
+                      {
+                        label: "Verified Seller",
+                        description: "Seller profile is verified on GRAIL.",
+                        tone: "verified" as const,
+                      },
+                    ]
+                  : []),
+                {
+                  label: profile.seller_level || "Collector Profile",
+                  description: "Public seller identity and storefront are active.",
+                  tone: "prestige" as const,
+                },
+              ]}
+              metrics={[
+                {
+                  label: "Active Listings",
+                  value: String(stats?.active_listings || listings.length),
+                },
+                {
+                  label: "Sold Cards",
+                  value: String(stats?.sold_cards || 0),
+                },
+                {
+                  label: "Total Sales",
+                  value: formatMoney(stats?.total_sales || 0),
+                },
+              ]}
+              narrative={
+                profile.bio ||
+                "This seller identity combines public storefront activity, verification, and marketplace history."
+              }
+              showGrailPassPreview
+            />
+
+            <PublicTrustSection userId={profile.id} />
 
             <div className="mt-12 flex flex-col justify-between gap-4 md:flex-row md:items-end">
               <div>

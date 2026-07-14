@@ -3,8 +3,11 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../../lib/supabase";
+import CollectorIdentityCard, {
+  type CollectorIdentityBadge,
+} from "../../components/CollectorIdentityCard";
 import Header from "../../components/Header";
 import PublicTrustSection from "../../components/PublicTrustSection";
 import {
@@ -21,6 +24,13 @@ type Listing = MockListing & {
   imageUrl?: string | null;
   source?: "mock" | "supabase";
   sellerId?: string | null;
+};
+
+type StudioMode = "showcase" | "featured" | null;
+
+type CollectionCurationPreferences = {
+  showcaseCardId: string | null;
+  featuredCardIds: string[];
 };
 
 type ListingImageRow = {
@@ -73,6 +83,7 @@ const sellers = mockSellers;
 const buildSellerListings = buildMockSellerListings;
 const mockConversationStorageKey = "grail-mock-conversations";
 const mockOfferStorageKey = "grail-mock-offers";
+const collectionCurationStorageKey = "grail-collection-curation";
 
 const filterModes: FilterMode[] = ["All", "Grail", "Hot", "Graded", "Raw"];
 
@@ -101,6 +112,68 @@ function readLocalMockOffers() {
 function saveLocalMockOffer(offer: LocalMockOffer) {
   const offers = readLocalMockOffers();
   window.localStorage.setItem(mockOfferStorageKey, JSON.stringify([offer, ...offers]));
+}
+
+function getCollectionCurationStorageKey(collectionId: string) {
+  return `${collectionCurationStorageKey}:${collectionId}`;
+}
+
+function getDefaultCurationPreferences(): CollectionCurationPreferences {
+  return {
+    showcaseCardId: null,
+    featuredCardIds: [],
+  };
+}
+
+function readCollectionCurationPreferences(collectionId: string) {
+  if (typeof window === "undefined") {
+    return getDefaultCurationPreferences();
+  }
+
+  try {
+    const storedPreferences = window.localStorage.getItem(
+      getCollectionCurationStorageKey(collectionId),
+    );
+
+    if (!storedPreferences) {
+      return getDefaultCurationPreferences();
+    }
+
+    const parsedPreferences = JSON.parse(storedPreferences) as Partial<CollectionCurationPreferences>;
+
+    return {
+      showcaseCardId:
+        typeof parsedPreferences.showcaseCardId === "string"
+          ? parsedPreferences.showcaseCardId
+          : null,
+      featuredCardIds: Array.isArray(parsedPreferences.featuredCardIds)
+        ? parsedPreferences.featuredCardIds.filter(
+            (item): item is string => typeof item === "string",
+          )
+        : [],
+    };
+  } catch (error) {
+    console.error("Collection curation preference read error:", error);
+    return getDefaultCurationPreferences();
+  }
+}
+
+function saveCollectionCurationPreferences(
+  collectionId: string,
+  preferences: CollectionCurationPreferences,
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      getCollectionCurationStorageKey(collectionId),
+      JSON.stringify(preferences),
+    );
+  } catch (error) {
+    console.error("Collection curation preference save error:", error);
+  }
 }
 
 function formatListedDate(value: string | null) {
@@ -487,6 +560,168 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function getListingValue(listing: Listing) {
+  return Number(listing.marketValue || listing.price || 0);
+}
+
+function getListingYear(listing: Listing) {
+  const year = Number.parseInt(listing.details?.year || "", 10);
+  return Number.isFinite(year) ? year : null;
+}
+
+function getGradeValue(listing: Listing) {
+  const grade = Number.parseFloat(listing.details?.grade || listing.condition || "");
+  return Number.isFinite(grade) ? grade : 0;
+}
+
+function getUniqueCategories(listings: Listing[]) {
+  return Array.from(new Set(listings.map((listing) => listing.category).filter(Boolean)));
+}
+
+function getCollectionPersonality(listings: Listing[]) {
+  if (listings.length === 0) {
+    return "Curated Collection";
+  }
+
+  const categories = getUniqueCategories(listings);
+  const gradedCount = listings.filter((listing) => listing.isGraded).length;
+  const rookieCount = listings.filter((listing) =>
+    `${listing.title} ${listing.overview}`.toLowerCase().includes("rookie"),
+  ).length;
+  const years = listings
+    .map(getListingYear)
+    .filter((year): year is number => Boolean(year));
+  const newestYear = years.length ? Math.max(...years) : null;
+  const oldestYear = years.length ? Math.min(...years) : null;
+
+  if (categories.includes("TCG") && categories.length === 1) {
+    return "TCG";
+  }
+
+  if (categories.length > 1) {
+    return "Multi-Sport";
+  }
+
+  if (rookieCount >= Math.max(2, Math.ceil(listings.length * 0.35))) {
+    return "Rookie Focus";
+  }
+
+  if (oldestYear && oldestYear < 1990) {
+    return "Vintage Focus";
+  }
+
+  if (newestYear && newestYear >= 2020) {
+    return "Modern Collection";
+  }
+
+  if (gradedCount >= Math.ceil(listings.length * 0.6)) {
+    return "Graded Showcase";
+  }
+
+  if (listings.length <= 6) {
+    return "Focused Collection";
+  }
+
+  return "Curated Collection";
+}
+
+function getCollectionReputation(listings: Listing[], totalValue: number) {
+  if (listings.length === 0) {
+    return null;
+  }
+
+  if (totalValue >= 50000) {
+    return "Premium Collection";
+  }
+
+  if (listings.length >= 25) {
+    return "Legacy Collection";
+  }
+
+  if (listings.some((listing) => listing.isGrail || listing.tag === "Grail")) {
+    return "Curated Collection";
+  }
+
+  if (listings.length >= 10) {
+    return "Focused Collection";
+  }
+
+  return "Growing Collection";
+}
+
+function getShowcaseCard(
+  listings: Listing[],
+  highestValueCard: Listing | null,
+): Listing | null {
+  return (
+    listings.find((listing) => listing.isGrail || listing.tag === "Grail") ||
+    listings.find((listing) => listing.isHot || listing.tag === "Hot") ||
+    highestValueCard ||
+    listings[0] ||
+    null
+  );
+}
+
+function getNewestCard(listings: Listing[]): Listing | null {
+  return listings[0] || null;
+}
+
+function getOldestCard(listings: Listing[]): Listing | null {
+  const cardsWithYears = listings
+    .map((listing) => ({ listing, year: getListingYear(listing) }))
+    .filter((item): item is { listing: Listing; year: number } => item.year !== null);
+
+  if (cardsWithYears.length === 0) {
+    return null;
+  }
+
+  return cardsWithYears.reduce((oldest, item) =>
+    item.year < oldest.year ? item : oldest,
+  ).listing;
+}
+
+function getHighestGradeCard(listings: Listing[]) {
+  return listings.reduce<Listing | null>((best, listing) => {
+    const value = getGradeValue(listing);
+
+    if (value <= 0) {
+      return best;
+    }
+
+    if (!best || value > getGradeValue(best)) {
+      return listing;
+    }
+
+    return best;
+  }, null);
+}
+
+function HighlightCard({
+  label,
+  listing,
+  fallback,
+}: {
+  label: string;
+  listing: Listing | null;
+  fallback?: string;
+}) {
+  return (
+    <article className="highlight-card">
+      <span>{label}</span>
+      {listing ? (
+        <>
+          <strong>{listing.title}</strong>
+          <small>
+            {listing.conditionDisplay} · {listing.priceDisplay}
+          </small>
+        </>
+      ) : (
+        <strong>{fallback || "Waiting for cards"}</strong>
+      )}
+    </article>
+  );
+}
+
 export default function SellerCollectionPage() {
   const params = useParams();
   const slug = String(params.slug || "");
@@ -495,11 +730,19 @@ export default function SellerCollectionPage() {
   const [realSeller, setRealSeller] = useState<MockSeller | null>(null);
   const [realSellerUserId, setRealSellerUserId] = useState<string | null>(null);
   const [realListings, setRealListings] = useState<Listing[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isLoadingRealSeller, setIsLoadingRealSeller] = useState(!mockSeller);
   const [filterMode, setFilterMode] = useState<FilterMode>("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [isFollowing, setIsFollowing] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [curationPreferences, setCurationPreferences] =
+    useState<CollectionCurationPreferences>(() =>
+      readCollectionCurationPreferences(decodedSlug || slug),
+    );
+  const [studioMode, setStudioMode] = useState<StudioMode>(null);
+  const [draftShowcaseCardId, setDraftShowcaseCardId] = useState<string | null>(null);
+  const [draftFeaturedCardIds, setDraftFeaturedCardIds] = useState<string[]>([]);
   const [messageListing, setMessageListing] = useState<Listing | null>(null);
   const [messageBody, setMessageBody] = useState("");
   const [messageError, setMessageError] = useState("");
@@ -511,8 +754,9 @@ export default function SellerCollectionPage() {
   const [offerError, setOfferError] = useState("");
   const [sentOfferAmount, setSentOfferAmount] = useState<number | null>(null);
   const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
+  const studioCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const seller = mockSeller ?? realSeller;
-  const allListings = useMemo(() => {
+  const allListings = useMemo<Listing[]>(() => {
     if (mockSeller) {
       return buildSellerListings(mockSeller);
     }
@@ -523,8 +767,32 @@ export default function SellerCollectionPage() {
   useEffect(() => {
     let isMounted = true;
 
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (isMounted) {
+        setCurrentUserId(session?.user.id ?? null);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUserId(session?.user.id ?? null);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
     async function loadRealSeller() {
       if (mockSeller || !decodedSlug) {
+        setRealSeller(null);
+        setRealSellerUserId(null);
+        setRealListings([]);
         setIsLoadingRealSeller(false);
         return;
       }
@@ -645,6 +913,32 @@ export default function SellerCollectionPage() {
     };
   }, [decodedSlug, mockSeller]);
 
+  useEffect(() => {
+    if (!studioMode) {
+      return;
+    }
+
+    const previouslyFocusedElement =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusTimer = window.setTimeout(() => {
+      studioCloseButtonRef.current?.focus();
+    }, 0);
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setStudioMode(null);
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", handleKeyDown);
+      previouslyFocusedElement?.focus();
+    };
+  }, [studioMode]);
+
   const listings = useMemo(() => {
     if (!seller) {
       return [];
@@ -704,23 +998,75 @@ export default function SellerCollectionPage() {
     );
   }
 
-  const totalValue = allListings.reduce(
-    (sum, listing) => sum + (listing.marketValue || listing.price),
-    0,
-  );
-  const totalPrice = allListings.reduce((sum, listing) => sum + listing.price, 0);
-  const averagePrice =
-    allListings.length > 0 ? Math.round(totalPrice / allListings.length) : 0;
+  const totalValue = allListings.reduce((sum, listing) => sum + getListingValue(listing), 0);
+  const averageCardValue =
+    allListings.length > 0 ? Math.round(totalValue / allListings.length) : 0;
+  const isOwner = Boolean(currentUserId && realSellerUserId && currentUserId === realSellerUserId);
   const highestValueCard = allListings.length > 0
     ? allListings.reduce((highest, listing) =>
-        (listing.marketValue || listing.price) >
-        (highest.marketValue || highest.price)
+        getListingValue(listing) > getListingValue(highest)
           ? listing
           : highest,
       )
     : null;
+  const defaultShowcaseCard = getShowcaseCard(allListings, highestValueCard);
+  const savedShowcaseCard = isOwner && curationPreferences.showcaseCardId
+    ? allListings.find((listing) => listing.id === curationPreferences.showcaseCardId) || null
+    : null;
+  const showcaseCard = savedShowcaseCard || defaultShowcaseCard;
+  const newestCard = getNewestCard(allListings);
+  const oldestCard = getOldestCard(allListings);
+  const highestGradeCard = getHighestGradeCard(allListings);
+  const categoriesRepresented = getUniqueCategories(allListings);
+  const sportsRepresented = categoriesRepresented.length
+    ? categoriesRepresented.join(" / ")
+    : "Pending";
+  const collectionPersonality = getCollectionPersonality(allListings);
+  const collectionReputation = getCollectionReputation(allListings, totalValue);
+  const collectorIdentityBadges: CollectorIdentityBadge[] = [
+    {
+      label: collectionPersonality,
+      description: "Collection personality derived from public card data.",
+      tone: "prestige",
+    },
+    collectionReputation
+      ? {
+          label: collectionReputation,
+          description: "Collection reputation based on visible collection characteristics.",
+          tone: "trust",
+        }
+      : null,
+    seller.rewardsBadge
+      ? {
+          label: seller.rewardsBadge,
+          description: "Public seller or collection badge.",
+          tone: "verified",
+        }
+      : null,
+  ].filter(Boolean) as CollectorIdentityBadge[];
   const grailCount = allListings.filter((listing) => listing.tag === "Grail").length;
   const hotCount = allListings.filter((listing) => listing.tag === "Hot").length;
+  const defaultFeaturedListings = [
+    showcaseCard,
+    highestValueCard,
+    newestCard,
+    highestGradeCard,
+    oldestCard,
+  ].filter(
+    (listing, index, items): listing is Listing =>
+      Boolean(listing) &&
+      items.findIndex((item) => item?.id === listing?.id) === index,
+  );
+  const savedFeaturedListings = isOwner ? curationPreferences.featuredCardIds
+    .map((listingId) => allListings.find((listing) => listing.id === listingId))
+    .filter((listing): listing is Listing => Boolean(listing)) : [];
+  const featuredListings =
+    savedFeaturedListings.length > 0 ? savedFeaturedListings : defaultFeaturedListings;
+  const draftShowcaseCard =
+    allListings.find((listing) => listing.id === draftShowcaseCardId) || null;
+  const draftFeaturedListings = draftFeaturedCardIds
+    .map((listingId) => allListings.find((listing) => listing.id === listingId))
+    .filter((listing): listing is Listing => Boolean(listing));
 
   function openMessageModal(listing: Listing) {
     setMessageListing(listing);
@@ -752,6 +1098,103 @@ export default function SellerCollectionPage() {
     setOfferError("");
     setSentOfferAmount(null);
     setIsSubmittingOffer(false);
+  }
+
+  function persistCurationPreferences(nextPreferences: CollectionCurationPreferences) {
+    setCurationPreferences(nextPreferences);
+
+    const collectionPreferenceId = decodedSlug || realSellerUserId || slug;
+
+    if (collectionPreferenceId) {
+      saveCollectionCurationPreferences(collectionPreferenceId, nextPreferences);
+    }
+  }
+
+  function openShowcaseStudio() {
+    if (!isOwner || allListings.length === 0) {
+      return;
+    }
+
+    setDraftShowcaseCardId(showcaseCard?.id || allListings[0]?.id || null);
+    setDraftFeaturedCardIds(featuredListings.map((listing) => listing.id));
+    setStatusMessage("");
+    setStudioMode("showcase");
+  }
+
+  function openFeaturedStudio() {
+    if (!isOwner || allListings.length === 0) {
+      return;
+    }
+
+    setDraftShowcaseCardId(showcaseCard?.id || null);
+    setDraftFeaturedCardIds(featuredListings.map((listing) => listing.id));
+    setStatusMessage("");
+    setStudioMode("featured");
+  }
+
+  function closeStudioModal() {
+    setStudioMode(null);
+  }
+
+  function saveShowcaseCard() {
+    if (!draftShowcaseCardId) {
+      return;
+    }
+
+    persistCurationPreferences({
+      ...curationPreferences,
+      showcaseCardId: draftShowcaseCardId,
+    });
+    setStatusMessage("Showcase Card updated.");
+    closeStudioModal();
+  }
+
+  function toggleDraftFeaturedCard(listingId: string) {
+    setDraftFeaturedCardIds((currentIds) => {
+      if (currentIds.includes(listingId)) {
+        return currentIds.filter((currentId) => currentId !== listingId);
+      }
+
+      return [...currentIds, listingId];
+    });
+  }
+
+  function saveFeaturedCards() {
+    persistCurationPreferences({
+      ...curationPreferences,
+      featuredCardIds: draftFeaturedCardIds,
+    });
+    setStatusMessage("Featured Cards updated.");
+    closeStudioModal();
+  }
+
+  function setCardAsShowcase(listing: Listing) {
+    persistCurationPreferences({
+      ...curationPreferences,
+      showcaseCardId: listing.id,
+    });
+    setStatusMessage(`${listing.title} is now your Showcase Card.`);
+  }
+
+  function toggleFeaturedCard(listing: Listing) {
+    const isFeatured = featuredListings.some((featuredListing) => featuredListing.id === listing.id);
+    const currentFeaturedIds =
+      curationPreferences.featuredCardIds.length > 0
+        ? curationPreferences.featuredCardIds
+        : featuredListings.map((featuredListing) => featuredListing.id);
+    const nextFeaturedCardIds = isFeatured
+      ? currentFeaturedIds.filter((listingId) => listingId !== listing.id)
+      : [...currentFeaturedIds, listing.id];
+
+    persistCurationPreferences({
+      ...curationPreferences,
+      featuredCardIds: nextFeaturedCardIds,
+    });
+    setStatusMessage(
+      isFeatured
+        ? `${listing.title} was removed from Featured Cards.`
+        : `${listing.title} was added to Featured Cards.`,
+    );
   }
 
   async function submitOffer() {
@@ -940,6 +1383,202 @@ export default function SellerCollectionPage() {
     }
   }
 
+  const collectorIdentitySection = (
+    <CollectorIdentityCard
+      name={seller.name}
+      handle={seller.slug}
+      initials={seller.initials}
+      eyebrow={isOwner ? "Collector Signals" : "Collection Identity"}
+      rankTitle={seller.level}
+      collectorSince={seller.joinedDate}
+      marketplaceEvent="Marketplace Live"
+      featuredAchievement={
+        showcaseCard ? `${showcaseCard.title} defines this showcase` : collectionPersonality
+      }
+      profileHref={`/collections/${seller.slug}`}
+      badges={collectorIdentityBadges}
+      metrics={[
+        {
+          label: "Collection Value",
+          value: formatCurrency(totalValue),
+        },
+        {
+          label: "Cards Owned",
+          value: String(allListings.length),
+        },
+        {
+          label: "Highest Card",
+          value: highestValueCard?.priceDisplay || "Pending",
+          detail: highestValueCard?.title,
+        },
+        {
+          label: "Sports",
+          value: sportsRepresented,
+        },
+      ]}
+      narrative={
+        isOwner
+          ? "These public collector signals stay available, but Curate Mode keeps your collection and showcase decisions first."
+          : "This collection combines public card data, collector identity, and trust signals into one showcase."
+      }
+      showGrailPassPreview
+    />
+  );
+  const trustSection = <PublicTrustSection userId={mockSeller ? null : realSellerUserId} />;
+  const highlightsSection = allListings.length > 0 ? (
+    <section className="collection-story-grid" aria-label="Collection highlights">
+      <HighlightCard label="Most Valuable Card" listing={highestValueCard} />
+      <HighlightCard label="Newest Addition" listing={newestCard} />
+      <HighlightCard label="Oldest Card" listing={oldestCard} fallback="Year data pending" />
+      <HighlightCard
+        label="Highest Grade"
+        listing={highestGradeCard}
+        fallback="Grade data pending"
+      />
+    </section>
+  ) : null;
+  const featuredCardsSection = allListings.length > 0 ? (
+    <section
+      className={`featured-cards-panel panel${isOwner ? " owner-featured-panel" : ""}`}
+      aria-labelledby="featured-cards-title"
+    >
+      <div className="section-heading-row">
+        <span>Featured Cards</span>
+        <h2 id="featured-cards-title">
+          {isOwner ? "Cards chosen to represent your collection." : "Cards that define the collection."}
+        </h2>
+        <p>
+          {isOwner
+            ? "These are the cards visitors should remember first."
+            : "Showcase cards are selected from existing public cards. Owner-selected showcase cards can plug into this layout later."}
+        </p>
+      </div>
+      <div className="featured-card-grid">
+        {featuredListings.map((listing) => (
+          <Link
+            key={listing.id}
+            href={listing.href}
+            className="featured-card"
+            aria-label={`View featured card ${listing.title}`}
+          >
+            <CardArtwork listing={listing} />
+            <div>
+              <span>{listing.tag}</span>
+              <strong>{listing.title}</strong>
+              <small>{listing.conditionDisplay} · {listing.priceDisplay}</small>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </section>
+  ) : null;
+  const activitySection = allListings.length > 0 ? (
+    <section className="collection-activity-panel panel" aria-labelledby="activity-title">
+      <div className="section-heading-row">
+        <span>{isOwner ? "Recent Additions" : "Collection Activity"}</span>
+        <h2 id="activity-title">
+          {isOwner ? "What changed recently." : "Recently added to the showcase."}
+        </h2>
+        <p>
+          {isOwner
+            ? "Use recent public additions as a cue for what to feature, refine, or share next."
+            : "Activity uses public card listing data today. A fuller collection activity feed can plug into this section later."}
+        </p>
+      </div>
+      <div className="activity-card-list">
+        {allListings.slice(0, 4).map((listing) => (
+          <Link key={listing.id} href={listing.href} className="activity-card">
+            <span>{listing.listedDate}</span>
+            <strong>{listing.title}</strong>
+            <small>{listing.conditionDisplay} · {listing.priceDisplay}</small>
+          </Link>
+        ))}
+      </div>
+    </section>
+  ) : null;
+  const collectionStudioSection = isOwner ? (
+    <section className="owner-management-panel panel" aria-labelledby="owner-tools-title">
+      <div className="studio-heading-row">
+        <div>
+          <span>Collection Studio</span>
+          <h2 id="owner-tools-title">Curate. Customize. Elevate.</h2>
+        </div>
+        <button
+          type="button"
+          className="studio-open-button"
+          onClick={openShowcaseStudio}
+          disabled={allListings.length === 0}
+        >
+          Open Studio →
+        </button>
+      </div>
+      <div className="owner-management-grid">
+        <button type="button" onClick={openShowcaseStudio} disabled={allListings.length === 0}>
+          <span>Choose the centerpiece</span>
+          <strong>Showcase Card</strong>
+          <small>{showcaseCard ? showcaseCard.title : "Add cards to begin"}</small>
+        </button>
+        <button type="button" onClick={openFeaturedStudio} disabled={allListings.length === 0}>
+          <span>Build the gallery</span>
+          <strong>Featured Cards</strong>
+          <small>
+            {featuredListings.length} card{featuredListings.length === 1 ? "" : "s"} selected
+          </small>
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setStatusMessage("Banner customization is reserved for Collection Studio.")
+          }
+        >
+          <span>Coming Soon</span>
+          <strong>Banner</strong>
+          <small>Collection atmosphere</small>
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setStatusMessage("Collection themes are reserved for a future release.")
+          }
+        >
+          <span>Coming Soon</span>
+          <strong>Themes</strong>
+          <small>Premium presentation</small>
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setStatusMessage("Collection layout controls are reserved for Collection Studio.")
+          }
+        >
+          <span>Coming Soon</span>
+          <strong>Layout</strong>
+          <small>Showroom structure</small>
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setStatusMessage("Collection insights are reserved for a future release.")
+          }
+        >
+          <span>Coming Soon</span>
+          <strong>Insights</strong>
+          <small>Collection signals</small>
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setStatusMessage("Share settings are reserved for Collection Studio.")
+          }
+        >
+          <span>Coming Soon</span>
+          <strong>Share Settings</strong>
+          <small>Public presentation</small>
+        </button>
+      </div>
+    </section>
+  ) : null;
+
   return (
     <main className="collection-page">
       <style>{pageStyles}</style>
@@ -950,72 +1589,179 @@ export default function SellerCollectionPage() {
           <Link href="/browse">← Back to Browse</Link>
         </div>
 
-        <section className="seller-hero panel">
-          <div className="seller-hero-main">
-            <span className="seller-avatar">{seller.initials}</span>
-            <div>
-              <div className="seller-heading-row">
-                <h1>{seller.name}</h1>
-                <span className="seller-badge">{seller.rewardsBadge}</span>
-              </div>
-              <p className="seller-level">{seller.level}</p>
-              <p className="seller-bio">{seller.bio}</p>
+        <section className={`collection-showcase-hero panel${isOwner ? " curate-hero" : ""}`}>
+          <div
+            className={`collection-banner${showcaseCard?.imageUrl ? " has-image" : ""}`}
+            style={
+              !isOwner && showcaseCard?.imageUrl
+                ? {
+                    backgroundImage: `linear-gradient(90deg, rgba(5,5,6,0.94), rgba(5,5,6,0.62) 48%, rgba(5,5,6,0.38)), url(${showcaseCard.imageUrl})`,
+                  }
+                : undefined
+            }
+          >
+            <div className="collection-banner-copy">
+              <span>{isOwner ? "Curate Mode" : "Explore Mode"}</span>
+              <h1>{isOwner ? "My Collection" : `${seller.name} Collection`}</h1>
+              {isOwner ? (
+                <div className="owner-hero-summary" aria-label="Collection summary">
+                  <div className="owner-hero-numbers">
+                    <div>
+                      <strong>{formatCurrency(totalValue)}</strong>
+                      <span>Collection Value</span>
+                    </div>
+                    <div>
+                      <strong>{allListings.length}</strong>
+                      <span>Cards Owned</span>
+                    </div>
+                  </div>
+                  <Link
+                    className="owner-latest-addition"
+                    href={newestCard?.href || "#"}
+                    aria-label={
+                      newestCard ? `View latest addition ${newestCard.title}` : "Latest addition"
+                    }
+                  >
+                    {newestCard ? <CardArtwork listing={newestCard} /> : null}
+                    <span>
+                      <small>Latest Addition</small>
+                      <strong>{newestCard?.title || "No public card yet"}</strong>
+                      <em>{newestCard?.listedDate || "Add cards to start the collection"}</em>
+                    </span>
+                  </Link>
+                </div>
+              ) : (
+                <>
+                  <p>
+                    {collectionPersonality}
+                    {collectionReputation ? ` · ${collectionReputation}` : ""} ·{" "}
+                    {allListings.length} public card{allListings.length === 1 ? "" : "s"}
+                  </p>
+                  <div className="collection-hero-tags" aria-label="Collection showcase details">
+                    <em>{sportsRepresented}</em>
+                    <em>{seller.level}</em>
+                    <em>Marketplace Live</em>
+                  </div>
+                </>
+              )}
             </div>
+
+            {showcaseCard ? (
+              <div className="showcase-card-panel">
+                <span>Showcase Card</span>
+                <Link href={showcaseCard.href} aria-label={`View ${showcaseCard.title}`}>
+                  <CardArtwork listing={showcaseCard} />
+                </Link>
+                <strong>{showcaseCard.title}</strong>
+                <small>{showcaseCard.conditionDisplay} · {showcaseCard.priceDisplay}</small>
+              </div>
+            ) : (
+              <div className="showcase-card-panel empty-showcase">
+                <span>Showcase Card</span>
+                <strong>Waiting for a public card.</strong>
+                <small>The showcase card will appear here when the collection has cards.</small>
+              </div>
+            )}
+
+            {isOwner ? (
+              <div className="owner-hero-note" aria-label="Collection owner">
+                <p>This collection is curated by</p>
+                <strong>{seller.name}</strong>
+              </div>
+            ) : null}
           </div>
 
-          <div className="hero-actions">
-            <button
-              type="button"
-              onClick={() => setStatusMessage("Message flow coming soon.")}
-            >
-              Message Seller
-            </button>
-            <button
-              type="button"
-              className={isFollowing ? "active" : ""}
-              onClick={() => setIsFollowing((current) => !current)}
-            >
-              {isFollowing ? "Following" : "Follow Seller"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusMessage("Share link copied.")}
-            >
-              Share Collection
-            </button>
-          </div>
-
-          {statusMessage ? (
-            <p className="hero-status">{statusMessage}</p>
+          {!isOwner ? (
+            <div className="collection-hero-actions">
+              <button
+                type="button"
+                onClick={() => setStatusMessage("Message flow coming soon.")}
+              >
+                Message Collector
+              </button>
+              <button
+                type="button"
+                className={isFollowing ? "active" : ""}
+                onClick={() => setIsFollowing((current) => !current)}
+              >
+                {isFollowing ? "Following" : "Follow Collection"}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setStatusMessage("Share Collection preview is reserved for a future release.")
+                }
+              >
+                Share Collection
+              </button>
+            </div>
           ) : null}
 
-          <div className="seller-hero-stats">
-            <Metric label="Completed Sales" value={String(seller.completedSales)} />
-            <Metric label="Public Cards" value={String(allListings.length)} />
-            <Metric label="Response Time" value={seller.responseTime} />
-            <Metric label="Ship Speed" value={seller.shipSpeed} />
-            <Metric label="Rating" value={seller.rating} />
-            <Metric label="Joined" value={seller.joinedDate} />
-            <Metric label="Location" value={seller.location} />
-          </div>
+          {statusMessage ? <p className="hero-status">{statusMessage}</p> : null}
+
+          {!isOwner ? (
+            <div className="collection-hero-stats">
+              <>
+                <Metric label="Collection Value" value={formatCurrency(totalValue)} />
+                <Metric label="Cards Owned" value={String(allListings.length)} />
+                <Metric label="Collector Since" value={seller.joinedDate} />
+                <Metric label="Current Rank" value={seller.level} />
+                <Metric label="Trust Badge" value={seller.rewardsBadge} />
+                <Metric label="Marketplace Status" value="Live" />
+              </>
+            </div>
+          ) : null}
         </section>
 
-        <PublicTrustSection userId={mockSeller ? null : realSellerUserId} />
+        {isOwner ? collectionStudioSection : null}
+        {isOwner ? featuredCardsSection : null}
+        {!isOwner ? collectorIdentitySection : null}
+        {!isOwner ? trustSection : null}
+        {!isOwner ? highlightsSection : null}
 
-        <section className="collection-layout">
+        <section className={`collection-layout${isOwner ? " owner-card-layout" : ""}`}>
           <div className="main-column">
-            <section className="collection-header panel">
-              <div>
-                <h2>Seller Collection</h2>
-                <p>Browse public cards from this seller.</p>
-              </div>
-              <div className="collection-stats">
-                <Metric label="Public Cards" value={String(allListings.length)} />
-                <Metric label="Total Value" value={formatCurrency(totalValue)} />
-                <Metric label="Avg Price" value={formatCurrency(averagePrice)} />
-                <Metric label="Seller Level" value={seller.level} />
-              </div>
-            </section>
+            {isOwner ? (
+              <section className="owner-all-cards-heading" aria-labelledby="all-cards-title">
+                <div>
+                  <span>All Cards</span>
+                  <h2 id="all-cards-title">All Cards</h2>
+                  <p>{allListings.length} card{allListings.length === 1 ? "" : "s"}</p>
+                </div>
+              </section>
+            ) : (
+              <section className="collection-header panel">
+                <div>
+                  <h2>Collection Library</h2>
+                  <p>
+                    Browse the public cards that shape this {collectionPersonality.toLowerCase()}.
+                  </p>
+                </div>
+                <div className="collection-stats">
+                  <Metric label="Collection Value" value={formatCurrency(totalValue)} />
+                  <Metric label="Cards Owned" value={String(allListings.length)} />
+                  <Metric label="Average Card Value" value={formatCurrency(averageCardValue)} />
+                  <Metric
+                    label="Highest Card"
+                    value={highestValueCard?.priceDisplay || "Pending"}
+                  />
+                  <Metric
+                    label="Newest Addition"
+                    value={newestCard?.listedDate || "Pending"}
+                  />
+                  <Metric
+                    label="Oldest Card"
+                    value={
+                      oldestCard ? oldestCard.details.year || oldestCard.title : "Pending"
+                    }
+                  />
+                  <Metric label="Sports Represented" value={sportsRepresented} />
+                  <Metric label="Collection Style" value={collectionPersonality} />
+                </div>
+              </section>
+            )}
+
+            {!isOwner ? featuredCardsSection : null}
 
             <section className="collection-toolbar panel">
               <label className="collection-search">
@@ -1046,7 +1792,7 @@ export default function SellerCollectionPage() {
             </section>
 
             {listings.length > 0 ? (
-              <section className="listing-grid" aria-label="Seller listings">
+              <section className="listing-grid" aria-label={isOwner ? "Collection cards" : "Seller listings"}>
                 {listings.map((listing) => (
                   <article key={listing.href} className="listing-card">
                     <div className="badge-row">
@@ -1066,60 +1812,86 @@ export default function SellerCollectionPage() {
                       <Link href={listing.href}>{listing.title}</Link>
                     </h3>
                     <p className="listing-meta">
-                      {listing.category}: {listing.condition}
+                      {isOwner
+                        ? `${listing.conditionDisplay} · ${listing.priceDisplay}`
+                        : `${listing.category}: ${listing.condition}`}
                     </p>
-                    <div className="listing-data">
-                      <span>{listing.priceDisplay}</span>
-                      <small>Market {formatCurrency(listing.marketValue)}</small>
-                      <small>{listing.watchCount} watching</small>
-                    </div>
-                    <div className="listing-actions">
-                      {listing.isCollectionOnly ? (
-                        <div className="action-circles">
-                          <button
-                            type="button"
-                            aria-label={`Message ${seller.name}`}
-                            title="Message"
-                            onClick={() => openMessageModal(listing)}
-                          >
-                            <span className="message-icon" aria-hidden="true" />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Make offer on ${listing.title}`}
-                            title="Make Offer"
-                            onClick={() => openOfferModal(listing)}
-                          >
-                            $
-                          </button>
+                    {isOwner ? (
+                      <div className="owner-curator-actions">
+                        <button
+                          type="button"
+                          onClick={() => setCardAsShowcase(listing)}
+                          disabled={showcaseCard?.id === listing.id}
+                        >
+                          {showcaseCard?.id === listing.id ? "Showcase Card" : "Set Showcase"}
+                        </button>
+                        <button type="button" onClick={() => toggleFeaturedCard(listing)}>
+                          {featuredListings.some(
+                            (featuredListing) => featuredListing.id === listing.id,
+                          )
+                            ? "Remove Featured"
+                            : "Feature Card"}
+                        </button>
+                        <Link className="view-card owner-view-card" href={listing.href}>
+                          View Card
+                        </Link>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="listing-data">
+                          <span>{listing.priceDisplay}</span>
+                          <small>Market {formatCurrency(listing.marketValue)}</small>
+                          <small>{listing.watchCount} watching</small>
                         </div>
-                      ) : (
-                        <div className="action-circles">
-                          <button type="button" aria-label={`Buy ${listing.title}`} title="Buy">
-                            <span className="cart-icon" aria-hidden="true" />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Message ${seller.name}`}
-                            title="Message"
-                            onClick={() => openMessageModal(listing)}
-                          >
-                            <span className="message-icon" aria-hidden="true" />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Make offer on ${listing.title}`}
-                            title="Make Offer"
-                            onClick={() => openOfferModal(listing)}
-                          >
-                            <span aria-hidden="true">$</span>
-                          </button>
+                        <div className="listing-actions">
+                          {listing.isCollectionOnly ? (
+                            <div className="action-circles">
+                              <button
+                                type="button"
+                                aria-label={`Message ${seller.name}`}
+                                title="Message"
+                                onClick={() => openMessageModal(listing)}
+                              >
+                                <span className="message-icon" aria-hidden="true" />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Make offer on ${listing.title}`}
+                                title="Make Offer"
+                                onClick={() => openOfferModal(listing)}
+                              >
+                                $
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="action-circles">
+                              <button type="button" aria-label={`Buy ${listing.title}`} title="Buy">
+                                <span className="cart-icon" aria-hidden="true" />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Message ${seller.name}`}
+                                title="Message"
+                                onClick={() => openMessageModal(listing)}
+                              >
+                                <span className="message-icon" aria-hidden="true" />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Make offer on ${listing.title}`}
+                                title="Make Offer"
+                                onClick={() => openOfferModal(listing)}
+                              >
+                                <span aria-hidden="true">$</span>
+                              </button>
+                            </div>
+                          )}
+                          <Link className="view-card" href={listing.href}>
+                            View Card
+                          </Link>
                         </div>
-                      )}
-                      <Link className="view-card" href={listing.href}>
-                        View Card
-                      </Link>
-                    </div>
+                      </>
+                    )}
                   </article>
                 ))}
               </section>
@@ -1137,9 +1909,24 @@ export default function SellerCollectionPage() {
                 </p>
               </section>
             )}
+
+            {!isOwner ? activitySection : null}
           </div>
 
+          {!isOwner ? (
           <aside className="sidebar">
+            <section className="panel sidebar-panel collection-personality-panel">
+              <h2>Collection Personality</h2>
+              <div className="personality-token">{collectionPersonality}</div>
+              {collectionReputation ? (
+                <div className="personality-token secondary">{collectionReputation}</div>
+              ) : null}
+              <p className="sidebar-note">
+                Personality and reputation are derived from visible cards, value,
+                categories, and collection depth.
+              </p>
+            </section>
+
             <section className="panel sidebar-panel">
               <h2>Seller Rewards</h2>
               <Metric label="Current Level" value={seller.level} />
@@ -1171,14 +1958,202 @@ export default function SellerCollectionPage() {
                 />
                 <Metric label="Grail Cards" value={String(grailCount)} />
                 <Metric label="Hot Cards" value={String(hotCount)} />
-                <Metric label="Avg Card Value" value={formatCurrency(averagePrice)} />
+                <Metric label="Avg Card Value" value={formatCurrency(averageCardValue)} />
               </div>
               <MarketChart />
             </section>
 
+            <section className="panel sidebar-panel collection-framework-panel">
+              <h2>Collection Milestones</h2>
+              <div className="framework-list">
+                <span>First Card</span>
+                <span>100 Cards</span>
+                <span>$10k Collection</span>
+                <span>Collection Featured</span>
+              </div>
+              <p className="sidebar-note">
+                Milestone tracking is reserved for a future collection identity pass.
+              </p>
+            </section>
+
+            <section className="panel sidebar-panel collection-framework-panel">
+              <h2>Collection Timeline</h2>
+              <div className="timeline-preview">
+                <div>
+                  <em />
+                  <span>First public card</span>
+                </div>
+                <div>
+                  <em />
+                  <span>Latest addition</span>
+                </div>
+                <div>
+                  <em />
+                  <span>Future milestone</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="panel sidebar-panel collection-framework-panel">
+              <h2>Showcase Mode</h2>
+              <p className="sidebar-note">
+                Future showcase mode can present this collection without marketplace
+                controls, filters, or owner administration.
+              </p>
+              <div className="framework-list">
+                <span>Share Preview Ready</span>
+                <span>Open Graph Ready</span>
+                <span>Distraction-Free Future</span>
+              </div>
+            </section>
           </aside>
+          ) : null}
         </section>
       </div>
+
+      {studioMode ? (
+        <div
+          className="studio-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeStudioModal();
+            }
+          }}
+        >
+          <section
+            className="studio-modal panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="studio-modal-title"
+            aria-describedby="studio-modal-description"
+          >
+            <div className="studio-modal-header">
+              <div>
+                <span>Collection Studio</span>
+                <h2 id="studio-modal-title">
+                  {studioMode === "showcase"
+                    ? "Choose your Showcase Card"
+                    : "Choose your Featured Cards"}
+                </h2>
+                <p id="studio-modal-description">
+                  {studioMode === "showcase"
+                    ? "Select the card that should anchor the first impression of your collection."
+                    : "Select the cards visitors should remember first when they enter your collection."}
+                </p>
+              </div>
+              <button
+                ref={studioCloseButtonRef}
+                type="button"
+                aria-label="Close Collection Studio"
+                onClick={closeStudioModal}
+              >
+                x
+              </button>
+            </div>
+
+            {studioMode === "showcase" ? (
+              <div className="studio-preview-grid">
+                <div className="studio-live-preview" aria-label="Showcase Card preview">
+                  <span>Live Preview</span>
+                  {draftShowcaseCard ? (
+                    <>
+                      <CardArtwork listing={draftShowcaseCard} />
+                      <strong>{draftShowcaseCard.title}</strong>
+                      <small>
+                        {draftShowcaseCard.conditionDisplay} · {draftShowcaseCard.priceDisplay}
+                      </small>
+                    </>
+                  ) : (
+                    <strong>No card selected.</strong>
+                  )}
+                </div>
+                <div className="studio-selection-grid" aria-label="Collection cards">
+                  {allListings.map((listing) => {
+                    const isSelected = draftShowcaseCardId === listing.id;
+                    const isCurrentShowcase = showcaseCard?.id === listing.id;
+
+                    return (
+                      <button
+                        key={listing.id}
+                        type="button"
+                        className={`studio-card-option${isSelected ? " selected" : ""}`}
+                        aria-pressed={isSelected}
+                        onClick={() => setDraftShowcaseCardId(listing.id)}
+                      >
+                        <CardArtwork listing={listing} />
+                        <span>
+                          <strong>{listing.title}</strong>
+                          <small>{listing.conditionDisplay} · {listing.priceDisplay}</small>
+                        </span>
+                        <em>{isCurrentShowcase ? "Current Showcase" : "Select"}</em>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="studio-featured-preview" aria-label="Selected Featured Cards">
+                  <span>Selected Gallery</span>
+                  {draftFeaturedListings.length > 0 ? (
+                    <div>
+                      {draftFeaturedListings.slice(0, 6).map((listing) => (
+                        <CardArtwork key={listing.id} listing={listing} />
+                      ))}
+                    </div>
+                  ) : (
+                    <strong>No featured cards selected.</strong>
+                  )}
+                </div>
+                <div className="studio-selection-grid featured-selection" aria-label="Collection cards">
+                  {allListings.map((listing) => {
+                    const isSelected = draftFeaturedCardIds.includes(listing.id);
+                    const isShowcase = showcaseCard?.id === listing.id;
+
+                    return (
+                      <button
+                        key={listing.id}
+                        type="button"
+                        className={`studio-card-option${isSelected ? " selected" : ""}`}
+                        aria-pressed={isSelected}
+                        onClick={() => toggleDraftFeaturedCard(listing.id)}
+                      >
+                        <CardArtwork listing={listing} />
+                        <span>
+                          <strong>{listing.title}</strong>
+                          <small>{listing.conditionDisplay} · {listing.priceDisplay}</small>
+                        </span>
+                        <em>
+                          {isSelected
+                            ? "Featured"
+                            : isShowcase
+                              ? "Showcase Card"
+                              : "Select"}
+                        </em>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            <div className="studio-modal-actions">
+              <button
+                type="button"
+                className="primary"
+                onClick={studioMode === "showcase" ? saveShowcaseCard : saveFeaturedCards}
+                disabled={studioMode === "showcase" ? !draftShowcaseCardId : false}
+              >
+                {studioMode === "showcase" ? "Save Showcase Card" : "Save Featured Cards"}
+              </button>
+              <button type="button" onClick={closeStudioModal}>
+                Cancel
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {offerListing ? (
         <div className="message-modal-backdrop" role="presentation">
@@ -1358,7 +2333,7 @@ const pageStyles = `
   }
 
   .collection-shell {
-    width: 1240px;
+    width: min(1240px, calc(100vw - 32px));
     margin: 0 auto;
     padding: 8px 0 38px;
   }
@@ -1392,8 +2367,429 @@ const pageStyles = `
     text-underline-offset: 3px;
   }
 
+  .collection-showcase-hero,
   .seller-hero {
     padding: 18px;
+  }
+
+  .collection-banner {
+    min-height: 420px;
+    border: 1px solid rgba(231,222,208,0.16);
+    border-radius: 20px;
+    background:
+      radial-gradient(circle at 18% 12%, rgba(231,222,208,0.16), transparent 28%),
+      radial-gradient(circle at 78% 0%, rgba(185,146,74,0.12), transparent 24%),
+      linear-gradient(135deg, #111112, #050506 54%, #0c0c0e);
+    background-size: cover;
+    background-position: center;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 270px;
+    gap: 24px;
+    align-items: end;
+    padding: clamp(22px, 4vw, 42px);
+    overflow: hidden;
+    position: relative;
+    box-sizing: border-box;
+  }
+
+  .collection-banner::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.04), transparent 34%),
+      radial-gradient(circle at 72% 18%, rgba(231,222,208,0.10), transparent 28%);
+    pointer-events: none;
+  }
+
+  .collection-banner-copy,
+  .showcase-card-panel {
+    position: relative;
+    z-index: 1;
+  }
+
+  .collection-banner-copy span,
+  .section-heading-row span,
+  .showcase-card-panel span,
+  .highlight-card span,
+  .featured-card span,
+  .activity-card span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .collection-banner-copy h1 {
+    max-width: 760px;
+    margin: 12px 0 0;
+    color: #fff;
+    font-size: clamp(44px, 7vw, 88px);
+    line-height: 0.94;
+    font-weight: 950;
+    letter-spacing: 0;
+  }
+
+  .collection-banner-copy p,
+  .section-heading-row p,
+  .highlight-card small,
+  .featured-card small,
+  .activity-card small {
+    color: #a1a1aa;
+    font-size: 13px;
+    line-height: 19px;
+    font-weight: 800;
+  }
+
+  .collection-banner-copy p {
+    max-width: 720px;
+    margin: 18px 0 0;
+    color: #D8D2C8;
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  .collection-hero-tags {
+    margin-top: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .collection-hero-tags em,
+  .framework-list span,
+  .personality-token {
+    min-height: 28px;
+    border: 1px solid rgba(231,222,208,0.18);
+    border-radius: 999px;
+    background: rgba(231,222,208,0.055);
+    color: #E7DED0;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    font-size: 11px;
+    line-height: 14px;
+    font-style: normal;
+    font-weight: 900;
+  }
+
+  .showcase-card-panel {
+    border: 1px solid rgba(231,222,208,0.20);
+    border-radius: 18px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.018)),
+      rgba(5,5,6,0.74);
+    box-shadow: 0 24px 60px rgba(0,0,0,0.38);
+    padding: 16px;
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+    text-align: center;
+    backdrop-filter: blur(12px);
+  }
+
+  .showcase-card-panel a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .showcase-card-panel .art-shell {
+    width: 190px;
+    height: 226px;
+  }
+
+  .showcase-card-panel .uploaded-card-image {
+    max-width: 150px;
+    max-height: 198px;
+  }
+
+  .showcase-card-panel strong,
+  .highlight-card strong,
+  .featured-card strong,
+  .activity-card strong {
+    color: #fff;
+    font-size: 14px;
+    line-height: 19px;
+    font-weight: 900;
+  }
+
+  .showcase-card-panel strong {
+    display: block;
+    font-size: 16px;
+    line-height: 21px;
+  }
+
+  .showcase-card-panel small {
+    color: #85858f;
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: 800;
+  }
+
+  .empty-showcase {
+    align-content: center;
+    min-height: 240px;
+  }
+
+  .collection-hero-actions {
+    margin-top: 16px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .collection-hero-stats,
+  .collection-story-grid {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .collection-story-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .curate-hero {
+    border-color: transparent;
+    background:
+      radial-gradient(circle at 54% 54%, rgba(231,222,208,0.055), transparent 32%),
+      transparent;
+    box-shadow: none;
+    padding: 10px 0 0;
+  }
+
+  .curate-hero .collection-banner {
+    min-height: 430px;
+    grid-template-columns: minmax(0, 1fr) 340px minmax(180px, 0.62fr);
+    border-color: transparent;
+    border-radius: 0;
+    background:
+      radial-gradient(circle at 56% 78%, rgba(231,222,208,0.16), transparent 22%),
+      radial-gradient(circle at 18% 48%, rgba(201,205,211,0.05), transparent 28%),
+      transparent;
+    align-items: center;
+    padding: clamp(18px, 4vw, 48px) 0;
+  }
+
+  .curate-hero .collection-banner-copy h1 {
+    max-width: 620px;
+    font-size: clamp(48px, 6.5vw, 90px);
+    line-height: 0.92;
+  }
+
+  .curate-hero .collection-hero-tags {
+    margin-top: 22px;
+  }
+
+  .curate-hero .collection-hero-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-top: 12px;
+  }
+
+  .curate-hero .metric {
+    min-height: 72px;
+    background: rgba(8,8,10,0.58);
+  }
+
+  .curate-hero .showcase-card-panel {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    padding: 0;
+  }
+
+  .curate-hero .showcase-card-panel .art-shell {
+    width: 252px;
+    height: 318px;
+    border-color: rgba(231,222,208,0.08);
+    border-radius: 18px;
+    background:
+      radial-gradient(circle at 50% 96%, rgba(231,222,208,0.20), transparent 26%),
+      rgba(3,3,4,0.92);
+  }
+
+  .curate-hero .showcase-card-panel .uploaded-card-image {
+    max-width: 206px;
+    max-height: 274px;
+  }
+
+  .owner-hero-summary {
+    margin-top: 34px;
+    display: grid;
+    gap: 30px;
+  }
+
+  .owner-hero-numbers {
+    display: flex;
+    gap: 34px;
+    flex-wrap: wrap;
+  }
+
+  .owner-hero-numbers div {
+    min-width: 132px;
+    border-right: 1px solid rgba(231,222,208,0.12);
+    padding-right: 30px;
+  }
+
+  .owner-hero-numbers div:last-child {
+    border-right: 0;
+    padding-right: 0;
+  }
+
+  .owner-hero-numbers strong {
+    display: block;
+    color: #fff;
+    font-size: clamp(34px, 4vw, 52px);
+    line-height: 0.98;
+    font-weight: 950;
+  }
+
+  .owner-hero-numbers span {
+    display: block;
+    margin-top: 8px;
+    color: #C9CDD3;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .owner-latest-addition {
+    max-width: 520px;
+    color: inherit;
+    display: grid;
+    grid-template-columns: 62px minmax(0, 1fr);
+    gap: 16px;
+    align-items: center;
+    text-decoration: none;
+  }
+
+  .owner-latest-addition .art-shell {
+    width: 62px;
+    height: 82px;
+    border-radius: 8px;
+  }
+
+  .owner-latest-addition .uploaded-card-image {
+    max-width: 50px;
+    max-height: 68px;
+  }
+
+  .owner-latest-addition .mock-card {
+    width: 42px;
+    height: 62px;
+    border-radius: 6px;
+    padding: 3px;
+  }
+
+  .owner-latest-addition small,
+  .owner-latest-addition em {
+    display: block;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 16px;
+    font-style: normal;
+    font-weight: 800;
+  }
+
+  .owner-latest-addition strong {
+    display: block;
+    margin: 4px 0;
+    color: #fff;
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 900;
+  }
+
+  .owner-hero-note {
+    color: #a1a1aa;
+    font-size: 18px;
+    line-height: 27px;
+    font-style: italic;
+    font-weight: 500;
+  }
+
+  .owner-hero-note p {
+    margin: 0;
+    color: #a1a1aa;
+  }
+
+  .owner-hero-note strong {
+    display: block;
+    margin-top: 18px;
+    color: #E7DED0;
+    font-size: 13px;
+    line-height: 17px;
+    font-style: normal;
+    font-weight: 900;
+  }
+
+  .owner-management-grid span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .owner-management-grid button {
+    border: 1px solid rgba(231,222,208,0.14);
+    border-radius: 14px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)),
+      rgba(8,8,10,0.82);
+    padding: 14px;
+    box-sizing: border-box;
+  }
+
+  .owner-management-grid strong {
+    display: block;
+    margin-top: 0;
+    color: #fff;
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 900;
+  }
+
+  .owner-management-grid small {
+    display: block;
+    margin-top: 8px;
+    color: #a1a1aa;
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: 800;
+  }
+
+  .owner-management-grid button:disabled,
+  .studio-open-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+  }
+
+  .highlight-card {
+    min-height: 118px;
+    border: 1px solid rgba(231,222,208,0.14);
+    border-radius: 14px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)),
+      rgba(5,5,6,0.92);
+    box-shadow: 0 18px 44px rgba(0,0,0,0.22);
+    padding: 14px;
+    display: grid;
+    gap: 8px;
+    align-content: start;
+  }
+
+  .highlight-card strong,
+  .featured-card strong,
+  .activity-card strong {
+    display: block;
   }
 
   .seller-hero-main {
@@ -1480,6 +2876,7 @@ const pageStyles = `
   }
 
   .hero-actions button,
+  .collection-hero-actions button,
   .collection-toolbar button,
   .listing-actions button,
   .listing-actions a {
@@ -1491,7 +2888,8 @@ const pageStyles = `
     text-decoration: none;
   }
 
-  .hero-actions button {
+  .hero-actions button,
+  .collection-hero-actions button {
     height: 38px;
     border-radius: 10px;
     padding: 0 14px;
@@ -1500,11 +2898,22 @@ const pageStyles = `
 
   .hero-actions button.active,
   .hero-actions button:hover,
+  .collection-hero-actions button.active,
+  .collection-hero-actions button:hover,
   .collection-toolbar button.active,
   .collection-toolbar button:hover {
     border-color: rgba(231,222,208,0.62);
     background: rgba(231,222,208,0.11);
     box-shadow: 0 0 18px rgba(201,205,211,0.13);
+  }
+
+  .collection-hero-actions .primary-action {
+    border-color: rgba(231,222,208,0.54);
+    background:
+      linear-gradient(180deg, rgba(231,222,208,0.18), rgba(231,222,208,0.07)),
+      rgba(8,8,10,0.88);
+    color: #fff;
+    box-shadow: 0 12px 28px rgba(231,222,208,0.08);
   }
 
   .hero-status {
@@ -1571,10 +2980,532 @@ const pageStyles = `
     top: 16px;
   }
 
+  .collection-shell > .featured-cards-panel,
+  .collection-shell > .collection-activity-panel {
+    margin-top: 16px;
+  }
+
+  .collection-shell > .owner-management-panel {
+    margin-top: 8px;
+  }
+
   .collection-header,
+  .featured-cards-panel,
+  .collection-activity-panel,
+  .owner-management-panel,
   .collection-toolbar,
   .sidebar-panel {
     padding: 14px;
+  }
+
+  .owner-management-panel {
+    border-color: rgba(231,222,208,0.10);
+    border-radius: 18px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.026), rgba(255,255,255,0.008)),
+      rgba(7,7,8,0.82);
+    padding: clamp(20px, 2.6vw, 30px);
+  }
+
+  .owner-management-grid {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: repeat(7, minmax(124px, 1fr));
+    gap: 14px;
+  }
+
+  .studio-heading-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 14px;
+  }
+
+  .studio-heading-row span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .studio-heading-row h2 {
+    margin: 4px 0 0;
+    color: #fff;
+    font-size: 17px;
+    line-height: 22px;
+    font-weight: 900;
+  }
+
+  .studio-open-button {
+    min-height: 40px;
+    border: 1px solid rgba(231,222,208,0.32);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.07);
+    color: #E7DED0;
+    padding: 0 14px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .owner-management-grid button {
+    min-height: 138px;
+    text-align: center;
+    color: inherit;
+    cursor: pointer;
+    transition:
+      border-color 160ms ease,
+      background 160ms ease,
+      transform 160ms ease;
+  }
+
+  .owner-management-grid button:hover,
+  .owner-management-grid button:focus-visible {
+    border-color: rgba(231,222,208,0.42);
+    background: rgba(231,222,208,0.075);
+    transform: translateY(-1px);
+    outline: none;
+  }
+
+  .owner-featured-panel {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    padding: 46px 0 8px;
+  }
+
+  .owner-featured-panel .section-heading-row {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 18px;
+  }
+
+  .owner-featured-panel .featured-card-grid {
+    display: flex;
+    gap: 30px;
+    overflow-x: auto;
+    padding: 2px 2px 12px;
+    scrollbar-width: thin;
+  }
+
+  .owner-featured-panel .featured-card {
+    flex: 0 0 214px;
+    min-height: 356px;
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .owner-featured-panel .featured-card:hover {
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  .owner-featured-panel .featured-card .art-shell {
+    height: 270px;
+    border-radius: 12px;
+  }
+
+  .owner-card-layout {
+    grid-template-columns: 1fr;
+    margin-top: 42px;
+  }
+
+  .owner-card-layout .main-column {
+    gap: 12px;
+  }
+
+  .owner-all-cards-heading {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 18px;
+    padding-top: 4px;
+  }
+
+  .owner-all-cards-heading span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .owner-all-cards-heading h2 {
+    margin: 4px 0 0;
+    color: #fff;
+    font-size: 22px;
+    line-height: 27px;
+    font-weight: 900;
+  }
+
+  .owner-all-cards-heading p {
+    margin: 2px 0 0;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 800;
+  }
+
+  .owner-card-layout .collection-toolbar {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+    grid-template-columns: minmax(220px, 1fr) auto auto;
+  }
+
+  .owner-card-layout .listing-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .owner-card-layout .listing-card {
+    min-height: 0;
+    border-color: rgba(231,222,208,0.08);
+    background: rgba(7,7,8,0.72);
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .owner-card-layout .listing-card .art-shell {
+    width: 100%;
+    height: 248px;
+  }
+
+  .owner-card-layout .listing-card h3 {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .owner-card-layout .listing-meta {
+    min-height: 30px;
+  }
+
+  .owner-view-card {
+    width: 100%;
+    margin-top: 2px;
+  }
+
+  .owner-curator-actions {
+    display: grid;
+    gap: 7px;
+    margin-top: 2px;
+  }
+
+  .owner-curator-actions button,
+  .owner-curator-actions a {
+    min-height: 34px;
+    border: 1px solid rgba(231,222,208,0.20);
+    border-radius: 9px;
+    background: rgba(231,222,208,0.055);
+    color: #fff;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: inherit;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .owner-curator-actions button:hover,
+  .owner-curator-actions button:focus-visible,
+  .owner-curator-actions a:hover,
+  .owner-curator-actions a:focus-visible {
+    border-color: rgba(231,222,208,0.48);
+    background: rgba(231,222,208,0.10);
+    outline: none;
+  }
+
+  .owner-curator-actions button:disabled {
+    border-color: rgba(231,222,208,0.30);
+    background: rgba(231,222,208,0.10);
+    color: #E7DED0;
+    cursor: default;
+  }
+
+  .studio-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    background: rgba(0,0,0,0.76);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(18px, 3vw, 36px);
+    backdrop-filter: blur(18px);
+  }
+
+  .studio-modal {
+    width: min(1120px, 100%);
+    max-height: min(88vh, 920px);
+    overflow: auto;
+    border-radius: 24px;
+    border-color: rgba(231,222,208,0.16);
+    background:
+      radial-gradient(circle at 50% 0%, rgba(231,222,208,0.10), transparent 34%),
+      linear-gradient(180deg, rgba(255,255,255,0.052), rgba(255,255,255,0.014)),
+      rgba(6,6,7,0.96);
+    box-shadow: 0 42px 120px rgba(0,0,0,0.56);
+    padding: clamp(20px, 3vw, 34px);
+  }
+
+  .studio-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 24px;
+  }
+
+  .studio-modal-header span,
+  .studio-live-preview > span,
+  .studio-featured-preview > span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .studio-modal-header h2 {
+    margin: 6px 0 0;
+    color: #fff;
+    font-size: clamp(26px, 3.8vw, 44px);
+    line-height: 1;
+    font-weight: 900;
+  }
+
+  .studio-modal-header p {
+    max-width: 640px;
+    margin: 10px 0 0;
+    color: #a1a1aa;
+    font-size: 14px;
+    line-height: 21px;
+    font-weight: 800;
+  }
+
+  .studio-modal-header button {
+    width: 38px;
+    height: 38px;
+    border: 1px solid rgba(231,222,208,0.18);
+    border-radius: 999px;
+    background: rgba(231,222,208,0.06);
+    color: #fff;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .studio-modal-header button:hover,
+  .studio-modal-header button:focus-visible {
+    border-color: rgba(231,222,208,0.44);
+    outline: none;
+  }
+
+  .studio-preview-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+    gap: clamp(20px, 3vw, 32px);
+    align-items: start;
+  }
+
+  .studio-live-preview,
+  .studio-featured-preview {
+    border: 1px solid rgba(231,222,208,0.12);
+    border-radius: 22px;
+    background:
+      radial-gradient(circle at 50% 32%, rgba(231,222,208,0.14), transparent 58%),
+      rgba(8,8,10,0.78);
+    padding: 18px;
+    display: grid;
+    gap: 12px;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .studio-live-preview .art-shell {
+    width: min(220px, 100%);
+    height: 290px;
+    border-radius: 16px;
+  }
+
+  .studio-live-preview strong,
+  .studio-featured-preview strong {
+    color: #fff;
+    font-size: 16px;
+    line-height: 21px;
+    font-weight: 900;
+  }
+
+  .studio-live-preview small {
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 800;
+  }
+
+  .studio-featured-preview {
+    margin-bottom: 20px;
+    justify-items: stretch;
+    text-align: left;
+  }
+
+  .studio-featured-preview > div {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding: 2px 2px 8px;
+  }
+
+  .studio-featured-preview .art-shell {
+    flex: 0 0 92px;
+    width: 92px;
+    height: 126px;
+    border-radius: 10px;
+  }
+
+  .studio-selection-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .featured-selection {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .studio-card-option {
+    position: relative;
+    min-height: 250px;
+    border: 1px solid rgba(231,222,208,0.12);
+    border-radius: 18px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.008)),
+      rgba(8,8,10,0.82);
+    color: inherit;
+    padding: 12px;
+    display: grid;
+    grid-template-rows: 1fr auto auto;
+    gap: 10px;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      border-color 160ms ease,
+      background 160ms ease,
+      transform 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .studio-card-option:hover,
+  .studio-card-option:focus-visible {
+    border-color: rgba(231,222,208,0.36);
+    background: rgba(231,222,208,0.055);
+    outline: none;
+    transform: translateY(-1px);
+  }
+
+  .studio-card-option.selected {
+    border-color: rgba(231,222,208,0.70);
+    background:
+      linear-gradient(180deg, rgba(231,222,208,0.13), rgba(231,222,208,0.04)),
+      rgba(8,8,10,0.92);
+    box-shadow: 0 0 0 1px rgba(231,222,208,0.12), 0 20px 44px rgba(0,0,0,0.28);
+  }
+
+  .studio-card-option .art-shell {
+    width: 100%;
+    height: 178px;
+    border-radius: 12px;
+  }
+
+  .studio-card-option strong {
+    display: block;
+    color: #fff;
+    font-size: 13px;
+    line-height: 17px;
+    font-weight: 900;
+  }
+
+  .studio-card-option small {
+    display: block;
+    margin-top: 3px;
+    color: #a1a1aa;
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: 800;
+  }
+
+  .studio-card-option em {
+    justify-self: start;
+    border: 1px solid rgba(231,222,208,0.20);
+    border-radius: 999px;
+    background: rgba(231,222,208,0.08);
+    color: #E7DED0;
+    padding: 5px 8px;
+    font-size: 10px;
+    line-height: 12px;
+    font-style: normal;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .studio-card-option.selected em {
+    border-color: rgba(231,222,208,0.52);
+    background: rgba(231,222,208,0.15);
+    color: #fff;
+  }
+
+  .studio-modal-actions {
+    margin-top: 24px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .studio-modal-actions button {
+    min-height: 42px;
+    border: 1px solid rgba(231,222,208,0.22);
+    border-radius: 11px;
+    background: rgba(231,222,208,0.06);
+    color: #fff;
+    padding: 0 16px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .studio-modal-actions .primary {
+    border-color: rgba(231,222,208,0.48);
+    background:
+      linear-gradient(180deg, rgba(231,222,208,0.18), rgba(231,222,208,0.07)),
+      rgba(8,8,10,0.88);
+  }
+
+  .studio-modal-actions button:hover,
+  .studio-modal-actions button:focus-visible {
+    border-color: rgba(231,222,208,0.56);
+    outline: none;
+  }
+
+  .studio-modal-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   .message-modal-backdrop {
@@ -1765,6 +3696,7 @@ const pageStyles = `
     color: #111;
   }
 
+  .section-heading-row h2,
   .collection-header h2,
   .sidebar-panel h2,
   .empty-state h2 {
@@ -1775,8 +3707,13 @@ const pageStyles = `
     font-weight: 900;
   }
 
+  .section-heading-row p,
   .collection-header p {
     margin: 6px 0 0;
+  }
+
+  .section-heading-row {
+    margin-bottom: 14px;
   }
 
   .collection-stats {
@@ -1784,6 +3721,55 @@ const pageStyles = `
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10px;
+  }
+
+  .featured-card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .featured-card {
+    min-height: 228px;
+    border: 1px solid rgba(231,222,208,0.14);
+    border-radius: 14px;
+    background:
+      radial-gradient(circle at 50% 0%, rgba(231,222,208,0.10), transparent 42%),
+      rgba(8,8,10,0.78);
+    color: inherit;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+    text-decoration: none;
+    transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  }
+
+  .featured-card:hover {
+    transform: translateY(-1px);
+    border-color: rgba(231,222,208,0.34);
+    box-shadow: 0 18px 42px rgba(0,0,0,0.34);
+  }
+
+  .featured-card .art-shell {
+    width: 100%;
+    height: 166px;
+  }
+
+  .featured-card span,
+  .activity-card span {
+    display: block;
+  }
+
+  .featured-card strong,
+  .activity-card strong {
+    margin-top: 5px;
+  }
+
+  .featured-card small,
+  .activity-card small {
+    display: block;
+    margin-top: 4px;
   }
 
   .collection-toolbar {
@@ -1846,6 +3832,27 @@ const pageStyles = `
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
+  }
+
+  .activity-card-list {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .activity-card {
+    border: 1px solid rgba(201,205,211,0.13);
+    border-radius: 13px;
+    background: rgba(8,8,10,0.72);
+    color: inherit;
+    padding: 12px;
+    text-decoration: none;
+    transition: border-color 160ms ease, transform 160ms ease;
+  }
+
+  .activity-card:hover {
+    border-color: rgba(231,222,208,0.28);
+    transform: translateY(-1px);
   }
 
   .listing-card {
@@ -2227,6 +4234,59 @@ const pageStyles = `
     gap: 10px;
   }
 
+  .personality-token {
+    justify-self: start;
+    border-color: rgba(185,146,74,0.28);
+    background: rgba(185,146,74,0.075);
+  }
+
+  .personality-token.secondary {
+    border-color: rgba(231,222,208,0.22);
+    background: rgba(231,222,208,0.055);
+  }
+
+  .framework-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .framework-list span {
+    min-height: 26px;
+    border-color: rgba(201,205,211,0.14);
+    color: #C9CDD3;
+    background: rgba(201,205,211,0.04);
+    font-size: 10px;
+  }
+
+  .timeline-preview {
+    display: grid;
+    gap: 10px;
+  }
+
+  .timeline-preview div {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 9px;
+    align-items: center;
+  }
+
+  .timeline-preview em {
+    width: 14px;
+    height: 14px;
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 999px;
+    background: radial-gradient(circle, #E7DED0 0 28%, #050506 34%);
+    box-shadow: 0 0 18px rgba(231,222,208,0.10);
+  }
+
+  .timeline-preview span {
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 800;
+  }
+
   .progress-block {
     border: 1px solid #202026;
     border-radius: 10px;
@@ -2270,16 +4330,16 @@ const pageStyles = `
   }
 
   .chart-fill {
-    fill: rgba(52,211,153,0.1);
+    fill: rgba(231,222,208,0.10);
   }
 
   .chart-line {
     fill: none;
-    stroke: #34d399;
+    stroke: #E7DED0;
     stroke-width: 3;
     stroke-linecap: round;
     stroke-linejoin: round;
-    filter: drop-shadow(0 0 8px rgba(52,211,153,0.24));
+    filter: drop-shadow(0 0 8px rgba(231,222,208,0.18));
   }
 
   .chart-grid path {
@@ -2316,13 +4376,18 @@ const pageStyles = `
   }
 
   @media (max-width: 1100px) {
-    .collection-shell {
-      width: calc(100vw - 32px);
-    }
-
+    .collection-banner,
     .collection-layout,
+    .collection-hero-stats,
+    .collection-story-grid,
     .seller-hero-stats,
     .collection-stats,
+    .featured-card-grid,
+    .activity-card-list,
+    .owner-management-grid,
+    .studio-preview-grid,
+    .studio-selection-grid,
+    .featured-selection,
     .collection-toolbar,
     .listing-grid {
       grid-template-columns: 1fr;
@@ -2334,6 +4399,100 @@ const pageStyles = `
 
     .filter-buttons {
       flex-wrap: wrap;
+    }
+
+    .curate-hero .collection-banner {
+      grid-template-columns: 1fr;
+    }
+
+    .curate-hero .collection-hero-stats,
+    .owner-management-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .studio-selection-grid,
+    .featured-selection {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .owner-card-layout .listing-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 680px) {
+    .collection-shell {
+      width: calc(100vw - 22px);
+    }
+
+    .collection-banner {
+      min-height: 560px;
+      border-radius: 16px;
+      padding: 18px;
+    }
+
+    .collection-banner-copy h1 {
+      font-size: 42px;
+      line-height: 0.98;
+    }
+
+    .showcase-card-panel .art-shell {
+      width: 168px;
+      height: 206px;
+    }
+
+    .collection-hero-actions {
+      display: grid;
+    }
+
+    .collection-hero-actions button {
+      width: 100%;
+    }
+
+    .curate-hero .collection-hero-stats,
+    .owner-management-grid,
+    .studio-selection-grid,
+    .featured-selection,
+    .owner-card-layout .collection-toolbar,
+    .owner-card-layout .listing-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .studio-modal {
+      max-height: calc(100vh - 28px);
+      border-radius: 18px;
+    }
+
+    .studio-card-option {
+      min-height: 220px;
+    }
+
+    .owner-curator-actions {
+      grid-template-columns: 1fr;
+    }
+
+    .studio-heading-row,
+    .owner-all-cards-heading {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .featured-card,
+    .activity-card,
+    .studio-card-option,
+    .owner-management-grid button,
+    .listing-card {
+      transition: none;
+    }
+
+    .featured-card:hover,
+    .activity-card:hover,
+    .studio-card-option:hover,
+    .owner-management-grid button:hover,
+    .listing-card:hover {
+      transform: none;
     }
   }
 `;

@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
-import Stripe from "stripe";
+import { createTransactionCheckoutSession } from "../../../../lib/transactionCheckout";
 import {
   createServiceSupabaseClient,
   getCurrentUser,
-  getRequiredEnv,
-  getSiteUrl,
   type AuctionListingRow,
 } from "../../_shared";
 
@@ -24,11 +22,9 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   let supabase;
-  let stripe;
 
   try {
     supabase = createServiceSupabaseClient();
-    stripe = new Stripe(getRequiredEnv("STRIPE_SECRET_KEY"));
   } catch (error) {
     console.error("Auction winner checkout configuration error:", error);
     return NextResponse.json(
@@ -97,41 +93,21 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  const siteUrl = getSiteUrl();
-  const stripeMetadata = {
-    type: "auction_sale",
-    source: "grail",
-    listingId,
-    sellerId: listing.seller_id,
-    buyerId: user.id,
-    auctionId: listingId,
-  };
-
   try {
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      client_reference_id: user.id,
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: "usd",
-            unit_amount: Math.round(winningBid * 100),
-            product_data: {
-              name: listing.title || "GRAIL Auction",
-            },
-          },
-        },
-      ],
-      success_url: `${siteUrl}/checkout/${listingId}?success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${siteUrl}/cards/${listingId}?auction_checkout=canceled`,
-      metadata: stripeMetadata,
-      payment_intent_data: {
-        metadata: stripeMetadata,
+    const checkout = await createTransactionCheckoutSession({
+      transactionType: "auction",
+      listingId,
+      sellerId: listing.seller_id,
+      buyerId: user.id,
+      amount: winningBid,
+      title: listing.title || "GRAIL Auction",
+      cancelPath: `/cards/${listingId}?auction_checkout=canceled`,
+      extraMetadata: {
+        auctionId: listingId,
       },
     });
 
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({ url: checkout.url });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Stripe checkout failed.";
     console.error("Auction winner Stripe checkout error:", {

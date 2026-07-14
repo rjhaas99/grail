@@ -770,6 +770,7 @@ export default function CardDetailPage() {
     isHighest: false,
   });
   const [ownerActionStatus, setOwnerActionStatus] = useState("");
+  const [auctionClockMs, setAuctionClockMs] = useState(() => new Date().getTime());
   const card = mockCard ?? realCard;
   const availablePhotoViews: PhotoView[] = card?.imageUrls
     ? photoViews.filter((view) => Boolean(card.imageUrls?.[view]))
@@ -785,6 +786,20 @@ export default function CardDetailPage() {
       highestBidState.listingId === auctionCardId &&
       highestBidState.isHighest,
   );
+
+  useEffect(() => {
+    if (!auctionCardId) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setAuctionClockMs(new Date().getTime());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [auctionCardId]);
 
   function goBack() {
     if (typeof window !== "undefined" && window.history.length > 1) {
@@ -1600,6 +1615,17 @@ export default function CardDetailPage() {
   const minimumNextBid = isAuction ? getMinimumNextBid(card) : 0;
   const auctionReserveStatus = isAuction ? getAuctionReserveStatus(card) : "";
   const isAuctionAwaitingPayment = card.auctionStatus === "awaiting_payment";
+  const isAuctionFinalizing =
+    isAuction &&
+    (card.auctionStatus === "finalizing" ||
+      (card.auctionStatus === "active" &&
+        Boolean(card.auctionEndsAt) &&
+        new Date(card.auctionEndsAt || 0).getTime() <= auctionClockMs));
+  const isAuctionOpenForBids =
+    isAuction &&
+    card.auctionStatus === "active" &&
+    Boolean(card.auctionEndsAt) &&
+    new Date(card.auctionEndsAt || 0).getTime() > auctionClockMs;
   const isAuctionWinner =
     Boolean(currentUserId) && card.auctionWinnerId === currentUserId;
   const listingStatusLower = card.listingStatus?.toLowerCase() || "";
@@ -1613,10 +1639,12 @@ export default function CardDetailPage() {
     ? `Sold · ${formatCurrency(soldPrice)}`
     : "Sold";
   const auctionPanelStatus = isAuction
-    ? card.auctionStatus === "active"
+    ? isAuctionFinalizing
+      ? "Finalizing Auction"
+      : card.auctionStatus === "active"
       ? "Auction"
       : card.auctionStatus === "awaiting_payment"
-        ? "Awaiting Payment"
+        ? "Payment Pending"
         : card.auctionStatus === "ended_reserve_not_met"
           ? "Reserve Not Met"
           : card.auctionStatus === "payment_expired"
@@ -1626,7 +1654,9 @@ export default function CardDetailPage() {
               : "Auction Ended"
     : "";
   const auctionEndedMessage =
-    card.auctionStatus === "awaiting_payment"
+    isAuctionFinalizing
+      ? "Finalizing Auction. GRAIL is confirming the winning bid."
+      : card.auctionStatus === "awaiting_payment"
       ? isAuctionWinner
         ? "You won this auction. Complete payment to finish the order."
         : "Auction ended. Awaiting winner payment."
@@ -1636,7 +1666,7 @@ export default function CardDetailPage() {
           ? "Auction payment window expired."
           : "Auction Ended.";
   const auctionSummaryText =
-    card.auctionStatus === "active"
+    isAuctionOpenForBids
       ? `${formatTimeRemaining(card.auctionEndsAt)} · ${auctionReserveStatus} · ${
           card.auctionBidCount || 0
         } bids`
@@ -1832,10 +1862,22 @@ export default function CardDetailPage() {
                       </Link>
                     ) : isAuction ? (
                       <>
-                        <Link className="buy-button" href="/seller-dashboard">
-                          Manage Auction
-                        </Link>
-                        <Link href={`/cards/${card.id}`}>View Auction</Link>
+                        {card.auctionStatus === "payment_expired" ? (
+                          <>
+                            <Link className="buy-button" href={`/list?edit=${card.id}`}>
+                              Relist Auction
+                            </Link>
+                            <Link href={`/list?edit=${card.id}`}>Sell Fixed Price</Link>
+                            <Link href={`/cards/${card.id}`}>Keep in Collection</Link>
+                          </>
+                        ) : (
+                          <>
+                            <Link className="buy-button" href="/seller-dashboard">
+                              Manage Auction
+                            </Link>
+                            <Link href={`/cards/${card.id}`}>View Auction</Link>
+                          </>
+                        )}
                       </>
                     ) : isCollectionOnly ? (
                       <>
@@ -1894,7 +1936,7 @@ export default function CardDetailPage() {
                         >
                           {isStartingAuctionCheckout ? "Opening Checkout..." : "Complete Payment"}
                         </button>
-                      ) : card.auctionStatus === "active" ? (
+                      ) : isAuctionOpenForBids ? (
                         <>
                           <label className="auction-bid-field">
                             <span>Your bid</span>

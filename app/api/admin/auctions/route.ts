@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { transactionLifecycleLabels } from "../../../lib/transactionCheckout";
 
 export const runtime = "nodejs";
 
@@ -109,6 +110,34 @@ function reserveStatus(auction: AuctionRow) {
   return auction.auction_reserve_met_at ? "Reserve Met" : "Reserve Not Met";
 }
 
+function getAuctionTransactionState(auction: AuctionRow) {
+  if (auction.auction_status === "finalizing") {
+    return "finalizing";
+  }
+
+  if (auction.auction_status === "awaiting_payment") {
+    return "payment_pending";
+  }
+
+  if (auction.auction_status === "paid" || auction.status === "sold") {
+    return "paid";
+  }
+
+  if (auction.auction_status === "payment_expired") {
+    return "expired";
+  }
+
+  if (
+    auction.auction_status === "cancelled" ||
+    auction.auction_status === "ended_reserve_not_met" ||
+    auction.auction_status === "ended_unsold"
+  ) {
+    return "cancelled";
+  }
+
+  return "payment_needed";
+}
+
 export async function GET(request: Request) {
   let serviceSupabase;
 
@@ -164,40 +193,46 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({
-    auctions: auctions.map((auction) => ({
-      id: auction.id,
-      shortId: shortId(auction.id),
-      title: auction.title || "GRAIL Auction",
-      sellerId: auction.seller_id,
-      sellerName: getProfileName(
-        auction.seller_id ? profilesById.get(auction.seller_id) : undefined,
-        auction.seller_id,
-      ),
-      status: auction.status || "unknown",
-      auctionStatus: auction.auction_status || "unknown",
-      endsAt: auction.auction_ends_at,
-      startingBid: Number(auction.auction_starting_bid || 0),
-      currentBid: Number(auction.auction_current_bid || 0),
-      bidCount: Number(auction.auction_bid_count || 0),
-      reserveStatus: reserveStatus(auction),
-      reserveFeeAmount: Number(auction.reserve_fee_amount || 0),
-      reserveFeeStatus: auction.reserve_fee_status || "none",
-      winnerId: auction.auction_winner_id,
-      winnerName: getProfileName(
-        auction.auction_winner_id
-          ? profilesById.get(auction.auction_winner_id)
-          : undefined,
-        auction.auction_winner_id,
-      ),
-      paymentDueAt: auction.auction_payment_due_at,
-      stripeReserveFeeCheckoutSessionId:
-        auction.stripe_reserve_fee_checkout_session_id || "",
-      stripeReserveFeePaymentIntentId:
-        auction.stripe_reserve_fee_payment_intent_id || "",
-      stripeReserveFeeChargeId: auction.stripe_reserve_fee_charge_id || "",
-      stripeReserveFeeRefundId: auction.stripe_reserve_fee_refund_id || "",
-      createdAt: auction.created_at,
-    })),
+    auctions: auctions.map((auction) => {
+      const transactionState = getAuctionTransactionState(auction);
+
+      return {
+        id: auction.id,
+        shortId: shortId(auction.id),
+        title: auction.title || "GRAIL Auction",
+        sellerId: auction.seller_id,
+        sellerName: getProfileName(
+          auction.seller_id ? profilesById.get(auction.seller_id) : undefined,
+          auction.seller_id,
+        ),
+        status: auction.status || "unknown",
+        auctionStatus: auction.auction_status || "unknown",
+        transactionState,
+        transactionStateLabel: transactionLifecycleLabels[transactionState],
+        endsAt: auction.auction_ends_at,
+        startingBid: Number(auction.auction_starting_bid || 0),
+        currentBid: Number(auction.auction_current_bid || 0),
+        bidCount: Number(auction.auction_bid_count || 0),
+        reserveStatus: reserveStatus(auction),
+        reserveFeeAmount: Number(auction.reserve_fee_amount || 0),
+        reserveFeeStatus: auction.reserve_fee_status || "none",
+        winnerId: auction.auction_winner_id,
+        winnerName: getProfileName(
+          auction.auction_winner_id
+            ? profilesById.get(auction.auction_winner_id)
+            : undefined,
+          auction.auction_winner_id,
+        ),
+        paymentDueAt: auction.auction_payment_due_at,
+        stripeReserveFeeCheckoutSessionId:
+          auction.stripe_reserve_fee_checkout_session_id || "",
+        stripeReserveFeePaymentIntentId:
+          auction.stripe_reserve_fee_payment_intent_id || "",
+        stripeReserveFeeChargeId: auction.stripe_reserve_fee_charge_id || "",
+        stripeReserveFeeRefundId: auction.stripe_reserve_fee_refund_id || "",
+        createdAt: auction.created_at,
+      };
+    }),
   });
 }
 

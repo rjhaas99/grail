@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import GrailPassPresenceCard from "../components/GrailPassPresenceCard";
 import Header from "../components/Header";
 import { mockSellerDashboardData } from "../lib/mockData";
 import {
@@ -139,6 +140,7 @@ type AuctionDashboardListing = {
   endsAt?: string | null;
   reserveStatus: string;
   reserveFeeStatus: string;
+  paymentDueAt?: string | null;
   href: string;
 };
 
@@ -343,6 +345,38 @@ function getSellerPayoutLabel(order: DashboardOrder) {
   }
 
   return "Pending";
+}
+
+function getSellerAuctionLifecycleLabel(auction: AuctionDashboardListing) {
+  if (auction.auctionStatus === "finalizing") {
+    return "Finalizing Auction";
+  }
+
+  if (auction.auctionStatus === "awaiting_payment") {
+    return "Payment Pending";
+  }
+
+  if (auction.auctionStatus === "paid") {
+    return "Paid / Ready to Ship";
+  }
+
+  if (auction.auctionStatus === "payment_expired") {
+    return "Payment Expired";
+  }
+
+  if (auction.auctionStatus === "ended_reserve_not_met") {
+    return "Reserve Not Met";
+  }
+
+  if (auction.auctionStatus === "ended_unsold") {
+    return "Ended Unsold";
+  }
+
+  if (auction.auctionStatus === "active") {
+    return "Active";
+  }
+
+  return auction.auctionStatus.replace(/_/g, " ");
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -593,7 +627,7 @@ export default function SellerDashboardPage() {
       const { data, error } = await supabase
         .from("listings")
         .select(
-          "id, title, status, auction_status, auction_ends_at, auction_starting_bid, auction_current_bid, auction_bid_count, auction_reserve_met_at, reserve_fee_status",
+          "id, title, status, auction_status, auction_ends_at, auction_starting_bid, auction_current_bid, auction_bid_count, auction_reserve_met_at, auction_payment_due_at, reserve_fee_status",
         )
         .eq("seller_id", session.user.id)
         .eq("sale_format", "auction")
@@ -621,6 +655,7 @@ export default function SellerDashboardPage() {
           endsAt: listing.auction_ends_at,
           reserveStatus: getAuctionReserveStatus(listing),
           reserveFeeStatus: listing.reserve_fee_status || "none",
+          paymentDueAt: listing.auction_payment_due_at,
           href: `/cards/${listing.id}`,
         })),
       );
@@ -1123,17 +1158,29 @@ export default function SellerDashboardPage() {
                     <article key={auction.id} className="table-row listing-row auction-row">
                       <div>
                         <strong>{auction.title}</strong>
-                        <span>{auction.auctionStatus.replace(/_/g, " ")}</span>
+                        <span>{getSellerAuctionLifecycleLabel(auction)}</span>
                       </div>
                       <span>
                         {formatCurrency(auction.currentBid || auction.startingBid)}
                       </span>
                       <span>{auction.bidCount} bids</span>
                       <span>{auction.reserveStatus}</span>
-                      <span>{formatAuctionTime(auction.endsAt)}</span>
+                      <span>
+                        {auction.auctionStatus === "awaiting_payment"
+                          ? `Pay by ${formatDateTime(auction.paymentDueAt)}`
+                          : formatAuctionTime(auction.endsAt)}
+                      </span>
                       <span>Commitment Fee {auction.reserveFeeStatus}</span>
                       <div className="row-actions">
-                        <Link href={auction.href}>View Auction</Link>
+                        {auction.auctionStatus === "payment_expired" ? (
+                          <>
+                            <Link href={`/list?edit=${auction.id}`}>Relist Auction</Link>
+                            <Link href={`/list?edit=${auction.id}`}>Sell Fixed Price</Link>
+                            <Link href={auction.href}>Keep in Collection</Link>
+                          </>
+                        ) : (
+                          <Link href={auction.href}>View Auction</Link>
+                        )}
                       </div>
                     </article>
                   ))
@@ -1456,6 +1503,13 @@ export default function SellerDashboardPage() {
                 Automatic GRAIL Credit rewards are awarded after eligible orders
                 complete. Current reward terms are pulled from GRAIL Economy.
               </p>
+              <GrailPassPresenceCard
+                variant="compact"
+                eyebrow="Seller Preview"
+                title="Future marketplace tools."
+                description="GRAIL Pass can later surface featured listing credits and seller presentation benefits without changing the seller dashboard workflow."
+                perkKeys={["featured_listing_credit"]}
+              />
             </section>
 
             <section className="panel sidebar-panel">

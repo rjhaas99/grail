@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import Stripe from "stripe";
 import { supabase } from "../../../lib/supabase";
-import { getConfiguredSiteUrl } from "../../lib/siteConfig";
+import { createTransactionCheckoutSession } from "../../lib/transactionCheckout";
 
 type CheckoutRequestBody = {
   listingId?: string;
@@ -33,7 +32,6 @@ function buildListingTitle(listing: CheckoutListing) {
 
 export async function POST(request: Request) {
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-  const siteUrl = getConfiguredSiteUrl();
 
   if (!stripeSecretKey) {
     return NextResponse.json(
@@ -101,6 +99,13 @@ export async function POST(request: Request) {
     const price = Number(listing.price || 0);
     const saleFormat = listing.sale_format || "fixed";
 
+    if (!listing.seller_id) {
+      return NextResponse.json(
+        { error: "This listing is missing seller payment information." },
+        { status: 400 },
+      );
+    }
+
     if (listing.status !== "active") {
       return NextResponse.json(
         { error: "This card is open to offers, not Buy Now." },
@@ -148,48 +153,24 @@ export async function POST(request: Request) {
       buyerId = user?.id || "";
     }
 
-    const stripe = new Stripe(stripeSecretKey);
     const title = buildListingTitle(listing);
-    const unitAmount = Math.round(price * 100);
-    const stripeMetadata = {
-      type: "fixed_price_sale",
+    const checkout = await createTransactionCheckoutSession({
+      transactionType: "buy_now",
       listingId: listing.id,
-      sellerId: listing.seller_id || "",
+      sellerId: listing.seller_id,
       buyerId,
-      source: "grail",
-    };
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: title,
-            },
-            unit_amount: unitAmount,
-          },
-          quantity: 1,
-        },
-      ],
-      client_reference_id: buyerId || undefined,
-      success_url: `${siteUrl}/checkout/${listing.id}?success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${siteUrl}/checkout/${listing.id}?canceled=true`,
-      metadata: stripeMetadata,
-      payment_intent_data: {
-        metadata: stripeMetadata,
-      },
+      amount: price,
+      title,
     });
 
-    if (!session.url) {
+    if (!checkout.url) {
       return NextResponse.json(
         { error: "Stripe checkout URL could not be created." },
         { status: 500 },
       );
     }
 
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({ url: checkout.url });
   } catch (error) {
     console.error("Stripe checkout session error:", error);
     return NextResponse.json(

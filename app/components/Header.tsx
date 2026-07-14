@@ -16,7 +16,7 @@ type Profile = {
 const mainMenuItems = [
   { label: "Browse Cards", href: "/browse" },
   { label: "Sell a Card", href: "/list" },
-  { label: "Portfolio", href: "/portfolio" },
+  { label: "My Collection", href: "/portfolio" },
   { label: "Offers", href: "/offers" },
   { label: "Messages", href: "/messages" },
   { label: "Watched Cards", href: "/watched" },
@@ -27,6 +27,7 @@ const accountItems = [
   { label: "Profile", href: "/profile" },
   { label: "Notifications", href: "/notifications" },
   { label: "Wallet", href: "/wallet" },
+  { label: "GRAIL Pass", href: "/grail-pass" },
   { label: "Billing & Payouts", href: "/billing-payouts" },
   { label: "Orders", href: "/orders" },
   { label: "Seller Rewards", href: "/seller-rewards" },

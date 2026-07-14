@@ -151,7 +151,7 @@ export type MockConversation = {
   };
 };
 
-export type PortfolioCard = {
+export type CollectionCard = {
   id: string;
   listingId: string;
   title: string;
@@ -1209,7 +1209,7 @@ export const mockWatchedCards = mockListings
     belowMarket: listing.price < listing.marketValue,
   }));
 
-export const mockPortfolioCards: PortfolioCard[] = [
+export const mockCollectionCards: CollectionCard[] = [
   {
     id: "owned-1",
     listingId: "browse-1",

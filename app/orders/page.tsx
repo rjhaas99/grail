@@ -35,6 +35,29 @@ type ListingRow = {
   title: string | null;
 };
 
+type AuctionBidRow = {
+  id: string;
+  listing_id: string | null;
+  amount: number | null;
+  status: string | null;
+  created_at: string | null;
+};
+
+type AuctionBidListingRow = {
+  id: string;
+  title: string | null;
+  status: string | null;
+  sale_format: string | null;
+  auction_status: string | null;
+  auction_current_bid: number | null;
+  auction_winner_id: string | null;
+  auction_payment_due_at: string | null;
+  auction_ends_at: string | null;
+  auction_bid_count: number | null;
+  auction_reserve_met_at: string | null;
+  reserve_fee_status: string | null;
+};
+
 type ProfileRow = {
   id: string;
   full_name: string | null;
@@ -63,6 +86,20 @@ type OrderView = {
   inspectionCompletedAt?: string | null;
   completedAt?: string | null;
   refundStatus?: string;
+};
+
+type MyBidView = {
+  id: string;
+  listingId: string;
+  cardTitle: string;
+  amountDisplay: string;
+  currentBidDisplay: string;
+  status: string;
+  statusDetail: string;
+  date: string;
+  paymentDueAt: string | null;
+  href: string;
+  canCompletePayment: boolean;
 };
 
 const mockOrderViews: OrderView[] = mockOrders.map((order) => ({
@@ -212,11 +249,75 @@ function getSimpleOrderStatus(order: OrderView) {
   return "Paid";
 }
 
+function getBidLifecycleStatus({
+  bid,
+  listing,
+  currentUserId,
+}: {
+  bid: AuctionBidRow;
+  listing: AuctionBidListingRow;
+  currentUserId: string;
+}) {
+  const auctionStatus = listing.auction_status || "unknown";
+  const bidAmount = Number(bid.amount || 0);
+  const currentBid = Number(listing.auction_current_bid || 0);
+  const isWinner = listing.auction_winner_id === currentUserId;
+
+  if (auctionStatus === "active") {
+    return bidAmount >= currentBid
+      ? { status: "Current Bid", detail: "You currently have the highest bid." }
+      : { status: "Outbid", detail: "Another collector currently has the highest bid." };
+  }
+
+  if (auctionStatus === "finalizing") {
+    return {
+      status: "Finalizing Auction",
+      detail: "GRAIL is confirming the winning bid.",
+    };
+  }
+
+  if (auctionStatus === "awaiting_payment") {
+    return isWinner
+      ? {
+          status: "Payment Pending",
+          detail: `Complete payment by ${formatDateTime(listing.auction_payment_due_at)}.`,
+        }
+      : { status: "Lost Auction", detail: "Another bidder won this auction." };
+  }
+
+  if (auctionStatus === "paid") {
+    return isWinner
+      ? { status: "Completed", detail: "Auction payment was completed." }
+      : { status: "Lost Auction", detail: "Another bidder won this auction." };
+  }
+
+  if (auctionStatus === "payment_expired") {
+    return isWinner
+      ? {
+          status: "Payment Expired",
+          detail: "The 24-hour payment window expired.",
+        }
+      : { status: "Lost Auction", detail: "Another bidder won this auction." };
+  }
+
+  if (auctionStatus === "ended_reserve_not_met") {
+    return {
+      status: "Reserve Not Met",
+      detail: "The auction ended below reserve. No sale occurred.",
+    };
+  }
+
+  return { status: "Lost Auction", detail: "This auction has ended." };
+}
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderView[]>(mockOrderViews);
+  const [myBids, setMyBids] = useState<MyBidView[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingBids, setIsLoadingBids] = useState(true);
   const [notice, setNotice] = useState("Demo orders");
   const [updatingOrderId, setUpdatingOrderId] = useState("");
+  const [startingAuctionCheckoutId, setStartingAuctionCheckoutId] = useState("");
   const [disputeOrder, setDisputeOrder] = useState<OrderView | null>(null);
   const [disputeReason, setDisputeReason] = useState("");
   const [disputeNotes, setDisputeNotes] = useState("");
@@ -384,6 +485,131 @@ export default function OrdersPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadMyBids() {
+      setIsLoadingBids(true);
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.user.id) {
+        if (isMounted) {
+          setMyBids([]);
+          setIsLoadingBids(false);
+        }
+        return;
+      }
+
+      try {
+        const { data: bidData, error: bidError } = await supabase
+          .from("auction_bids")
+          .select("id, listing_id, amount, status, created_at")
+          .eq("bidder_id", session.user.id)
+          .eq("status", "valid")
+          .order("created_at", { ascending: false });
+
+        if (bidError) {
+          throw bidError;
+        }
+
+        const bids = (bidData || []) as AuctionBidRow[];
+        const latestBidByListing = new Map<string, AuctionBidRow>();
+
+        bids.forEach((bid) => {
+          if (!bid.listing_id) {
+            return;
+          }
+
+          const existing = latestBidByListing.get(bid.listing_id);
+
+          if (!existing || Number(bid.amount || 0) > Number(existing.amount || 0)) {
+            latestBidByListing.set(bid.listing_id, bid);
+          }
+        });
+
+        const listingIds = Array.from(latestBidByListing.keys());
+
+        if (listingIds.length === 0) {
+          if (isMounted) {
+            setMyBids([]);
+          }
+          return;
+        }
+
+        const { data: listingData, error: listingError } = await supabase
+          .from("listings")
+          .select(
+            "id, title, status, sale_format, auction_status, auction_current_bid, auction_winner_id, auction_payment_due_at, auction_ends_at, auction_bid_count, auction_reserve_met_at, reserve_fee_status",
+          )
+          .in("id", listingIds);
+
+        if (listingError) {
+          throw listingError;
+        }
+
+        const listingsById = new Map<string, AuctionBidListingRow>();
+        ((listingData || []) as AuctionBidListingRow[]).forEach((listing) => {
+          listingsById.set(listing.id, listing);
+        });
+
+        const views = Array.from(latestBidByListing.entries())
+          .map(([listingId, bid]) => {
+            const listing = listingsById.get(listingId);
+
+            if (!listing || listing.sale_format !== "auction") {
+              return null;
+            }
+
+            const lifecycle = getBidLifecycleStatus({
+              bid,
+              listing,
+              currentUserId: session.user.id,
+            });
+
+            return {
+              id: bid.id,
+              listingId,
+              cardTitle: listing.title || "GRAIL Auction",
+              amountDisplay: formatCurrency(Number(bid.amount || 0)),
+              currentBidDisplay: formatCurrency(Number(listing.auction_current_bid || 0)),
+              status: lifecycle.status,
+              statusDetail: lifecycle.detail,
+              date: formatDate(bid.created_at),
+              paymentDueAt: listing.auction_payment_due_at,
+              href: `/cards/${listingId}`,
+              canCompletePayment:
+                listing.auction_status === "awaiting_payment" &&
+                listing.auction_winner_id === session.user.id,
+            } satisfies MyBidView;
+          })
+          .filter((view): view is MyBidView => Boolean(view));
+
+        if (isMounted) {
+          setMyBids(views);
+        }
+      } catch (error) {
+        console.error("Orders My Bids fetch error:", error);
+
+        if (isMounted) {
+          setMyBids([]);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingBids(false);
+        }
+      }
+    }
+
+    loadMyBids();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   function openDispute(order: OrderView) {
     setDisputeOrder(order);
     setDisputeReason("");
@@ -411,6 +637,40 @@ export default function OrdersPage() {
       });
     } catch (error) {
       console.warn("Order system notification skipped:", error);
+    }
+  }
+
+  async function startAuctionCheckout(listingId: string) {
+    setStartingAuctionCheckoutId(listingId);
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setNotice("Sign in to complete auction payment.");
+      setStartingAuctionCheckoutId("");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/auctions/${listingId}/checkout`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const payload = (await response.json()) as { url?: string; error?: string };
+
+      if (!response.ok || !payload.url) {
+        throw new Error(payload.error || "Auction checkout could not be started.");
+      }
+
+      window.location.assign(payload.url);
+    } catch (error) {
+      console.error("Orders auction checkout error:", error);
+      setNotice(error instanceof Error ? error.message : "Auction checkout could not be started.");
+      setStartingAuctionCheckoutId("");
     }
   }
 
@@ -654,6 +914,59 @@ export default function OrdersPage() {
         </section>
 
         {notice ? <p className="orders-notice">{notice}</p> : null}
+
+        <section className="orders-list panel my-bids-panel" aria-labelledby="my-bids-title">
+          <div className="orders-section-heading">
+            <div>
+              <span>Auctions</span>
+              <h2 id="my-bids-title">My Bids</h2>
+              <p>Track current bids, won auctions, payment pending auctions, and completed auction purchases.</p>
+            </div>
+          </div>
+
+          {isLoadingBids ? <p className="empty-orders">Loading bids...</p> : null}
+
+          {!isLoadingBids && myBids.length === 0 ? (
+            <article className="empty-orders">
+              <h2>No auction bids yet.</h2>
+              <p>Your active, won, lost, and payment pending auction bids will appear here.</p>
+            </article>
+          ) : null}
+
+          {!isLoadingBids
+            ? myBids.map((bid) => (
+                <article key={bid.id} className="order-row bid-row">
+                  <div>
+                    <span>{bid.listingId}</span>
+                    <h2>{bid.cardTitle}</h2>
+                    <p>Your bid: {bid.amountDisplay}</p>
+                    <p>{bid.date}</p>
+                  </div>
+                  <div className="order-status-stack">
+                    <strong className={`status status-${bid.status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
+                      {bid.status}
+                    </strong>
+                    <span>{bid.currentBidDisplay} current bid</span>
+                  </div>
+                  <p className="order-summary-note">{bid.statusDetail}</p>
+                  <div className="order-actions">
+                    <Link href={bid.href}>View Auction</Link>
+                    {bid.canCompletePayment ? (
+                      <button
+                        type="button"
+                        disabled={startingAuctionCheckoutId === bid.listingId}
+                        onClick={() => startAuctionCheckout(bid.listingId)}
+                      >
+                        {startingAuctionCheckoutId === bid.listingId
+                          ? "Opening Checkout..."
+                          : "Complete Payment"}
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ))
+            : null}
+        </section>
 
         <section className="orders-list panel">
           {isLoading ? <p className="empty-orders">Loading orders...</p> : null}
@@ -959,6 +1272,35 @@ const pageStyles = `
     gap: 10px;
   }
 
+  .orders-section-heading {
+    padding: 10px 10px 4px;
+  }
+
+  .orders-section-heading span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .orders-section-heading h2 {
+    margin: 6px 0 0;
+    color: #fff;
+    font-size: 22px;
+    line-height: 27px;
+    font-weight: 900;
+  }
+
+  .orders-section-heading p {
+    margin: 6px 0 0;
+    color: #a1a1aa;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 800;
+  }
+
   .order-row {
     border: 1px solid #202026;
     border-radius: 10px;
@@ -968,6 +1310,10 @@ const pageStyles = `
     grid-template-columns: minmax(220px, 1fr) 140px minmax(190px, 0.8fr) auto auto;
     gap: 16px;
     align-items: center;
+  }
+
+  .bid-row {
+    grid-template-columns: minmax(220px, 1fr) 150px minmax(220px, 1fr) auto;
   }
 
   .order-row h2 {
@@ -1121,6 +1467,29 @@ const pageStyles = `
   }
 
   .status-delivered {
+    color: #86efac;
+    background: rgba(52,211,153,0.08);
+    border-color: rgba(52,211,153,0.24);
+  }
+
+  .status-current-bid,
+  .status-payment-pending,
+  .status-finalizing-auction {
+    color: #E7DED0;
+    background: rgba(231,222,208,0.08);
+    border-color: rgba(231,222,208,0.28);
+  }
+
+  .status-outbid,
+  .status-lost-auction,
+  .status-payment-expired,
+  .status-reserve-not-met {
+    color: #C9CDD3;
+    background: rgba(201,205,211,0.06);
+    border-color: rgba(201,205,211,0.18);
+  }
+
+  .status-completed {
     color: #86efac;
     background: rgba(52,211,153,0.08);
     border-color: rgba(52,211,153,0.24);

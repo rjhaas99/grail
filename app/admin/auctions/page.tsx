@@ -15,6 +15,8 @@ type AdminAuction = {
   sellerName: string;
   status: string;
   auctionStatus: string;
+  transactionState: string;
+  transactionStateLabel: string;
   endsAt?: string | null;
   startingBid: number;
   currentBid: number;
@@ -125,8 +127,8 @@ export default function AdminAuctionsPage() {
     () => [
       ["Total", auctions.length],
       ["Active", statusCount(auctions, "active")],
-      ["Awaiting Payment", statusCount(auctions, "awaiting_payment")],
-      ["Paid", statusCount(auctions, "paid")],
+      ["Payment Pending", auctions.filter((auction) => auction.transactionState === "payment_pending").length],
+      ["Paid", auctions.filter((auction) => auction.transactionState === "paid").length],
       ["Reserve Not Met", statusCount(auctions, "ended_reserve_not_met")],
       ["Cancelled", statusCount(auctions, "cancelled")],
     ],
@@ -218,6 +220,7 @@ export default function AdminAuctionsPage() {
                     <span>Reserve Commitment Fee {formatCurrency(auction.reserveFeeAmount)}</span>
                   </div>
                   <div>
+                    <span>Transaction {auction.transactionStateLabel}</span>
                     <span>Status {auction.status}</span>
                     <span>Auction {auction.auctionStatus}</span>
                     <span>Commitment Fee {auction.reserveFeeStatus}</span>
