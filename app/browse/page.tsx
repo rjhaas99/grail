@@ -403,12 +403,17 @@ function formatTimeRemaining(value?: string | null) {
 
   const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
   const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+  const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
 
   if (days > 0) {
     return `${days}d ${hours}h left`;
   }
 
-  return `${Math.max(hours, 1)}h left`;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m left`;
+  }
+
+  return `${Math.max(minutes, 1)}m left`;
 }
 
 function getAuctionReserveStatus(listing: BrowseListing | SupabaseListingRow) {

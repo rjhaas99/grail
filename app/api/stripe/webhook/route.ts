@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { normalizeAuctionDurationDays } from "../../../lib/auctionDurations";
 import { createSystemNotifications } from "../../../lib/serverNotifications";
 import { getTransactionTypeFromStripeCheckoutType } from "../../../lib/transactionCheckout";
 
@@ -86,17 +87,6 @@ function calculateReserveFee(reservePrice: number) {
 
 function addDays(value: Date, days: number) {
   return new Date(value.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
-}
-
-function normalizeAuctionDurationDays(value: number | null | undefined) {
-  const duration = Number(value || 7);
-  const oneMinuteDuration = 1 / (24 * 60);
-  const validDurations = [oneMinuteDuration, 1, 3, 5, 7];
-  const matchedDuration = validDurations.find(
-    (validDuration) => Math.abs(duration - validDuration) < 0.000001,
-  );
-
-  return matchedDuration || 7;
 }
 
 function getPaymentIntentId(session: Stripe.Checkout.Session) {
@@ -416,7 +406,9 @@ async function handleAuctionReserveFeeCompleted(
     return;
   }
 
-  const durationDays = normalizeAuctionDurationDays(listing.auction_duration_days);
+  const durationDays = normalizeAuctionDurationDays(
+    metadata.auctionDurationDays || listing.auction_duration_days,
+  );
   const startsAt = new Date();
   const endsAt = addDays(startsAt, durationDays);
   const feeAmount = calculateReserveFee(Number(listing.auction_reserve_price || reservePrice));

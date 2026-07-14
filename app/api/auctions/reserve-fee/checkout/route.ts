@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { normalizeAuctionDurationDays } from "../../../../lib/auctionDurations";
 import {
   calculateReserveFee,
   createServiceSupabaseClient,
@@ -13,6 +14,7 @@ export const runtime = "nodejs";
 
 type ReserveFeeCheckoutPayload = {
   listingId?: string;
+  auctionDurationDays?: number;
 };
 
 export async function POST(request: Request) {
@@ -96,6 +98,9 @@ export async function POST(request: Request) {
   }
 
   const reserveFeeAmount = calculateReserveFee(reservePrice);
+  const auctionDurationDays = normalizeAuctionDurationDays(
+    payload.auctionDurationDays ?? listing.auction_duration_days,
+  );
   const siteUrl = getSiteUrl();
   const stripeMetadata = {
     type: "auction_reserve_fee",
@@ -104,6 +109,7 @@ export async function POST(request: Request) {
     sellerId: user.id,
     reservePrice: String(reservePrice),
     reserveFeeAmount: String(reserveFeeAmount),
+    auctionDurationDays: String(auctionDurationDays),
   };
 
   try {
@@ -135,6 +141,7 @@ export async function POST(request: Request) {
       .update({
         reserve_fee_amount: reserveFeeAmount,
         reserve_fee_status: "payment_required",
+        auction_duration_days: auctionDurationDays,
         stripe_reserve_fee_checkout_session_id: checkoutSession.id,
       })
       .eq("id", listingId)
@@ -159,6 +166,7 @@ export async function POST(request: Request) {
       listingId,
       sellerId: user.id,
       reserveFeeAmount,
+      auctionDurationDays,
     });
 
     return NextResponse.json({ url: checkoutSession.url });

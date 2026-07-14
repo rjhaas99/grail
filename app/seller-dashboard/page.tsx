@@ -260,8 +260,17 @@ function formatAuctionTime(value?: string | null) {
 
   const days = Math.floor(remaining / (24 * 60 * 60 * 1000));
   const hours = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+  const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
 
-  return days > 0 ? `${days}d ${hours}h remaining` : `${Math.max(hours, 1)}h remaining`;
+  if (days > 0) {
+    return `${days}d ${hours}h remaining`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m remaining`;
+  }
+
+  return `${Math.max(minutes, 1)}m remaining`;
 }
 
 function getAuctionReserveStatus(row: {

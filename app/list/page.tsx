@@ -5,6 +5,11 @@ import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { useEffect, useMemo, useState } from "react";
 import Header from "../components/Header";
+import {
+  getAuctionEndsAt,
+  isValidAuctionDuration,
+  oneMinuteAuctionDurationDays,
+} from "../lib/auctionDurations";
 import type { XpSource } from "../lib/progression";
 import { supabase } from "../../lib/supabase";
 
@@ -81,9 +86,6 @@ type PublishStatus = {
 type CreatedListing = {
   id: string;
 };
-
-const oneMinuteAuctionDurationDays = 1 / (24 * 60);
-const validAuctionDurationDays = [oneMinuteAuctionDurationDays, 1, 3, 5, 7];
 
 type ListingDraft = {
   id: string;
@@ -279,12 +281,6 @@ function formatCurrencyWithCents(value: string | number) {
 
 function calculateReserveFee(reservePrice: number) {
   return Math.round(Math.min(100, Math.max(1, reservePrice * 0.05)) * 100) / 100;
-}
-
-function isValidAuctionDuration(duration: number) {
-  return validAuctionDurationDays.some(
-    (validDuration) => Math.abs(duration - validDuration) < 0.000001,
-  );
 }
 
 function clean(value: string) {
@@ -1242,9 +1238,7 @@ export default function ListCardPage() {
       ? new Date()
       : null;
     const auctionEndsAt = auctionStartsAt
-      ? new Date(
-          auctionStartsAt.getTime() + Number(auctionDurationDays) * 24 * 60 * 60 * 1000,
-        ).toISOString()
+      ? getAuctionEndsAt(auctionStartsAt, auctionDurationDays).toISOString()
       : null;
     const savedEstimatedValue =
       Number.isFinite(manualMarketValue) && manualMarketValue > 0
@@ -1592,7 +1586,10 @@ export default function ListCardPage() {
             authorization: `Bearer ${currentSession.access_token}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({ listingId: createdListing.id }),
+          body: JSON.stringify({
+            listingId: createdListing.id,
+            auctionDurationDays: Number(auctionDurationDays),
+          }),
         });
         const payload = (await response.json()) as { url?: string; error?: string; detail?: string };
 
