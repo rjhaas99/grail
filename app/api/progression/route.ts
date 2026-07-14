@@ -2,13 +2,11 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import {
   calculateProgression,
-  getAchievementForXpSource,
   getXpSourceDisplay,
-  getXpForSource,
   isXpSource,
   type XpActivity,
-  type XpSource,
 } from "../../lib/progression";
+import { processRewardEvent, type RewardEventType } from "../../lib/rewardsEngine";
 
 export const runtime = "nodejs";
 
@@ -21,10 +19,6 @@ type ProgressRow = {
   progress_percentage: number | null;
 };
 
-type AchievementRow = {
-  achievement_key: string;
-};
-
 type XpEventRow = {
   id: string;
   source: string | null;
@@ -32,21 +26,6 @@ type XpEventRow = {
   reference_type: string | null;
   reference_id: string | null;
   created_at: string | null;
-};
-
-type ListingRow = {
-  id: string;
-  seller_id: string | null;
-  status: string | null;
-};
-
-type VerifiedXpEvent = {
-  source: XpSource;
-  xpAmount: number;
-  referenceType: string;
-  referenceId: string;
-  idempotencyKey: string;
-  metadata: Record<string, string | number | boolean | null>;
 };
 
 function getRequiredEnv(name: string) {
@@ -180,88 +159,6 @@ async function getOrCreateProgressRow(
   return inserted as ProgressRow;
 }
 
-async function getXpEventCount(
-  supabase: ReturnType<typeof createServiceSupabaseClient>,
-  userId: string,
-) {
-  const { count, error } = await supabase
-    .from("xp_events")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId);
-
-  if (error) {
-    console.error("XP event count error:", {
-      message: error.message,
-      error,
-      userId,
-    });
-    throw new Error("XP event records are not configured yet.");
-  }
-
-  return count || 0;
-}
-
-async function ensureLegacyBaselineEvent(
-  supabase: ReturnType<typeof createServiceSupabaseClient>,
-  userId: string,
-  currentXp: number,
-) {
-  if (currentXp <= 0) {
-    return;
-  }
-
-  const eventCount = await getXpEventCount(supabase, userId);
-
-  if (eventCount > 0) {
-    return;
-  }
-
-  const { error } = await supabase.from("xp_events").insert({
-    user_id: userId,
-    source: "legacy_baseline",
-    xp_amount: currentXp,
-    reference_type: "user",
-    reference_id: userId,
-    idempotency_key: `legacy_baseline:user:${userId}`,
-    metadata: {
-      reason: "Existing progression XP before xp_events enforcement.",
-    },
-  });
-
-  if (error && error.code !== "23505") {
-    console.error("Legacy XP baseline event insert error:", {
-      message: error.message,
-      error,
-      userId,
-    });
-    throw new Error("Existing XP could not be normalized.");
-  }
-}
-
-async function getXpTotalFromEvents(
-  supabase: ReturnType<typeof createServiceSupabaseClient>,
-  userId: string,
-) {
-  const { data, error } = await supabase
-    .from("xp_events")
-    .select("xp_amount")
-    .eq("user_id", userId);
-
-  if (error) {
-    console.error("XP event total fetch error:", {
-      message: error.message,
-      error,
-      userId,
-    });
-    throw new Error("XP event records could not be loaded.");
-  }
-
-  return ((data || []) as { xp_amount: number | null }[]).reduce(
-    (total, event) => total + Math.max(0, Number(event.xp_amount) || 0),
-    0,
-  );
-}
-
 async function getRecentXpActivity(
   supabase: ReturnType<typeof createServiceSupabaseClient>,
   userId: string,
@@ -308,135 +205,6 @@ async function getRecentXpActivity(
           : orderHref,
     };
   });
-}
-
-async function verifyXpEvent(
-  supabase: ReturnType<typeof createServiceSupabaseClient>,
-  userId: string,
-  payload: { source: XpSource; listingId?: unknown },
-): Promise<VerifiedXpEvent> {
-  const listingId =
-    typeof payload.listingId === "string" ? payload.listingId.trim() : "";
-
-  if (!listingId) {
-    throw new Error("listingId is required for this XP event.");
-  }
-
-  if (!["list_card", "quality_listing_photos"].includes(payload.source)) {
-    throw new Error("This XP source must be awarded by a verified server-side event.");
-  }
-
-  const { data, error } = await supabase
-    .from("listings")
-    .select("id, seller_id, status")
-    .eq("id", listingId)
-    .maybeSingle();
-
-  if (error) {
-    console.error("XP listing verification error:", {
-      message: error.message,
-      error,
-      userId,
-      listingId,
-      source: payload.source,
-    });
-    throw new Error("Listing could not be verified for XP.");
-  }
-
-  const listing = data as ListingRow | null;
-
-  if (!listing || listing.seller_id !== userId) {
-    throw new Error("Listing does not belong to the current user.");
-  }
-
-  if (!["active", "collection"].includes(listing.status || "")) {
-    throw new Error("Listing is not eligible for progression XP yet.");
-  }
-
-  if (payload.source === "quality_listing_photos") {
-    const { count, error: imageError } = await supabase
-      .from("listing_images")
-      .select("id", { count: "exact", head: true })
-      .eq("listing_id", listingId);
-
-    if (imageError) {
-      console.error("XP listing image verification error:", {
-        message: imageError.message,
-        error: imageError,
-        userId,
-        listingId,
-      });
-      throw new Error("Listing photos could not be verified for XP.");
-    }
-
-    if (!count) {
-      throw new Error("Listing needs uploaded photos before photo XP can be awarded.");
-    }
-  }
-
-  return {
-    source: payload.source,
-    xpAmount: getXpForSource(payload.source),
-    referenceType: "listing",
-    referenceId: listingId,
-    idempotencyKey: `${payload.source}:listing:${listingId}`,
-    metadata: {
-      listingId,
-      listingStatus: listing.status,
-    },
-  };
-}
-
-async function unlockBasicAchievement(
-  supabase: ReturnType<typeof createServiceSupabaseClient>,
-  userId: string,
-  source: XpSource,
-) {
-  const achievement = getAchievementForXpSource(source);
-
-  if (!achievement) {
-    return null;
-  }
-
-  const { data: existing, error: existingError } = await supabase
-    .from("achievement_unlocks")
-    .select("achievement_key")
-    .eq("user_id", userId)
-    .eq("achievement_key", achievement.key)
-    .maybeSingle();
-
-  if (existingError) {
-    console.warn("Achievement lookup skipped:", {
-      message: existingError.message,
-      error: existingError,
-      userId,
-      achievement: achievement.key,
-    });
-    return null;
-  }
-
-  if ((existing as AchievementRow | null)?.achievement_key) {
-    return null;
-  }
-
-  const { error } = await supabase.from("achievement_unlocks").insert({
-    user_id: userId,
-    achievement_key: achievement.key,
-    title: achievement.title,
-    description: achievement.description,
-  });
-
-  if (error) {
-    console.warn("Achievement unlock skipped:", {
-      message: error.message,
-      error,
-      userId,
-      achievement: achievement.key,
-    });
-    return null;
-  }
-
-  return achievement;
 }
 
 export async function GET(request: Request) {
@@ -519,88 +287,48 @@ export async function POST(request: Request) {
   const source = payload.source;
 
   try {
-    const row = await getOrCreateProgressRow(serviceSupabase, userId);
-    await ensureLegacyBaselineEvent(
-      serviceSupabase,
+    const listingId =
+      typeof payload.listingId === "string" ? payload.listingId.trim() : "";
+    const rewardEventBySource: Record<"list_card" | "quality_listing_photos", RewardEventType> = {
+      list_card: "LIST_CARD",
+      quality_listing_photos: "UPLOAD_LISTING_PHOTOS",
+    };
+    const rewardEvent = rewardEventBySource[source as keyof typeof rewardEventBySource];
+
+    if (!rewardEvent) {
+      return NextResponse.json(
+        { error: "This XP source must be processed by a verified server-side event." },
+        { status: 400 },
+      );
+    }
+
+    const result = await processRewardEvent({
+      supabase: serviceSupabase,
       userId,
-      Math.max(0, Number(row.xp) || 0),
-    );
-
-    const event = await verifyXpEvent(serviceSupabase, userId, {
-      source,
-      listingId: payload.listingId,
+      event: rewardEvent,
+      reference: {
+        type: "listing",
+        id: listingId,
+      },
+      metadata: {
+        listingId,
+        requestedSource: source,
+      },
     });
-
-    if (event.xpAmount <= 0) {
-      return NextResponse.json({ error: "No XP is configured for this source." }, { status: 400 });
-    }
-
-    const { error: eventError } = await serviceSupabase.from("xp_events").insert({
-      user_id: userId,
-      source: event.source,
-      xp_amount: event.xpAmount,
-      reference_type: event.referenceType,
-      reference_id: event.referenceId,
-      idempotency_key: event.idempotencyKey,
-      metadata: event.metadata,
-    });
-
-    if (eventError) {
-      if (eventError.code === "23505") {
-        const eventTotal = await getXpTotalFromEvents(serviceSupabase, userId);
-        const achievementsCount = await getAchievementCount(serviceSupabase, userId);
-        const progression = calculateProgression(eventTotal, achievementsCount);
-
-        return NextResponse.json({
-          awardedXp: 0,
-          source,
-          alreadyAwarded: true,
-          progression,
-        });
-      }
-
-      console.error("XP event insert error:", {
-        message: eventError.message,
-        error: eventError,
-        userId,
-        source,
-        idempotencyKey: event.idempotencyKey,
-      });
-      return NextResponse.json({ error: "XP event could not be recorded." }, { status: 500 });
-    }
-
-    const unlockedAchievement = await unlockBasicAchievement(serviceSupabase, userId, source);
-    const nextXp = await getXpTotalFromEvents(serviceSupabase, userId);
-    const achievementsCount = await getAchievementCount(serviceSupabase, userId);
-    const progression = calculateProgression(nextXp, achievementsCount);
-    const { error } = await serviceSupabase
-      .from("user_progress")
-      .update({
-        xp: progression.xp,
-        level: progression.level,
-        title: progression.title,
-        next_level_xp: progression.nextLevelXp,
-        progress_percentage: progression.progressPercentage,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("user_id", userId);
-
-    if (error) {
-      console.error("Progression update error:", {
-        message: error.message,
-        error,
-        userId,
-        source,
-      });
-      return NextResponse.json({ error: "Progression could not be updated." }, { status: 500 });
-    }
+    const firstAward = result.xp.awards[0] || null;
 
     return NextResponse.json({
-      awardedXp: event.xpAmount,
+      awardedXp: result.xp.totalAwarded,
       source,
-      idempotencyKey: event.idempotencyKey,
-      progression,
-      achievementUnlocked: unlockedAchievement,
+      idempotencyKey: firstAward
+        ? `${firstAward.source}:${firstAward.referenceType}:${firstAward.referenceId}`
+        : null,
+      alreadyAwarded: result.xp.awards.length > 0
+        ? result.xp.awards.every((award) => award.alreadyAwarded)
+        : false,
+      progression: result.progression || calculateProgression(0),
+      achievementUnlocked: result.achievements.unlocked[0] || null,
+      rewardEvent: result.event,
     });
   } catch (error) {
     console.error("Progression POST error:", error);

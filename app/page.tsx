@@ -85,6 +85,28 @@ type MarketSnapshot = {
   marketplaceVolume: number | null;
 };
 
+type MarketplaceBanner = {
+  title: string;
+  subtitle: string;
+  buttonLabel: string;
+  buttonHref: string;
+  background: string;
+  priority: number;
+  dismissible: boolean;
+  countdownEnabled: boolean;
+  countdown: {
+    status: string;
+    label: string;
+    startsIn: string | null;
+    endsIn: string | null;
+    targetAt: string | null;
+  };
+};
+
+type MarketplaceStatusResponse = {
+  currentBanner?: MarketplaceBanner | null;
+};
+
 const featuredAccentPairs = [
   { accent: "#E7DED0", secondary: "#ffffff" },
   { accent: "#C9CDD3", secondary: "#f3f4f6" },
@@ -871,6 +893,8 @@ export default function Home() {
   });
   const [isLoadingHomeData, setIsLoadingHomeData] = useState(true);
   const [homeDataError, setHomeDataError] = useState("");
+  const [marketplaceBanner, setMarketplaceBanner] = useState<MarketplaceBanner | null>(null);
+  const [isBannerDismissed, setIsBannerDismissed] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -880,6 +904,18 @@ export default function Home() {
       setHomeDataError("");
 
       try {
+        const bannerResponse = await fetch("/api/marketplace/status")
+          .then((response) => response.json())
+          .catch((error) => {
+            console.warn("Homepage marketplace banner unavailable:", error);
+            return {};
+          }) as MarketplaceStatusResponse;
+
+        if (isMounted) {
+          setMarketplaceBanner(bannerResponse.currentBanner || null);
+          setIsBannerDismissed(false);
+        }
+
         let { data: listingData, error: listingError } =
           await fetchHomepageListings(true);
 
@@ -1168,6 +1204,108 @@ export default function Home() {
 
       <div style={{ width: "1240px", margin: "0 auto", padding: "8px 0 34px" }}>
         <Header />
+
+        {marketplaceBanner && !isBannerDismissed ? (
+          <section
+            style={{
+              marginTop: "10px",
+              border: "1px solid rgba(231,222,208,0.24)",
+              borderRadius: "10px",
+              background:
+                marketplaceBanner.background === "dark"
+                  ? "linear-gradient(90deg, rgba(8,8,10,0.96), rgba(24,24,27,0.82))"
+                  : "linear-gradient(90deg, rgba(231,222,208,0.14), rgba(201,205,211,0.06)), rgba(5,5,6,0.92)",
+              minHeight: "72px",
+              padding: "14px 16px",
+              boxSizing: "border-box",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "18px",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <span
+                style={{
+                  color: "#C9CDD3",
+                  fontSize: "10px",
+                  lineHeight: "13px",
+                  fontWeight: 900,
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Marketplace Event
+              </span>
+              <h2
+                style={{
+                  margin: "4px 0 0",
+                  color: "#fff",
+                  fontSize: "20px",
+                  lineHeight: "24px",
+                  fontWeight: 900,
+                }}
+              >
+                {marketplaceBanner.title}
+              </h2>
+              <p
+                style={{
+                  margin: "4px 0 0",
+                  color: "#a1a1aa",
+                  fontSize: "12px",
+                  lineHeight: "16px",
+                  fontWeight: 800,
+                }}
+              >
+                {marketplaceBanner.subtitle}
+                {marketplaceBanner.countdownEnabled
+                  ? ` ${marketplaceBanner.countdown.label}.`
+                  : ""}
+              </p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <Link
+                href={marketplaceBanner.buttonHref || "/browse"}
+                style={{
+                  height: "36px",
+                  borderRadius: "8px",
+                  background: "#E7DED0",
+                  color: "#111",
+                  textDecoration: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "0 13px",
+                  fontSize: "12px",
+                  fontWeight: 900,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {marketplaceBanner.buttonLabel || "Browse Cards"}
+              </Link>
+              {marketplaceBanner.dismissible ? (
+                <button
+                  type="button"
+                  aria-label="Dismiss marketplace event banner"
+                  onClick={() => setIsBannerDismissed(true)}
+                  style={{
+                    width: "34px",
+                    height: "34px",
+                    borderRadius: "999px",
+                    border: "1px solid rgba(201,205,211,0.2)",
+                    background: "rgba(5,5,6,0.72)",
+                    color: "#fff",
+                    fontSize: "16px",
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  x
+                </button>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
         <section
           style={{

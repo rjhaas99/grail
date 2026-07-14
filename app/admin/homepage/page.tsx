@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import AdminLayout from "../AdminLayout";
 import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
 
@@ -274,6 +275,7 @@ export default function AdminHomepagePage() {
   return (
     <main className="admin-homepage-page">
       <style>{pageStyles}</style>
+      <AdminLayout />
       <div className="admin-homepage-shell">
         <Header />
 

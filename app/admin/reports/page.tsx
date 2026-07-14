@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import AdminLayout from "../AdminLayout";
 import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
 
@@ -291,6 +292,7 @@ export default function AdminReportsPage() {
   return (
     <main className="admin-reports-page">
       <style>{pageStyles}</style>
+      <AdminLayout />
       <div className="admin-reports-shell">
         <Header />
 

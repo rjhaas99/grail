@@ -13,6 +13,45 @@ import {
   type XpActivity,
 } from "../lib/progression";
 
+type WalletSummary = {
+  availableCredit: number;
+  pendingCredit: number;
+  lifetimeEarned: number;
+  lifetimeRedeemed: number;
+};
+
+type RewardTier = {
+  rankName: string;
+  sellerFeePercent: number;
+  buyerBasePercent: number;
+  sellerBasePercent: number;
+  buyerMultiplier: number;
+  sellerMultiplier: number;
+  buyerRewardPercent: number;
+  sellerRewardPercent: number;
+  xpMultiplier: number;
+  walletMultiplier: number;
+};
+
+type RewardsMarketplace = {
+  currentEvent?: { eventName: string } | null;
+  upcomingEvent?: { eventName: string } | null;
+  marketplaceStatus?: string;
+  currentMarketplaceState?: string;
+  currentMultipliers?: {
+    buyerMultiplier: number;
+    sellerMultiplier: number;
+    xpMultiplier: number;
+    walletMultiplier: number;
+    treasureMultiplier: number;
+    challengeMultiplier: number;
+  };
+  currentCountdown?: {
+    label: string;
+    status: string;
+  };
+};
+
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="stat-card panel">
@@ -34,6 +73,29 @@ function formatActivityDate(value: string | null) {
   });
 }
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(value || 0);
+}
+
+function formatPercent(value?: number | null) {
+  if (value === null || value === undefined) {
+    return "Pending";
+  }
+
+  return `${Number(value).toFixed(2)}%`;
+}
+
+const emptyWallet: WalletSummary = {
+  availableCredit: 0,
+  pendingCredit: 0,
+  lifetimeEarned: 0,
+  lifetimeRedeemed: 0,
+};
+
 export default function ProfilePage() {
   const [status, setStatus] = useState("");
   const [avatarPreview, setAvatarPreview] = useState("");
@@ -41,6 +103,10 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<{ full_name: string | null; username: string | null } | null>(null);
   const [progression, setProgression] = useState<ProgressionSummary>(calculateProgression(0));
   const [recentActivity, setRecentActivity] = useState<XpActivity[]>([]);
+  const [wallet, setWallet] = useState<WalletSummary>(emptyWallet);
+  const [rewardTier, setRewardTier] = useState<RewardTier | null>(null);
+  const [nextRewardTier, setNextRewardTier] = useState<RewardTier | null>(null);
+  const [marketplaceRewards, setMarketplaceRewards] = useState<RewardsMarketplace | null>(null);
   const [showXpGuide, setShowXpGuide] = useState(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const displayName = String(
@@ -74,12 +140,16 @@ export default function ProfilePage() {
           setProfile(null);
           setProgression(calculateProgression(0));
           setRecentActivity([]);
+          setWallet(emptyWallet);
+          setRewardTier(null);
+          setNextRewardTier(null);
+          setMarketplaceRewards(null);
         }
         return;
       }
 
       const accessToken = session.access_token;
-      const [{ data: profileData }, progressionResult] = await Promise.all([
+      const [{ data: profileData }, progressionResult, walletResult, rewardsResult] = await Promise.all([
         supabase
           .from("profiles")
           .select("full_name, username")
@@ -93,6 +163,26 @@ export default function ProfilePage() {
           .then((response) => response.json())
           .catch((error) => {
             console.warn("Profile progression load skipped:", error);
+            return {};
+          }),
+        fetch("/api/wallet", {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        })
+          .then((response) => response.json())
+          .catch((error) => {
+            console.warn("Profile wallet load skipped:", error);
+            return {};
+          }),
+        fetch("/api/rewards", {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        })
+          .then((response) => response.json())
+          .catch((error) => {
+            console.warn("Profile rewards load skipped:", error);
             return {};
           }),
       ]);
@@ -109,6 +199,12 @@ export default function ProfilePage() {
       );
       setRecentActivity(
         (progressionResult as { recentActivity?: XpActivity[] }).recentActivity || [],
+      );
+      setWallet((walletResult as { wallet?: WalletSummary }).wallet || emptyWallet);
+      setRewardTier((rewardsResult as { tier?: RewardTier | null }).tier || null);
+      setNextRewardTier((rewardsResult as { nextTier?: RewardTier | null }).nextTier || null);
+      setMarketplaceRewards(
+        (rewardsResult as { marketplace?: RewardsMarketplace | null }).marketplace || null,
       );
     }
 
@@ -238,6 +334,66 @@ export default function ProfilePage() {
           <StatCard label="Offers Sent" value="12" />
           <StatCard label="Completed Purchases" value="5" />
           <StatCard label="GRAIL Level" value={`Level ${progression.level}`} />
+        </section>
+
+        <section className="panel wallet-summary-panel">
+          <div>
+            <span>GRAIL Wallet</span>
+            <h2>{formatCurrency(wallet.availableCredit)}</h2>
+            <p>Available GRAIL Credit for future checkout features.</p>
+          </div>
+          <div className="wallet-summary-stats">
+            <span>Pending {formatCurrency(wallet.pendingCredit)}</span>
+            <span>Lifetime GRAIL Credit Earned {formatCurrency(wallet.lifetimeEarned)}</span>
+            <span>Redeemed {formatCurrency(wallet.lifetimeRedeemed)}</span>
+          </div>
+          <Link href="/wallet">View Wallet</Link>
+        </section>
+
+        <section className="panel rewards-summary-panel">
+          <div>
+            <span>GRAIL Economy</span>
+            <h2>{rewardTier?.rankName || "Configuration Pending"}</h2>
+            <p>Rewards increase as you level up.</p>
+            <p>
+              Current event:{" "}
+              {marketplaceRewards?.currentEvent?.eventName ||
+                marketplaceRewards?.upcomingEvent?.eventName ||
+                "None"}
+              {marketplaceRewards?.currentCountdown?.label
+                ? ` · ${marketplaceRewards.currentCountdown.label}`
+                : ""}
+            </p>
+          </div>
+          <div className="rewards-summary-grid">
+            <div>
+              <span>Seller Fee</span>
+              <strong>{formatPercent(rewardTier?.sellerFeePercent)}</strong>
+            </div>
+            <div>
+              <span>Current Buyer Reward</span>
+              <strong>{formatPercent(rewardTier?.buyerRewardPercent)}</strong>
+            </div>
+            <div>
+              <span>Current Reward %</span>
+              <strong>{formatPercent(rewardTier?.buyerRewardPercent)}</strong>
+            </div>
+            <div>
+              <span>Current Seller Reward</span>
+              <strong>{formatPercent(rewardTier?.sellerRewardPercent)}</strong>
+            </div>
+            <div>
+              <span>Next Reward Tier</span>
+              <strong>{nextRewardTier?.rankName || "Max tier"}</strong>
+            </div>
+            <div>
+              <span>Current Multipliers</span>
+              <strong>
+                XP {marketplaceRewards?.currentMultipliers?.xpMultiplier || 1}x · Wallet{" "}
+                {marketplaceRewards?.currentMultipliers?.walletMultiplier || 1}x
+              </strong>
+            </div>
+          </div>
         </section>
 
         <section id="xp-guide" className="xp-info-grid">
@@ -611,6 +767,105 @@ const pageStyles = `
   .stat-card { min-height: 82px; padding: 14px; }
   .stat-card span { color: #85858f; font-size: 11px; line-height: 14px; font-weight: 800; }
   .stat-card strong { display: block; margin-top: 8px; color: #fff; font-size: 24px; line-height: 28px; font-weight: 900; }
+  .wallet-summary-panel {
+    margin-top: 16px;
+    padding: 16px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 16px;
+    align-items: center;
+  }
+  .wallet-summary-panel span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .wallet-summary-panel h2 {
+    margin: 7px 0 0;
+    color: #fff;
+    font-size: 28px;
+    line-height: 32px;
+    font-weight: 900;
+  }
+  .wallet-summary-panel p {
+    margin: 6px 0 0;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 17px;
+    font-weight: 800;
+  }
+  .wallet-summary-stats {
+    display: grid;
+    gap: 6px;
+    text-align: right;
+  }
+  .wallet-summary-panel a {
+    min-height: 40px;
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 14px;
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 900;
+  }
+  .rewards-summary-panel {
+    margin-top: 16px;
+    padding: 16px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 1.5fr;
+    gap: 16px;
+    align-items: center;
+  }
+  .rewards-summary-panel span,
+  .rewards-summary-grid span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .rewards-summary-panel h2 {
+    margin: 7px 0 0;
+    color: #fff;
+    font-size: 24px;
+    line-height: 28px;
+    font-weight: 900;
+  }
+  .rewards-summary-panel p {
+    margin: 6px 0 0;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 17px;
+    font-weight: 800;
+  }
+  .rewards-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .rewards-summary-grid div {
+    border: 1px solid rgba(201,205,211,0.14);
+    border-radius: 10px;
+    background: rgba(8,8,10,0.72);
+    padding: 11px;
+  }
+  .rewards-summary-grid strong {
+    display: block;
+    margin-top: 6px;
+    color: #fff;
+    font-size: 18px;
+    line-height: 22px;
+    font-weight: 900;
+  }
   .content-grid { margin-top: 16px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
   .form-panel, .side-panel { padding: 16px; }
   label { display: grid; gap: 7px; margin-top: 14px; }
@@ -631,8 +886,9 @@ const pageStyles = `
   .status-message { margin: 12px 0 0; border: 1px solid rgba(52,211,153,0.24); border-radius: 10px; background: rgba(52,211,153,0.07); color: #86efac; padding: 10px; }
   @media (max-width: 1100px) {
     .account-shell { width: calc(100vw - 32px); }
-    .profile-hero, .progression-panel, .xp-info-grid, .stats-grid, .content-grid { grid-template-columns: 1fr; }
+    .profile-hero, .progression-panel, .xp-info-grid, .stats-grid, .wallet-summary-panel, .rewards-summary-panel, .rewards-summary-grid, .content-grid { grid-template-columns: 1fr; }
     .progression-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .progression-stats strong { text-align: left; }
+    .wallet-summary-stats { text-align: left; }
   }
 `;

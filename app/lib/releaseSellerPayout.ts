@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 import { createSystemNotifications } from "./serverNotifications";
-import { awardCompletedOrderProgression } from "./serverProgression";
+import { processRewardEvent } from "./rewardsEngine";
 
 type OrderRow = {
   id: string;
@@ -323,23 +323,74 @@ export async function releaseSellerPayoutForOrder({
     ]);
 
     try {
-      const progressionResult = await awardCompletedOrderProgression(
-        supabase,
-        order.id,
-      );
-      console.info("Seller payout progression processed:", {
+      const rewardResults = [];
+
+      if (order.buyer_id) {
+        rewardResults.push(
+          await processRewardEvent({
+            supabase,
+            userId: order.buyer_id,
+            event: "BUY_COMPLETED",
+            reference: {
+              type: "order",
+              id: order.id,
+            },
+            metadata: {
+              orderId: order.id,
+              listingId: order.listing_id,
+              source,
+            },
+          }),
+        );
+        rewardResults.push(
+          await processRewardEvent({
+            supabase,
+            userId: order.buyer_id,
+            event: "AUCTION_WIN",
+            reference: {
+              type: "order",
+              id: order.id,
+            },
+            metadata: {
+              orderId: order.id,
+              listingId: order.listing_id,
+              source,
+            },
+          }),
+        );
+      }
+
+      if (order.seller_id) {
+        rewardResults.push(
+          await processRewardEvent({
+            supabase,
+            userId: order.seller_id,
+            event: "SELL_COMPLETED",
+            reference: {
+              type: "order",
+              id: order.id,
+            },
+            metadata: {
+              orderId: order.id,
+              listingId: order.listing_id,
+              source,
+            },
+          }),
+        );
+      }
+
+      console.info("Seller payout rewards processed:", {
         orderId: order.id,
         source,
-        awarded: progressionResult.awarded.map((event) => ({
-          source: event.source,
-          userId: event.userId,
-          alreadyAwarded: event.alreadyAwarded,
+        events: rewardResults.map((result) => ({
+          event: result.event,
+          userId: result.userId,
+          xpAwarded: result.xp.totalAwarded,
+          skipped: result.skipped,
         })),
-        skipped: progressionResult.skipped,
-        isAuctionSale: progressionResult.isAuctionSale,
       });
     } catch (progressionError) {
-      console.warn("Seller payout progression skipped:", {
+      console.warn("Seller payout rewards skipped:", {
         orderId: order.id,
         source,
         error:

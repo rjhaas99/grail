@@ -26,6 +26,7 @@ const mainMenuItems = [
 const accountItems = [
   { label: "Profile", href: "/profile" },
   { label: "Notifications", href: "/notifications" },
+  { label: "Wallet", href: "/wallet" },
   { label: "Billing & Payouts", href: "/billing-payouts" },
   { label: "Orders", href: "/orders" },
   { label: "Seller Rewards", href: "/seller-rewards" },

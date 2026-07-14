@@ -14,6 +14,48 @@ import {
 
 type OfferStatus = "Pending" | "Accepted" | "Countered" | "Declined";
 type OrderStatus = "Processing" | "Shipped" | "Paid";
+type RewardTier = {
+  rankName: string;
+  sellerFeePercent: number;
+  buyerBasePercent: number;
+  sellerBasePercent: number;
+  buyerMultiplier: number;
+  sellerMultiplier: number;
+  buyerRewardPercent: number;
+  sellerRewardPercent: number;
+  xpMultiplier: number;
+  walletMultiplier: number;
+};
+type RewardsMarketplace = {
+  currentEvent?: { eventName: string } | null;
+  upcomingEvent?: { eventName: string } | null;
+  marketplaceStatus?: string;
+  currentMarketplaceState?: string;
+  currentMultipliers?: {
+    buyerMultiplier: number;
+    sellerMultiplier: number;
+    xpMultiplier: number;
+    walletMultiplier: number;
+    treasureMultiplier: number;
+    challengeMultiplier: number;
+  };
+  currentCountdown?: {
+    label: string;
+    status: string;
+  };
+};
+type WalletSummary = {
+  availableCredit: number;
+  pendingCredit: number;
+  lifetimeEarned: number;
+  lifetimeRedeemed: number;
+};
+type WalletLedgerEntry = {
+  id: string;
+  amount: number;
+  title: string;
+  createdAt: string | null;
+};
 type DashboardOrder = {
   id: string;
   card: string;
@@ -133,6 +175,14 @@ function formatCurrency(value: number) {
     currency: "USD",
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+function formatPercent(value?: number | null) {
+  if (value === null || value === undefined) {
+    return "Pending";
+  }
+
+  return `${Number(value).toFixed(2)}%`;
 }
 
 function shortId(value?: string | null) {
@@ -323,11 +373,15 @@ export default function SellerDashboardPage() {
   const [uploadingEvidenceId, setUploadingEvidenceId] = useState("");
   const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
   const [progression, setProgression] = useState<ProgressionSummary>(calculateProgression(0));
+  const [rewardTier, setRewardTier] = useState<RewardTier | null>(null);
+  const [marketplaceRewards, setMarketplaceRewards] = useState<RewardsMarketplace | null>(null);
+  const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null);
+  const [lastWalletReward, setLastWalletReward] = useState<WalletLedgerEntry | null>(null);
 
   useEffect(() => {
     let isMounted = true;
 
-    async function loadProgression() {
+    async function loadProgressionAndRewards() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -337,24 +391,52 @@ export default function SellerDashboardPage() {
       }
 
       try {
-        const response = await fetch("/api/progression", {
-          headers: {
-            authorization: `Bearer ${session.access_token}`,
-          },
-        });
-        const payload = (await response.json()) as {
+        const [progressionResponse, rewardsResponse, walletResponse] = await Promise.all([
+          fetch("/api/progression", {
+            headers: {
+              authorization: `Bearer ${session.access_token}`,
+            },
+          }),
+          fetch("/api/rewards", {
+            headers: {
+              authorization: `Bearer ${session.access_token}`,
+            },
+          }),
+          fetch("/api/wallet", {
+            headers: {
+              authorization: `Bearer ${session.access_token}`,
+            },
+          }),
+        ]);
+        const payload = (await progressionResponse.json()) as {
           progression?: ProgressionSummary;
+        };
+        const rewardsPayload = (await rewardsResponse.json()) as {
+          tier?: RewardTier | null;
+          marketplace?: RewardsMarketplace | null;
+        };
+        const walletPayload = (await walletResponse.json()) as {
+          wallet?: WalletSummary;
+          ledger?: WalletLedgerEntry[];
         };
 
         if (isMounted && payload.progression) {
           setProgression(payload.progression);
         }
+        if (isMounted) {
+          setRewardTier(rewardsPayload.tier || null);
+          setMarketplaceRewards(rewardsPayload.marketplace || null);
+          setWalletSummary(walletPayload.wallet || null);
+          setLastWalletReward(
+            (walletPayload.ledger || []).find((entry) => Number(entry.amount) > 0) || null,
+          );
+        }
       } catch (error) {
-        console.warn("Seller dashboard progression load skipped:", error);
+        console.warn("Seller dashboard progression/rewards load skipped:", error);
       }
     }
 
-    loadProgression();
+    loadProgressionAndRewards();
 
     return () => {
       isMounted = false;
@@ -975,14 +1057,6 @@ export default function SellerDashboardPage() {
   const shouldShowPayoutButton = !isLoadingPayoutStatus && (!payoutConnected || payoutIncomplete);
   const payoutButtonLabel = payoutConnected ? "Continue Payout Setup" : "Set Up Payouts";
   const upcomingProgressionLevel = getNextProgressionLevel(progression.level);
-  const unlockedProgressionRewards = [
-    `Level ${progression.level} profile badge`,
-    `${progression.title} rank title`,
-    "Achievement display",
-  ];
-  const nextProgressionReward = upcomingProgressionLevel
-    ? `Level ${upcomingProgressionLevel.level} ${upcomingProgressionLevel.title}`
-    : "All Phase 1 progression levels unlocked";
 
   return (
     <main className="dashboard-page">
@@ -1340,10 +1414,33 @@ export default function SellerDashboardPage() {
                 </strong>
               </div>
               <div className="progression-reward-list">
-                <span>Unlocked rewards</span>
-                {unlockedProgressionRewards.map((reward) => (
-                  <em key={reward}>{reward}</em>
-                ))}
+                <span>GRAIL Economy</span>
+                <em>{rewardTier?.rankName || "Configuration Pending"}</em>
+                <em>
+                  Marketplace {marketplaceRewards?.marketplaceStatus || "Live"} ·{" "}
+                  {marketplaceRewards?.currentMarketplaceState || "Normal"}
+                </em>
+                <em>
+                  Event{" "}
+                  {marketplaceRewards?.currentEvent?.eventName ||
+                    marketplaceRewards?.upcomingEvent?.eventName ||
+                    "None"}
+                </em>
+                <em>Seller Fee {formatPercent(rewardTier?.sellerFeePercent)}</em>
+                <em>Buyer Reward {formatPercent(rewardTier?.buyerRewardPercent)}</em>
+                <em>Seller Reward {formatPercent(rewardTier?.sellerRewardPercent)}</em>
+                <em>Current Seller Reward % {formatPercent(rewardTier?.sellerRewardPercent)}</em>
+                <em>Lifetime Credit Earned {formatCurrency(walletSummary?.lifetimeEarned || 0)}</em>
+                <em>
+                  Last Reward{" "}
+                  {lastWalletReward
+                    ? `${formatCurrency(lastWalletReward.amount)} · ${lastWalletReward.title}`
+                    : "None yet"}
+                </em>
+                <em>
+                  Multipliers XP {marketplaceRewards?.currentMultipliers?.xpMultiplier || 1}x ·
+                  Wallet {marketplaceRewards?.currentMultipliers?.walletMultiplier || 1}x
+                </em>
               </div>
               <div className="progression-xp-guide">
                 <span>How to earn XP</span>
@@ -1356,8 +1453,8 @@ export default function SellerDashboardPage() {
                 ))}
               </div>
               <p>
-                Next reward: {nextProgressionReward}. Phase 1 progression is badge and rank
-                status only.
+                Automatic GRAIL Credit rewards are awarded after eligible orders
+                complete. Current reward terms are pulled from GRAIL Economy.
               </p>
             </section>
 
@@ -1379,6 +1476,7 @@ export default function SellerDashboardPage() {
               <Link href="/collections/vault-runner">View Public Collection</Link>
               <Link href="/messages">View Messages</Link>
               <Link href="/offers">View Offers</Link>
+              <Link href="/wallet">View Wallet</Link>
             </section>
           </aside>
         </section>
