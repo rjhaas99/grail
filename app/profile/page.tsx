@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import Header from "../components/Header";
+import PublicTrustSection from "../components/PublicTrustSection";
 import { supabase } from "../../lib/supabase";
 import {
   calculateProgression,
@@ -149,7 +150,12 @@ export default function ProfilePage() {
       }
 
       const accessToken = session.access_token;
-      const [{ data: profileData }, progressionResult, walletResult, rewardsResult] = await Promise.all([
+      const [
+        { data: profileData },
+        progressionResult,
+        walletResult,
+        rewardsResult,
+      ] = await Promise.all([
         supabase
           .from("profiles")
           .select("full_name, username")
@@ -280,6 +286,8 @@ export default function ProfilePage() {
             </div>
           </div>
         </section>
+
+        <PublicTrustSection userId={user?.id} />
 
         <section className="progression-panel panel">
           <div

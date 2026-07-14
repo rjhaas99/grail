@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Header from "../../components/Header";
+import PublicTrustSection from "../../components/PublicTrustSection";
 import { supabase } from "../../../lib/supabase";
 
 type Profile = {
@@ -231,6 +232,8 @@ export default function SellerPublicProfilePage() {
                       </div>
 
                       <p className="mt-2 text-zinc-500">@{getUsername()}</p>
+
+                     <PublicTrustSection userId={profile.id} />
                     </div>
                   </div>
 

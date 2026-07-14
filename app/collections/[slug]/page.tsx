@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
+import PublicTrustSection from "../../components/PublicTrustSection";
 import {
   type ListingTag,
   type MockConversation,
@@ -492,6 +493,7 @@ export default function SellerCollectionPage() {
   const decodedSlug = decodeURIComponent(slug);
   const mockSeller = sellers.find((item) => item.slug === slug);
   const [realSeller, setRealSeller] = useState<MockSeller | null>(null);
+  const [realSellerUserId, setRealSellerUserId] = useState<string | null>(null);
   const [realListings, setRealListings] = useState<Listing[]>([]);
   const [isLoadingRealSeller, setIsLoadingRealSeller] = useState(!mockSeller);
   const [filterMode, setFilterMode] = useState<FilterMode>("All");
@@ -559,6 +561,7 @@ export default function SellerCollectionPage() {
         if (!profile) {
           if (isMounted) {
             setRealSeller(null);
+            setRealSellerUserId(null);
             setRealListings([]);
           }
           return;
@@ -617,6 +620,7 @@ export default function SellerCollectionPage() {
 
         if (isMounted) {
           setRealSeller(mappedSeller);
+          setRealSellerUserId(profile.id);
           setRealListings(mappedListings);
         }
       } catch (error) {
@@ -624,6 +628,7 @@ export default function SellerCollectionPage() {
 
         if (isMounted) {
           setRealSeller(null);
+          setRealSellerUserId(null);
           setRealListings([]);
         }
       } finally {
@@ -995,6 +1000,8 @@ export default function SellerCollectionPage() {
           </div>
         </section>
 
+        <PublicTrustSection userId={mockSeller ? null : realSellerUserId} />
+
         <section className="collection-layout">
           <div className="main-column">
             <section className="collection-header panel">
@@ -1169,15 +1176,6 @@ export default function SellerCollectionPage() {
               <MarketChart />
             </section>
 
-            <section className="panel sidebar-panel trust-panel">
-              <h2>Trust & Safety</h2>
-              <ul>
-                <li>Verified seller placeholder</li>
-                <li>Secure checkout</li>
-                <li>Offer protection</li>
-                <li>Buyer protection placeholder</li>
-              </ul>
-            </section>
           </aside>
         </section>
       </div>
@@ -2287,21 +2285,6 @@ const pageStyles = `
   .chart-grid path {
     stroke: rgba(201,205,211,0.08);
     stroke-width: 1;
-  }
-
-  .trust-panel ul {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    display: grid;
-    gap: 8px;
-  }
-
-  .trust-panel li {
-    color: #C9CDD3;
-    font-size: 12px;
-    line-height: 16px;
-    font-weight: 800;
   }
 
   .empty-state,
