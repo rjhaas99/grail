@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabase } from "../../../lib/supabase";
+import { getConfiguredSiteUrl } from "../../lib/siteConfig";
 
 type CheckoutRequestBody = {
   listingId?: string;
@@ -30,15 +31,11 @@ function buildListingTitle(listing: CheckoutListing) {
   );
 }
 
-function getSiteUrl() {
-  return process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "";
-}
-
 export async function POST(request: Request) {
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-  const siteUrl = getSiteUrl();
+  const siteUrl = getConfiguredSiteUrl();
 
-  if (!stripeSecretKey || !siteUrl) {
+  if (!stripeSecretKey) {
     return NextResponse.json(
       {
         error: "Stripe test checkout is not configured yet.",

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Header from "../components/Header";
+import { siteConfig } from "../lib/siteConfig";
 
 const lastUpdated = "July 2026";
 const legalLinks = [["Terms", "/terms"], ["Privacy", "/privacy"], ["Buyer Protection", "/buyer-protection"], ["Seller Rules", "/seller-rules"], ["Fees", "/fees"], ["Shipping", "/shipping-policy"], ["Refunds & Disputes", "/refund-dispute-policy"], ["Prohibited Items", "/prohibited-items"]];
@@ -7,7 +8,7 @@ const sections = [
   { title: "Seller Shipping", body: ["After a sale, the seller is responsible for shipping the card promptly and adding accurate tracking in GRAIL.", "Sellers should use secure packaging appropriate for raw cards, slabs, and high-value cards."] },
   { title: "Tracking And Delivery", body: ["Tracking and delivery information may start the buyer inspection timeline. Buyers should inspect the item as soon as possible after delivery.", "Lost or damaged shipments may require carrier proof, tracking history, packaging photos, and other evidence."] },
   { title: "Payout Holds", body: ["GRAIL may hold seller payout during shipping, delivery confirmation, the 3-day inspection window, or dispute review.", "Seller payout happens after successful delivery and inspection unless a dispute is opened."] },
-  { title: "Support", body: ["Contact support@grailcollectibles.com if shipment tracking appears wrong, a package is delayed, or a delivery issue needs review."] },
+  { title: "Support", body: [`Contact ${siteConfig.supportEmail} if shipment tracking appears wrong, a package is delayed, or a delivery issue needs review.`] },
 ];
 
 export default function ShippingPolicyPage() { return <PolicyPage eyebrow="Shipping" title="Shipping Policy" sections={sections} />; }

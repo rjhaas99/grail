@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Header from "../components/Header";
+import { siteConfig } from "../lib/siteConfig";
 
 const lastUpdated = "July 2026";
 const legalLinks = [["Terms", "/terms"], ["Privacy", "/privacy"], ["Buyer Protection", "/buyer-protection"], ["Seller Rules", "/seller-rules"], ["Fees", "/fees"], ["Shipping", "/shipping-policy"], ["Refunds & Disputes", "/refund-dispute-policy"], ["Prohibited Items", "/prohibited-items"]];
@@ -8,7 +9,7 @@ const sections = [
   { title: "How We Use Information", body: ["We use information to operate the marketplace, process orders, support GRAIL Protected Checkout, prevent fraud, review disputes, improve services, and communicate with users.", "Messages, order data, listing data, and uploaded evidence may be reviewed when needed for support, safety, or dispute handling."] },
   { title: "Service Providers", body: ["GRAIL uses vendors for hosting, database, storage, payments, analytics, and support. Supabase or similar services may store account, listing, image, order, and message data.", "Stripe or another payment processor may process payment, payout, fraud, tax, and compliance information."] },
   { title: "Security And Retention", body: ["GRAIL uses reasonable technical and organizational steps to protect marketplace data, but no online service can guarantee perfect security.", "We may retain records as needed for orders, legal compliance, fraud prevention, dispute review, and account safety."] },
-  { title: "Contact", body: ["Contact support@grailcollectibles.com with privacy questions or requests about your account information."] },
+  { title: "Contact", body: [`Contact ${siteConfig.supportEmail} with privacy questions or requests about your account information.`] },
 ];
 
 export default function PrivacyPage() { return <PolicyPage eyebrow="Privacy" title="Privacy Policy" sections={sections} />; }

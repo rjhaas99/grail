@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { getConfiguredSiteUrl } from "../../../../lib/siteConfig";
 
 export const runtime = "nodejs";
 
@@ -56,10 +57,6 @@ function getRequiredEnv(name: string) {
   return value;
 }
 
-function getSiteUrl() {
-  return process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "";
-}
-
 function createServiceSupabaseClient() {
   return createClient(
     getRequiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
@@ -107,19 +104,12 @@ export async function POST(request: Request) {
 
   try {
     stripe = new Stripe(getRequiredEnv("STRIPE_SECRET_KEY"));
-    siteUrl = getSiteUrl();
+    siteUrl = getConfiguredSiteUrl();
     supabase = createServiceSupabaseClient();
   } catch (error) {
     console.error("Stripe Connect onboarding configuration error:", error);
     return NextResponse.json(
       { error: "Stripe Connect onboarding is not configured." },
-      { status: 500 },
-    );
-  }
-
-  if (!siteUrl) {
-    return NextResponse.json(
-      { error: "NEXT_PUBLIC_SITE_URL is required for Stripe onboarding." },
       { status: 500 },
     );
   }

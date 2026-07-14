@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Header from "../components/Header";
+import { siteConfig } from "../lib/siteConfig";
 
 const lastUpdated = "July 2026";
 const legalLinks = [
@@ -46,7 +47,7 @@ const sections = [
     title: "Limitations",
     body: [
       "GRAIL is a marketplace for sports cards and trading cards/TCG. Users remain responsible for listing accuracy, shipping, compliance with law, and cooperation during disputes.",
-      "Contact support@grailcollectibles.com with account, order, or policy questions.",
+      `Contact ${siteConfig.supportEmail} with account, order, or policy questions.`,
     ],
   },
 ];

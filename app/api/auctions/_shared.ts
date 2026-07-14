@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { getConfiguredSiteUrl } from "../../lib/siteConfig";
 
 export const adminEmails = ["ryanjhaas99@gmail.com"];
 
@@ -89,13 +90,7 @@ export async function getCurrentUser(request: Request) {
 }
 
 export function getSiteUrl() {
-  const vercelUrl = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : "";
-  const siteUrl =
-    process.env.NEXT_PUBLIC_SITE_URL || vercelUrl || "http://localhost:3000";
-
-  return siteUrl.replace(/\/$/, "");
+  return getConfiguredSiteUrl();
 }
 
 export function roundCurrency(value: number) {
