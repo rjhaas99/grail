@@ -143,8 +143,23 @@ type AuctionDashboardListing = {
   paymentDueAt?: string | null;
   href: string;
 };
+type ActiveListingView = {
+  id: string;
+  card: string;
+  price: string;
+  market: string;
+  status: string;
+  href: string;
+};
+type ActiveListingRow = {
+  id: string;
+  title: string | null;
+  price: number | null;
+  status: string | null;
+  estimated_value?: number | null;
+  sportscardspro_estimated_value?: number | null;
+};
 
-const listings = mockSellerDashboardData.activeListings;
 const initialOffers = mockSellerDashboardData.incomingOffers.map((offer) => ({
   ...offer,
   status: offer.status as OfferStatus,
@@ -398,9 +413,13 @@ function StatCard({ label, value }: { label: string; value: string }) {
 }
 
 export default function SellerDashboardPage() {
+  const [activeListings, setActiveListings] = useState<ActiveListingView[]>([]);
   const [offers, setOffers] = useState(initialOffers);
   const [orders, setOrders] = useState<DashboardOrder[]>(initialOrders);
   const [auctionListings, setAuctionListings] = useState<AuctionDashboardListing[]>([]);
+  const [auctionPaymentTransactions, setAuctionPaymentTransactions] = useState<
+    AuctionDashboardListing[]
+  >([]);
   const [payoutStatus, setPayoutStatus] = useState<PayoutStatus | null>(null);
   const [isLoadingPayoutStatus, setIsLoadingPayoutStatus] = useState(true);
   const [isStartingPayouts, setIsStartingPayouts] = useState(false);
@@ -624,6 +643,61 @@ export default function SellerDashboardPage() {
   useEffect(() => {
     let isMounted = true;
 
+    async function loadSellerListings() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.user.id) {
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("listings")
+        .select("id, title, price, status, estimated_value, sportscardspro_estimated_value")
+        .eq("seller_id", session.user.id)
+        .eq("status", "active")
+        .or("sale_format.is.null,sale_format.eq.fixed")
+        .order("created_at", { ascending: false })
+        .limit(25);
+
+      if (error) {
+        console.error("Seller dashboard active listing fetch error:", error);
+        return;
+      }
+
+      if (!isMounted) {
+        return;
+      }
+
+      setActiveListings(
+        ((data || []) as ActiveListingRow[]).map((listing) => {
+          const estimatedValue = Number(
+            listing.sportscardspro_estimated_value || listing.estimated_value || 0,
+          );
+
+          return {
+            id: listing.id,
+            card: listing.title || "GRAIL Card",
+            price: formatCurrency(Number(listing.price || 0)),
+            market: estimatedValue > 0 ? formatCurrency(estimatedValue) : "Market pending",
+            status: "Active",
+            href: `/cards/${listing.id}`,
+          };
+        }),
+      );
+    }
+
+    loadSellerListings();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
     async function loadSellerAuctions() {
       const {
         data: { session },
@@ -640,6 +714,8 @@ export default function SellerDashboardPage() {
         )
         .eq("seller_id", session.user.id)
         .eq("sale_format", "auction")
+        .eq("status", "active")
+        .eq("auction_status", "active")
         .order("created_at", { ascending: false })
         .limit(25);
 
@@ -654,6 +730,49 @@ export default function SellerDashboardPage() {
 
       setAuctionListings(
         (data || []).map((listing) => ({
+          id: listing.id,
+          title: listing.title || "GRAIL Auction",
+          status: listing.status || "unknown",
+          auctionStatus: listing.auction_status || "unknown",
+          currentBid: Number(listing.auction_current_bid || 0),
+          startingBid: Number(listing.auction_starting_bid || 0),
+          bidCount: Number(listing.auction_bid_count || 0),
+          endsAt: listing.auction_ends_at,
+          reserveStatus: getAuctionReserveStatus(listing),
+          reserveFeeStatus: listing.reserve_fee_status || "none",
+          paymentDueAt: listing.auction_payment_due_at,
+          href: `/cards/${listing.id}`,
+        })),
+      );
+
+      const { data: paymentData, error: paymentError } = await supabase
+        .from("listings")
+        .select(
+          "id, title, status, auction_status, auction_ends_at, auction_starting_bid, auction_current_bid, auction_bid_count, auction_reserve_met_at, auction_payment_due_at, reserve_fee_status",
+        )
+        .eq("seller_id", session.user.id)
+        .eq("sale_format", "auction")
+        .in("auction_status", [
+          "finalizing",
+          "awaiting_payment",
+          "payment_expired",
+          "ended_reserve_not_met",
+          "ended_unsold",
+        ])
+        .order("auction_payment_due_at", { ascending: true, nullsFirst: false })
+        .limit(25);
+
+      if (paymentError) {
+        console.error("Seller dashboard auction transaction fetch error:", paymentError);
+        return;
+      }
+
+      if (!isMounted) {
+        return;
+      }
+
+      setAuctionPaymentTransactions(
+        (paymentData || []).map((listing) => ({
           id: listing.id,
           title: listing.title || "GRAIL Auction",
           status: listing.status || "unknown",
@@ -1101,6 +1220,7 @@ export default function SellerDashboardPage() {
   const shouldShowPayoutButton = !isLoadingPayoutStatus && (!payoutConnected || payoutIncomplete);
   const payoutButtonLabel = payoutConnected ? "Continue Payout Setup" : "Set Up Payouts";
   const upcomingProgressionLevel = getNextProgressionLevel(progression.level);
+  const activeInventoryCount = activeListings.length + auctionListings.length;
 
   return (
     <main className="dashboard-page">
@@ -1118,7 +1238,7 @@ export default function SellerDashboardPage() {
         </section>
 
         <section className="stats-grid">
-          <StatCard label="Active Listings" value={mockSellerDashboardData.stats.activeListings} />
+          <StatCard label="Active Listings" value={String(activeInventoryCount)} />
           <StatCard label="Pending Offers" value={mockSellerDashboardData.stats.pendingOffers} />
           <StatCard label="Orders This Month" value={mockSellerDashboardData.stats.ordersThisMonth} />
           <StatCard label="Total Earnings" value={mockSellerDashboardData.stats.totalEarnings} />
@@ -1136,23 +1256,32 @@ export default function SellerDashboardPage() {
                 <Link href="/list">Add Listing</Link>
               </div>
               <div className="table-list">
-                {listings.map((listing) => (
-                  <article key={listing.card} className="table-row listing-row">
+                {activeListings.length > 0 ? (
+                  activeListings.map((listing) => (
+                    <article key={listing.id} className="table-row listing-row">
+                      <div>
+                        <strong>{listing.card}</strong>
+                        <span>{listing.status}</span>
+                      </div>
+                      <span>{listing.price}</span>
+                      <span>{listing.market}</span>
+                      <span>Active inventory</span>
+                      <span>Fixed price</span>
+                      <div className="row-actions">
+                        <Link href={`/edit-listing/${listing.id}`}>Edit</Link>
+                        <Link href={listing.href}>View</Link>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <article className="table-row listing-row">
                     <div>
-                      <strong>{listing.card}</strong>
-                      <span>{listing.status}</span>
+                      <strong>No active fixed-price listings.</strong>
+                      <span>Sold and inactive cards stay out of active inventory.</span>
                     </div>
-                    <span>{listing.price}</span>
-                    <span>{listing.market}</span>
-                    <span>{listing.watches} watches</span>
-                    <span>{listing.views} views</span>
-                    <div className="row-actions">
-                      <button type="button">Edit</button>
-                      <button type="button">Promote</button>
-                      <Link href={listing.href}>View</Link>
-                    </div>
+                    <Link href="/list">Add Listing</Link>
                   </article>
-                ))}
+                )}
               </div>
             </section>
 
@@ -1181,6 +1310,47 @@ export default function SellerDashboardPage() {
                       </span>
                       <span>Commitment Fee {auction.reserveFeeStatus}</span>
                       <div className="row-actions">
+                        <Link href={auction.href}>View Auction</Link>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <article className="table-row listing-row">
+                    <div>
+                      <strong>No active auctions.</strong>
+                      <span>Ended auctions move into payment or order status.</span>
+                    </div>
+                    <Link href="/list">Create Auction</Link>
+                  </article>
+                )}
+              </div>
+            </section>
+
+            {auctionPaymentTransactions.length > 0 ? (
+              <section className="panel dashboard-section">
+                <div className="section-heading">
+                  <h2>Payment Pending</h2>
+                  <Link href="/orders">View Orders</Link>
+                </div>
+                <div className="table-list">
+                  {auctionPaymentTransactions.map((auction) => (
+                    <article key={auction.id} className="table-row listing-row auction-row">
+                      <div>
+                        <strong>{auction.title}</strong>
+                        <span>{getSellerAuctionLifecycleLabel(auction)}</span>
+                      </div>
+                      <span>
+                        {formatCurrency(auction.currentBid || auction.startingBid)}
+                      </span>
+                      <span>{auction.bidCount} bids</span>
+                      <span>{auction.reserveStatus}</span>
+                      <span>
+                        {auction.auctionStatus === "awaiting_payment"
+                          ? `Pay by ${formatDateTime(auction.paymentDueAt)}`
+                          : getSellerAuctionLifecycleLabel(auction)}
+                      </span>
+                      <span>Commitment Fee {auction.reserveFeeStatus}</span>
+                      <div className="row-actions">
                         {auction.auctionStatus === "payment_expired" ? (
                           <>
                             <Link href={`/list?edit=${auction.id}`}>Relist Auction</Link>
@@ -1192,18 +1362,10 @@ export default function SellerDashboardPage() {
                         )}
                       </div>
                     </article>
-                  ))
-                ) : (
-                  <article className="table-row listing-row">
-                    <div>
-                      <strong>No auctions yet.</strong>
-                      <span>Create an auction from the List page.</span>
-                    </div>
-                    <Link href="/list">Create Auction</Link>
-                  </article>
-                )}
-              </div>
-            </section>
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
             <section className="panel dashboard-section">
               <div className="section-heading">

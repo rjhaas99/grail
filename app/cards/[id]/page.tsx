@@ -143,6 +143,13 @@ type SupabaseOrderRow = {
   card_price?: number | null;
 };
 
+type CardDetailResponse = {
+  listing?: SupabaseListingRow;
+  profile?: ProfileRow | null;
+  order?: SupabaseOrderRow | null;
+  error?: string;
+};
+
 type DetailSeller = {
   name: string;
   level: string;
@@ -849,66 +856,21 @@ export default function CardDetailPage() {
       setIsLoadingRealCard(true);
 
       try {
-        const { data, error } = await supabase
-          .from("listings")
-          .select(
-            `
-              id,
-              seller_id,
-              title,
-              sport,
-              player,
-              year,
-              brand,
-              card_number,
-              card_type,
-              grader,
-              grade,
-              cert_number,
-              condition,
-              price,
-              status,
-              is_collection_card,
-              is_public_collection,
-              psa_verified,
-              psa_cert_number,
-              psa_grade,
-              psa_card_name,
-              psa_verified_at,
-              estimated_value,
-              sportscardspro_id,
-              sportscardspro_product_name,
-              sportscardspro_set_name,
-              sportscardspro_estimated_value,
-              sportscardspro_price_field,
-              sportscardspro_source_url,
-              sportscardspro_fetched_at,
-              sale_format,
-              auction_status,
-              auction_starts_at,
-              auction_ends_at,
-              auction_starting_bid,
-              auction_current_bid,
-              auction_bid_count,
-              auction_reserve_met_at,
-              auction_winner_id,
-              auction_payment_due_at,
-              reserve_fee_status,
-              created_at,
-              listing_images (
-                image_url,
-                image_type
-              )
-            `,
-          )
-          .eq("id", cardId)
-          .maybeSingle();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const response = await fetch(`/api/cards/${encodeURIComponent(cardId)}`, {
+          headers: session?.access_token
+            ? { authorization: `Bearer ${session.access_token}` }
+            : undefined,
+        });
+        const payload = (await response.json()) as CardDetailResponse;
 
-        if (error) {
-          throw error;
-        }
+        if (!response.ok) {
+          if (response.status !== 404) {
+            throw new Error(payload.error || "Card could not be loaded.");
+          }
 
-        if (!data) {
           if (isMounted) {
             setRealCard(null);
             setRealSeller(null);
@@ -916,7 +878,16 @@ export default function CardDetailPage() {
           return;
         }
 
-        const listing = data as SupabaseListingRow;
+        const listing = payload.listing;
+
+        if (!listing) {
+          if (isMounted) {
+            setRealCard(null);
+            setRealSeller(null);
+          }
+          return;
+        }
+
         const listingStatus = listing.status?.toLowerCase();
 
         if (listingStatus === "deleted" || listingStatus === "inactive") {
@@ -927,43 +898,11 @@ export default function CardDetailPage() {
           return;
         }
 
-        let profile: ProfileRow | null = null;
-        let order: SupabaseOrderRow | null = null;
-
-        if (listing.seller_id) {
-          const { data: profileData, error: profileError } = await supabase
-            .from("profiles")
-            .select("id, full_name, username")
-            .eq("id", listing.seller_id)
-            .maybeSingle();
-
-          if (profileError) {
-            console.error("Card detail profile fetch error:", profileError);
-          } else {
-            profile = profileData as ProfileRow | null;
-          }
-        }
-
-        if (
-          listingStatus === "sold" &&
-          (listing.sale_format !== "auction" || listing.auction_status === "paid")
-        ) {
-          const { data: orderData, error: orderError } = await supabase
-            .from("orders")
-            .select("total_amount, card_price")
-            .eq("listing_id", listing.id)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (orderError) {
-            console.error("Card detail sold order fetch error:", orderError);
-          } else {
-            order = orderData as SupabaseOrderRow | null;
-          }
-        }
-
-        const mapped = mapSupabaseCard(listing, profile, order);
+        const mapped = mapSupabaseCard(
+          listing,
+          payload.profile || null,
+          payload.order || null,
+        );
 
         if (isMounted) {
           setRealCard(mapped.card);

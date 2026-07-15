@@ -299,7 +299,12 @@ async function endAuctions(request: Request) {
         {
           userId: auction.seller_id,
           title: "Your auction ended",
-          body: "Waiting for buyer payment. No order or payout starts until the winner pays.",
+          body: `Winning bid: ${new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: "USD",
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }).format(Number(highBid.amount || 0))}. Waiting for buyer payment.`,
           linkUrl: "/seller-dashboard",
         },
         ...losingBidderIds.map((bidderId) => ({
