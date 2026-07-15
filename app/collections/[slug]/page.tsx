@@ -38,20 +38,6 @@ type ListingImageRow = {
   image_type: string | null;
 };
 
-type LocalMockOffer = {
-  id: string;
-  listing_id: string;
-  cardTitle: string;
-  buyerName: string;
-  sellerName: string;
-  amount: number;
-  askingPrice: number;
-  message: string;
-  status: "pending";
-  createdAt: string;
-  cardRoute: string;
-};
-
 type SupabaseListingRow = {
   id: string;
   seller_id: string | null;
@@ -82,7 +68,6 @@ type ProfileRow = {
 const sellers = mockSellers;
 const buildSellerListings = buildMockSellerListings;
 const mockConversationStorageKey = "grail-mock-conversations";
-const mockOfferStorageKey = "grail-mock-offers";
 const collectionCurationStorageKey = "grail-collection-curation";
 
 const filterModes: FilterMode[] = ["All", "Grail", "Hot", "Graded", "Raw"];
@@ -93,25 +78,6 @@ function formatCurrency(value: number) {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(value);
-}
-
-function readLocalMockOffers() {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  try {
-    const storedOffers = window.localStorage.getItem(mockOfferStorageKey);
-    return storedOffers ? (JSON.parse(storedOffers) as LocalMockOffer[]) : [];
-  } catch (error) {
-    console.error("Mock offer read error:", error);
-    return [];
-  }
-}
-
-function saveLocalMockOffer(offer: LocalMockOffer) {
-  const offers = readLocalMockOffers();
-  window.localStorage.setItem(mockOfferStorageKey, JSON.stringify([offer, ...offers]));
 }
 
 function getCollectionCurationStorageKey(collectionId: string) {
@@ -1211,21 +1177,8 @@ export default function SellerCollectionPage() {
     }
 
     if (offerListing.source !== "supabase") {
-      saveLocalMockOffer({
-        id: `mock-offer-${Date.now()}`,
-        listing_id: offerListing.id,
-        cardTitle: offerListing.title,
-        buyerName: "You",
-        sellerName: offerListing.seller,
-        amount,
-        askingPrice: offerListing.askingPrice || offerListing.price || 0,
-        message: offerMessage.trim(),
-        status: "pending",
-        createdAt: new Date().toISOString(),
-        cardRoute: offerListing.href,
-      });
-      setOfferError("");
-      setSentOfferAmount(amount);
+      setOfferError("Offers can be submitted on live listings only.");
+      setSentOfferAmount(null);
       return;
     }
 
@@ -1255,23 +1208,28 @@ export default function SellerCollectionPage() {
     setOfferError("");
 
     try {
-      const { error } = await supabase.from("offers").insert({
-        listing_id: offerListing.id,
-        buyer_id: session.user.id,
-        seller_id: offerListing.sellerId,
-        amount,
-        message: offerMessage.trim() || null,
-        status: "pending",
+      const response = await fetch("/api/offers", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          listingId: offerListing.id,
+          amount,
+          message: offerMessage.trim(),
+        }),
       });
+      const payload = (await response.json()) as { error?: string };
 
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        throw new Error(payload.error || "Offer could not be sent.");
       }
 
       setSentOfferAmount(amount);
     } catch (error) {
-      console.error("Collection offer insert error:", error);
-      setOfferError("Offer could not be sent.");
+      console.error("Collection offer submit error:", error);
+      setOfferError(error instanceof Error ? error.message : "Offer could not be sent.");
       setSentOfferAmount(null);
     } finally {
       setIsSubmittingOffer(false);

@@ -216,12 +216,14 @@ export async function POST(request: Request, context: RouteContext) {
       title: "New bid received",
       body: `${listing.title || "Your auction"} received a new bid of $${bidAmount.toFixed(2)}.`,
       linkUrl: `/cards/${listingId}`,
+      type: "new_bid_received",
     },
     {
       userId: user.id,
       title: "Bid placed",
       body: `Your bid of $${bidAmount.toFixed(2)} was placed on ${listing.title || "this auction"}.`,
       linkUrl: `/cards/${listingId}`,
+      type: "bid_placed",
     },
   ];
 
@@ -231,6 +233,7 @@ export async function POST(request: Request, context: RouteContext) {
       title: "You were outbid",
       body: `${listing.title || "A GRAIL auction"} has a new higher bid.`,
       linkUrl: `/cards/${listingId}`,
+      type: "outbid",
     });
   }
 
@@ -240,6 +243,7 @@ export async function POST(request: Request, context: RouteContext) {
       title: "Reserve met",
       body: `${listing.title || "Your reserve auction"} has met its reserve.`,
       linkUrl: `/cards/${listingId}`,
+      type: "reserve_met",
     });
   }
 

@@ -67,20 +67,6 @@ type MockCard = MockListing & {
   reserveFeeStatus?: string | null;
 };
 
-type LocalMockOffer = {
-  id: string;
-  listing_id: string;
-  cardTitle: string;
-  buyerName: string;
-  sellerName: string;
-  amount: number;
-  askingPrice: number;
-  message: string;
-  status: "pending";
-  createdAt: string;
-  cardRoute: string;
-};
-
 type ListingImageRow = {
   image_url: string | null;
   image_type: string | null;
@@ -149,6 +135,10 @@ type CardDetailResponse = {
   order?: SupabaseOrderRow | null;
   error?: string;
 };
+type SavedItemStatusResponse = {
+  saved?: boolean;
+  error?: string;
+};
 
 type DetailSeller = {
   name: string;
@@ -162,7 +152,6 @@ type DetailSeller = {
 };
 
 const realListingAccent = "#334155";
-const mockOfferStorageKey = "grail-mock-offers";
 const mockConversationStorageKey = "grail-mock-conversations";
 
 function formatCurrency(value: number) {
@@ -248,25 +237,6 @@ function getAuctionReserveStatus(card: MockCard) {
   }
 
   return card.auctionReserveMetAt ? "Reserve Met" : "Reserve Not Met";
-}
-
-function readLocalMockOffers() {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  try {
-    const storedOffers = window.localStorage.getItem(mockOfferStorageKey);
-    return storedOffers ? (JSON.parse(storedOffers) as LocalMockOffer[]) : [];
-  } catch (error) {
-    console.error("Mock offer read error:", error);
-    return [];
-  }
-}
-
-function saveLocalMockOffer(offer: LocalMockOffer) {
-  const offers = readLocalMockOffers();
-  window.localStorage.setItem(mockOfferStorageKey, JSON.stringify([offer, ...offers]));
 }
 
 function readLocalMockConversations() {
@@ -751,6 +721,8 @@ export default function CardDetailPage() {
   const [selectedPhoto, setSelectedPhoto] =
     useState<PhotoView>("Front");
   const [isWatching, setIsWatching] = useState(false);
+  const [isUpdatingWatch, setIsUpdatingWatch] = useState(false);
+  const [watchMessage, setWatchMessage] = useState("");
   const [isOfferOpen, setIsOfferOpen] = useState(false);
   const [offerAmount, setOfferAmount] = useState("");
   const [offerMessage, setOfferMessage] = useState("");
@@ -930,6 +902,64 @@ export default function CardDetailPage() {
   }, [cardId, mockCard]);
 
   useEffect(() => {
+    let isMounted = true;
+
+    async function loadSavedState() {
+      if (mockCard || !cardId || !currentUserId) {
+        if (isMounted && !currentUserId) {
+          setIsWatching(false);
+        }
+        return;
+      }
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.access_token) {
+          if (isMounted) {
+            setIsWatching(false);
+          }
+          return;
+        }
+
+        const response = await fetch(
+          `/api/saved-items?itemType=listing&listingId=${encodeURIComponent(cardId)}`,
+          {
+            cache: "no-store",
+            headers: {
+              authorization: `Bearer ${session.access_token}`,
+            },
+          },
+        );
+        const payload = (await response.json()) as SavedItemStatusResponse;
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Saved state could not be loaded.");
+        }
+
+        if (isMounted) {
+          setIsWatching(Boolean(payload.saved));
+          setWatchMessage("");
+        }
+      } catch (error) {
+        console.error("Card detail saved state error:", error);
+
+        if (isMounted) {
+          setWatchMessage("Saved state could not be loaded.");
+        }
+      }
+    }
+
+    void loadSavedState();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [cardId, currentUserId, mockCard]);
+
+  useEffect(() => {
     if (!auctionCardId) {
       return;
     }
@@ -1029,6 +1059,64 @@ export default function CardDetailPage() {
     });
   }
 
+  async function toggleSavedItem() {
+    if (!card) {
+      return;
+    }
+
+    if (mockCard) {
+      setIsWatching((current) => !current);
+      setWatchMessage("Demo cards are not saved to your real watchlist.");
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setWatchMessage("Sign in to save this card.");
+      return;
+    }
+
+    setIsUpdatingWatch(true);
+    setWatchMessage("");
+
+    try {
+      const response = await fetch(
+        isWatching
+          ? `/api/saved-items?listingId=${encodeURIComponent(card.id)}`
+          : "/api/saved-items",
+        {
+          method: isWatching ? "DELETE" : "POST",
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+            ...(isWatching ? {} : { "content-type": "application/json" }),
+          },
+          body: isWatching
+            ? undefined
+            : JSON.stringify({
+                itemType: "listing",
+                listingId: card.id,
+              }),
+        },
+      );
+      const payload = (await response.json()) as SavedItemStatusResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Watchlist could not be updated.");
+      }
+
+      setIsWatching(!isWatching);
+      setWatchMessage(isWatching ? "Removed from watched cards." : "Saved to watched cards.");
+    } catch (error) {
+      console.error("Card detail watchlist update error:", error);
+      setWatchMessage(error instanceof Error ? error.message : "Watchlist could not be updated.");
+    } finally {
+      setIsUpdatingWatch(false);
+    }
+  }
+
   async function submitOffer() {
     if (!card) {
       return;
@@ -1043,21 +1131,8 @@ export default function CardDetailPage() {
     }
 
     if (mockCard) {
-      saveLocalMockOffer({
-        id: `mock-offer-${Date.now()}`,
-        listing_id: card.id,
-        cardTitle: card.title,
-        buyerName: "You",
-        sellerName: card.seller,
-        amount,
-        askingPrice: card.askingPrice || card.price || 0,
-        message: offerMessage.trim(),
-        status: "pending",
-        createdAt: new Date().toISOString(),
-        cardRoute: card.href,
-      });
-      setOfferError("");
-      setSentOfferAmount(amount);
+      setOfferError("Offers can be submitted on live listings only.");
+      setSentOfferAmount(null);
       return;
     }
 
@@ -1078,12 +1153,8 @@ export default function CardDetailPage() {
     }
 
     if (!card.sellerId) {
-      console.warn("Supabase offers table not available; using mock offer flow.", {
-        reason: "Missing seller_id on listing.",
-        listingId: card.id,
-      });
-      setOfferError("");
-      setSentOfferAmount(amount);
+      setOfferError("Seller was not found for this listing.");
+      setSentOfferAmount(null);
       return;
     }
 
@@ -1091,24 +1162,28 @@ export default function CardDetailPage() {
     setOfferError("");
 
     try {
-      const { error } = await supabase.from("offers").insert({
-        listing_id: card.id,
-        buyer_id: session.user.id,
-        seller_id: card.sellerId,
-        amount,
-        message: offerMessage.trim() || null,
-        status: "pending",
+      const response = await fetch("/api/offers", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          listingId: card.id,
+          amount,
+          message: offerMessage.trim(),
+        }),
       });
+      const payload = (await response.json()) as { error?: string };
 
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        throw new Error(payload.error || "Offer could not be sent.");
       }
 
       setSentOfferAmount(amount);
     } catch (error) {
-      console.error("Card detail offer insert error:", error);
-      console.warn("Supabase offers table not available; using mock offer flow.", error);
-      setOfferError("Offer could not be sent.");
+      console.error("Card detail offer submit error:", error);
+      setOfferError(error instanceof Error ? error.message : "Offer could not be sent.");
       setSentOfferAmount(null);
     } finally {
       setIsSubmittingOffer(false);
@@ -1647,8 +1722,9 @@ export default function CardDetailPage() {
                   className={`watch-button ${isWatching ? "active" : ""}`}
                   aria-pressed={isWatching}
                   aria-label={isWatching ? "Remove from watched cards" : "Watch card"}
-                  title="Watch card"
-                  onClick={() => setIsWatching((current) => !current)}
+                  title={isWatching ? "Remove from watched cards" : "Watch card"}
+                  onClick={toggleSavedItem}
+                  disabled={isUpdatingWatch}
                 >
                   {isWatching ? "♥" : "♡"}
                 </button>
@@ -1673,6 +1749,8 @@ export default function CardDetailPage() {
                   ›
                 </button>
               </div>
+
+              {watchMessage ? <p className="watch-status">{watchMessage}</p> : null}
 
               <div className="thumbnail-row" aria-label="Card photos">
                 {visiblePhotoViews.map((view) => (
@@ -2472,6 +2550,19 @@ const pageStyles = `
 
   .watch-button.active {
     transform: translateY(-1px);
+  }
+
+  .watch-button:disabled {
+    cursor: wait;
+    opacity: 0.68;
+  }
+
+  .watch-status {
+    margin: 10px 0 0;
+    color: #C9CDD3;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 800;
   }
 
   .viewer-arrow {

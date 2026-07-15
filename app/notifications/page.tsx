@@ -5,103 +5,47 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
 
-type NotificationType = "All" | "Offers" | "Messages" | "Orders" | "Market" | "Seller";
+type NotificationCategory =
+  | "Auctions"
+  | "Offers"
+  | "Messages"
+  | "Orders"
+  | "Rewards"
+  | "Market"
+  | "Trust"
+  | "Seller"
+  | "System";
+type NotificationType = "All" | NotificationCategory;
 
 type Notification = {
   id: string;
-  type: Exclude<NotificationType, "All">;
+  type: string;
+  category: NotificationCategory;
   title: string;
   description: string;
-  timestamp: string;
+  createdAt: string | null;
+  readAt: string | null;
   href: string;
   action: string;
   unread: boolean;
-  source?: "mock" | "supabase";
 };
 
-type NotificationRow = {
-  id: string;
-  title: string;
-  body: string;
-  type: string | null;
-  link_url: string | null;
-  read_at: string | null;
-  created_at: string | null;
+type NotificationsResponse = {
+  notifications?: Notification[];
+  unreadCount?: number;
+  error?: string;
 };
 
-const tabs: NotificationType[] = ["All", "Offers", "Messages", "Orders", "Market", "Seller"];
-
-const initialNotifications: Notification[] = [
-  {
-    id: "n1",
-    type: "Offers",
-    title: "Offer received",
-    description: "MasonVault offered $485 for Obsidian Field Captain.",
-    timestamp: "2 minutes ago",
-    href: "/offers",
-    action: "View Offer",
-    unread: true,
-  },
-  {
-    id: "n2",
-    type: "Offers",
-    title: "Offer accepted",
-    description: "Your offer on Midnight Arc Holo was accepted.",
-    timestamp: "18 minutes ago",
-    href: "/offers",
-    action: "View Offer",
-    unread: true,
-  },
-  {
-    id: "n3",
-    type: "Messages",
-    title: "New message from seller",
-    description: "VaultRunner replied about shipping and extra photos.",
-    timestamp: "34 minutes ago",
-    href: "/messages",
-    action: "Open Message",
-    unread: true,
-  },
-  {
-    id: "n4",
-    type: "Market",
-    title: "Watched card price changed",
-    description: "Emerald Archive Guardian moved +4.8% over the last 30 days.",
-    timestamp: "Today",
-    href: "/cards/browse-7",
-    action: "View Card",
-    unread: false,
-  },
-  {
-    id: "n5",
-    type: "Orders",
-    title: "Order shipped",
-    description: "Your Midnight Arc Holo order has tracking available.",
-    timestamp: "Today",
-    href: "/orders",
-    action: "View Order",
-    unread: false,
-  },
-  {
-    id: "n6",
-    type: "Seller",
-    title: "Seller reward level progress",
-    description: "You are 76% of the way to Level 5 Seller.",
-    timestamp: "Yesterday",
-    href: "/seller-rewards",
-    action: "View Rewards",
-    unread: false,
-  },
-  {
-    id: "n7",
-    type: "Market",
-    title: "Hot card alert",
-    description: "Crimson Court Rookie is trending with increased watch activity.",
-    timestamp: "Yesterday",
-    href: "/cards/browse-1",
-    action: "View Card",
-    unread: true,
-  },
+const tabs: NotificationType[] = [
+  "All",
+  "Auctions",
+  "Offers",
+  "Messages",
+  "Orders",
+  "Rewards",
+  "Market",
+  "Seller",
+  "Trust",
 ];
 
 function formatTimestamp(value?: string | null) {
@@ -117,104 +61,113 @@ function formatTimestamp(value?: string | null) {
   });
 }
 
-function getNotificationType(row: NotificationRow): Exclude<NotificationType, "All"> {
-  const text = `${row.title} ${row.body} ${row.type || ""}`.toLowerCase();
+function getGroupLabel(value?: string | null) {
+  if (!value) {
+    return "Earlier";
+  }
 
-  if (text.includes("offer")) return "Offers";
-  if (text.includes("message") || text.includes("information")) return "Messages";
-  if (text.includes("order") || text.includes("refund") || text.includes("shipped")) return "Orders";
-  if (text.includes("market")) return "Market";
+  const date = new Date(value);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
 
-  return "Seller";
+  if (date.toDateString() === today.toDateString()) {
+    return "Today";
+  }
+
+  if (date.toDateString() === yesterday.toDateString()) {
+    return "Yesterday";
+  }
+
+  return "Earlier";
 }
 
-function getActionLabel(type: Exclude<NotificationType, "All">) {
-  if (type === "Offers") return "View Offer";
-  if (type === "Messages") return "Open Message";
-  if (type === "Orders") return "View Order";
-  if (type === "Market") return "View Card";
+async function getAccessToken() {
+  const {
+    data: { session },
+    error,
+  } = await supabase.auth.getSession();
 
-  return "Open";
+  if (error) {
+    console.error("Notifications auth error:", error);
+  }
+
+  return session?.access_token || "";
 }
 
 export default function NotificationsPage() {
   const [activeTab, setActiveTab] = useState<NotificationType>("All");
-  const [notifications, setNotifications] = useState(initialNotifications);
-  const [notice, setNotice] = useState("Demo notifications");
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notice, setNotice] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadNotifications() {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
+      setIsLoading(true);
+      const accessToken = await getAccessToken();
 
-      if (sessionError) {
-        console.error("Notifications auth error:", sessionError);
-      }
-
-      if (!session?.user.id) {
+      if (!accessToken) {
         if (isMounted) {
-          setNotifications(initialNotifications);
-          setNotice("Sign in to view real notifications. Showing demo notifications.");
+          setNotifications([]);
+          setNotice("Sign in to view real GRAIL notifications.");
+          setIsLoading(false);
         }
         return;
       }
 
-      const { data, error } = await supabase
-        .from("notifications")
-        .select("id, title, body, type, link_url, read_at, created_at")
-        .eq("user_id", session.user.id)
-        .order("created_at", { ascending: false });
+      try {
+        const response = await fetch("/api/notifications", {
+          cache: "no-store",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const payload = (await response.json()) as NotificationsResponse;
 
-      if (error) {
-        console.warn("Notifications fetch unavailable, using demo notifications:", error);
+        if (!response.ok) {
+          throw new Error(payload.error || "Notifications could not be loaded.");
+        }
 
         if (isMounted) {
-          setNotifications(initialNotifications);
-          setNotice("Real notifications unavailable. Showing demo notifications.");
+          setNotifications(payload.notifications || []);
+          setNotice("");
+          setIsLoading(false);
         }
-        return;
+      } catch (error) {
+        console.error("Notifications fetch error:", error);
+
+        if (isMounted) {
+          setNotifications([]);
+          setNotice(
+            error instanceof Error
+              ? error.message
+              : "Real notifications could not be loaded.",
+          );
+          setIsLoading(false);
+        }
       }
-
-      const rows = (data || []) as NotificationRow[];
-
-      if (!isMounted) {
-        return;
-      }
-
-      if (rows.length === 0) {
-        setNotifications([]);
-        setNotice("No notifications yet.");
-        return;
-      }
-
-      setNotifications(
-        rows.map((row) => {
-          const type = getNotificationType(row);
-
-          return {
-            id: row.id,
-            type,
-            title: row.title,
-            description: row.body,
-            timestamp: formatTimestamp(row.created_at),
-            href: row.link_url || "/notifications",
-            action: getActionLabel(type),
-            unread: !row.read_at,
-            source: "supabase",
-          };
-        }),
-      );
-      setNotice("Live GRAIL Admin notifications");
     }
 
-    loadNotifications();
+    void loadNotifications();
+
+    const refreshOnFocus = () => {
+      void loadNotifications();
+    };
+    const refreshOnVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void loadNotifications();
+      }
+    };
+
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnVisibility);
 
     return () => {
       isMounted = false;
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnVisibility);
     };
   }, []);
 
@@ -223,40 +176,54 @@ export default function NotificationsPage() {
       return notifications;
     }
 
-    return notifications.filter((notification) => notification.type === activeTab);
+    return notifications.filter((notification) => notification.category === activeTab);
   }, [activeTab, notifications]);
+
+  const groupedNotifications = useMemo(() => {
+    const groupOrder = ["Today", "Yesterday", "Earlier"];
+
+    return groupOrder
+      .map((label) => ({
+        label,
+        items: visibleNotifications.filter(
+          (notification) => getGroupLabel(notification.createdAt) === label,
+        ),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [visibleNotifications]);
 
   const unreadCount = notifications.filter((notification) => notification.unread).length;
 
   async function markRead(id: string) {
+    const target = notifications.find((notification) => notification.id === id);
+
+    if (!target?.unread) {
+      return;
+    }
+
     setNotifications((items) =>
       items.map((notification) =>
         notification.id === id ? { ...notification, unread: false } : notification,
       ),
     );
 
-    const notification = notifications.find((item) => item.id === id);
+    const accessToken = await getAccessToken();
 
-    if (notification?.source !== "supabase") {
+    if (!accessToken) {
       return;
     }
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const response = await fetch("/api/notifications", {
+      method: "PATCH",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ notificationId: id }),
+    });
 
-    if (!session?.user.id) {
-      return;
-    }
-
-    const { error } = await supabase
-      .from("notifications")
-      .update({ read_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("user_id", session.user.id);
-
-    if (error) {
-      console.warn("Notification read update failed:", error);
+    if (!response.ok) {
+      console.warn("Notification read update failed:", await response.text());
     }
   }
 
@@ -265,22 +232,23 @@ export default function NotificationsPage() {
       items.map((notification) => ({ ...notification, unread: false })),
     );
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const accessToken = await getAccessToken();
 
-    if (!session?.user.id) {
+    if (!accessToken) {
       return;
     }
 
-    const { error } = await supabase
-      .from("notifications")
-      .update({ read_at: new Date().toISOString() })
-      .eq("user_id", session.user.id)
-      .is("read_at", null);
+    const response = await fetch("/api/notifications", {
+      method: "PATCH",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ markAllRead: true }),
+    });
 
-    if (error) {
-      console.warn("Notification bulk read update failed:", error);
+    if (!response.ok) {
+      console.warn("Notification bulk read update failed:", await response.text());
     }
   }
 
@@ -294,11 +262,12 @@ export default function NotificationsPage() {
           <div>
             <span>Activity</span>
             <h1>Notifications</h1>
-            <p>Track offers, messages, orders, seller activity, and market alerts.</p>
+            <p>Permanent GRAIL updates for auctions, orders, offers, rewards, and trust.</p>
           </div>
           <button
             type="button"
             className="mark-read-button"
+            disabled={notifications.length === 0 || unreadCount === 0}
             onClick={markAllRead}
           >
             Mark all as read
@@ -321,42 +290,67 @@ export default function NotificationsPage() {
           <span>{unreadCount} unread</span>
         </section>
 
-        <section className="notification-list">
-          {visibleNotifications.map((notification) => (
-            <article
-              key={notification.id}
-              className={`notification-row panel ${notification.unread ? "unread" : ""}`}
-              onClick={() => markRead(notification.id)}
-            >
-              <div className="notification-icon">
-                <span>{notification.type.slice(0, 1)}</span>
-              </div>
-              <div>
-                <div className="notification-title-row">
-                  <h2>{notification.title}</h2>
-                  <span>{notification.type}</span>
-                </div>
-                <p>{notification.description}</p>
-                <small>{notification.timestamp}</small>
-              </div>
-              <div className="notification-action">
-                <span className={notification.unread ? "dot unread-dot" : "dot"} />
-                <Link href={notification.href} onClick={(event) => event.stopPropagation()}>
-                  {notification.action}
-                </Link>
-              </div>
-            </article>
-          ))}
-          {visibleNotifications.length === 0 ? (
+        <section className="notification-list" aria-live="polite">
+          {isLoading ? (
             <article className="notification-row panel">
               <div className="notification-icon">
                 <span>G</span>
               </div>
               <div>
                 <div className="notification-title-row">
-                  <h2>No notifications.</h2>
+                  <h2>Loading notifications.</h2>
                 </div>
-                <p>Official GRAIL Admin updates will appear here.</p>
+                <p>Checking your permanent GRAIL inbox.</p>
+              </div>
+            </article>
+          ) : null}
+
+          {!isLoading && groupedNotifications.map((group) => (
+            <section key={group.label} className="notification-group" aria-label={group.label}>
+              <h2>{group.label}</h2>
+              <div className="notification-group-list">
+                {group.items.map((notification) => (
+                  <article
+                    key={notification.id}
+                    className={`notification-row panel ${notification.unread ? "unread" : ""}`}
+                    onClick={() => markRead(notification.id)}
+                  >
+                    <div className="notification-icon">
+                      <span>{notification.category.slice(0, 1)}</span>
+                    </div>
+                    <div>
+                      <div className="notification-title-row">
+                        <h3>{notification.title}</h3>
+                        <span>{notification.category}</span>
+                      </div>
+                      <p>{notification.description}</p>
+                      <small>{formatTimestamp(notification.createdAt)}</small>
+                    </div>
+                    <div className="notification-action">
+                      <span className={notification.unread ? "dot unread-dot" : "dot"} />
+                      <Link
+                        href={notification.href}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {notification.action}
+                      </Link>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ))}
+
+          {!isLoading && visibleNotifications.length === 0 ? (
+            <article className="notification-row panel">
+              <div className="notification-icon">
+                <span>G</span>
+              </div>
+              <div>
+                <div className="notification-title-row">
+                  <h3>No notifications.</h3>
+                </div>
+                <p>Real GRAIL marketplace updates will appear here as they happen.</p>
               </div>
             </article>
           ) : null}
@@ -369,57 +363,235 @@ export default function NotificationsPage() {
 const pageStyles = `
   .account-page {
     min-height: 100vh;
-    background: radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%), linear-gradient(180deg, #000 0%, #030304 58%, #000 100%);
+    background:
+      radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%),
+      linear-gradient(180deg, #000 0%, #030304 58%, #000 100%);
     color: #fafafa;
     font-family: Arial, Helvetica, sans-serif;
   }
-  .account-shell { width: 1240px; margin: 0 auto; padding: 8px 0 38px; }
+
+  .account-shell {
+    width: 1240px;
+    margin: 0 auto;
+    padding: 8px 0 38px;
+  }
+
   .panel {
     border: 1px solid #1d1d22;
     border-radius: 12px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)), rgba(5,5,6,0.92);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)),
+      rgba(5,5,6,0.92);
     box-shadow: 0 18px 44px rgba(0,0,0,0.28);
   }
-  .page-heading { margin-top: 18px; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
+
+  .page-heading {
+    margin-top: 18px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+  }
+
   .page-heading span {
-    color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase;
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
-  .page-heading h1 { margin: 8px 0 0; color: #fff; font-size: 42px; line-height: 46px; font-weight: 900; }
-  .page-heading p, .notification-row p, .notification-row small, .notification-notice {
-    color: #a1a1aa; font-size: 13px; line-height: 18px; font-weight: 800;
+
+  .page-heading h1 {
+    margin: 8px 0 0;
+    color: #fff;
+    font-size: 42px;
+    line-height: 46px;
+    font-weight: 900;
   }
-  .notification-notice { margin: 14px 0 0; border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); padding: 10px 12px; }
-  .mark-read-button, .tabs button, .notification-action a {
-    border: 1px solid rgba(231,222,208,0.28); border-radius: 10px; background: rgba(231,222,208,0.055);
-    color: #fff; min-height: 38px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center;
-    text-decoration: none; font-size: 12px; font-weight: 900; cursor: pointer;
+
+  .page-heading p,
+  .notification-row p,
+  .notification-row small,
+  .notification-notice {
+    color: #a1a1aa;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 800;
   }
-  .mark-read-button:hover, .tabs button.active, .tabs button:hover, .notification-action a:hover {
-    border-color: rgba(231,222,208,0.62); background: rgba(231,222,208,0.11); box-shadow: 0 0 18px rgba(201,205,211,0.13);
+
+  .notification-notice {
+    margin: 14px 0 0;
+    border: 1px solid rgba(201,205,211,0.16);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.045);
+    padding: 10px 12px;
   }
-  .tabs { margin-top: 18px; padding: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .tabs span { margin-left: auto; color: #C9CDD3; font-size: 12px; font-weight: 900; }
-  .notification-list { margin-top: 14px; display: grid; gap: 10px; }
+
+  .mark-read-button,
+  .tabs button,
+  .notification-action a {
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    color: #fff;
+    min-height: 38px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .mark-read-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .mark-read-button:not(:disabled):hover,
+  .tabs button.active,
+  .tabs button:hover,
+  .notification-action a:hover {
+    border-color: rgba(231,222,208,0.62);
+    background: rgba(231,222,208,0.11);
+    box-shadow: 0 0 18px rgba(201,205,211,0.13);
+  }
+
+  .tabs {
+    margin-top: 18px;
+    padding: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .tabs span {
+    margin-left: auto;
+    color: #C9CDD3;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .notification-list {
+    margin-top: 14px;
+    display: grid;
+    gap: 18px;
+  }
+
+  .notification-group {
+    display: grid;
+    gap: 10px;
+  }
+
+  .notification-group > h2 {
+    margin: 0;
+    color: #E7DED0;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .notification-group-list {
+    display: grid;
+    gap: 10px;
+  }
+
   .notification-row {
-    padding: 14px; display: grid; grid-template-columns: 44px 1fr auto; gap: 14px; align-items: center; cursor: pointer;
+    padding: 14px;
+    display: grid;
+    grid-template-columns: 44px 1fr auto;
+    gap: 14px;
+    align-items: center;
+    cursor: pointer;
   }
-  .notification-row.unread { border-color: rgba(231,222,208,0.28); background: linear-gradient(180deg, rgba(231,222,208,0.045), rgba(255,255,255,0.006)), rgba(5,5,6,0.92); }
+
+  .notification-row.unread {
+    border-color: rgba(231,222,208,0.28);
+    background:
+      linear-gradient(180deg, rgba(231,222,208,0.045), rgba(255,255,255,0.006)),
+      rgba(5,5,6,0.92);
+  }
+
   .notification-icon {
-    width: 40px; height: 40px; border-radius: 999px; border: 1px solid rgba(201,205,211,0.22); background: rgba(231,222,208,0.055);
-    color: #E7DED0; display: flex; align-items: center; justify-content: center; font-weight: 900;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    border: 1px solid rgba(201,205,211,0.22);
+    background: rgba(231,222,208,0.055);
+    color: #E7DED0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
   }
-  .notification-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .notification-title-row h2 { margin: 0; color: #fff; font-size: 17px; line-height: 21px; font-weight: 900; }
+
+  .notification-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .notification-title-row h3 {
+    margin: 0;
+    color: #fff;
+    font-size: 17px;
+    line-height: 21px;
+    font-weight: 900;
+  }
+
   .notification-title-row span {
-    border: 1px solid rgba(231,222,208,0.22); border-radius: 999px; color: #E7DED0; padding: 4px 8px; font-size: 10px; font-weight: 900;
+    border: 1px solid rgba(231,222,208,0.22);
+    border-radius: 999px;
+    color: #E7DED0;
+    padding: 4px 8px;
+    font-size: 10px;
+    font-weight: 900;
   }
-  .notification-action { display: flex; align-items: center; gap: 12px; }
-  .dot { width: 8px; height: 8px; border-radius: 999px; background: #3f3f46; display: inline-block; }
-  .unread-dot { background: #E7DED0; box-shadow: 0 0 14px rgba(231,222,208,0.4); }
+
+  .notification-action {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #3f3f46;
+    display: inline-block;
+  }
+
+  .unread-dot {
+    background: #E7DED0;
+    box-shadow: 0 0 14px rgba(231,222,208,0.4);
+  }
+
   @media (max-width: 1100px) {
-    .account-shell { width: calc(100vw - 32px); }
-    .page-heading, .notification-row { grid-template-columns: 1fr; display: grid; align-items: start; }
-    .tabs span { margin-left: 0; }
-    .notification-action { justify-content: space-between; }
+    .account-shell {
+      width: calc(100vw - 32px);
+    }
+
+    .page-heading,
+    .notification-row {
+      grid-template-columns: 1fr;
+      display: grid;
+      align-items: start;
+    }
+
+    .tabs span {
+      margin-left: 0;
+    }
+
+    .notification-action {
+      justify-content: space-between;
+    }
   }
 `;

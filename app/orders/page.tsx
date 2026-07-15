@@ -83,6 +83,7 @@ type MyBidView = {
 
 type PaymentNeededView = {
   id: string;
+  transactionType: "auction" | "accepted_offer";
   listingId: string;
   cardTitle: string;
   amountDisplay: string;
@@ -102,6 +103,7 @@ type PaymentNeededView = {
 type BuyerTransactionResponse = {
   paymentNeeded?: Array<{
     id: string;
+    transactionType: "auction" | "accepted_offer";
     listingId: string;
     cardTitle: string;
     amountDue: number;
@@ -531,6 +533,7 @@ export default function OrdersPage() {
         if (isMounted) {
           const mappedPaymentNeeded = (payload.paymentNeeded || []).map((transaction) => ({
             id: transaction.id,
+            transactionType: transaction.transactionType,
             listingId: transaction.listingId,
             cardTitle: transaction.cardTitle,
             amountDisplay: formatCurrency(Number(transaction.amountDue || 0)),
@@ -662,8 +665,8 @@ export default function OrdersPage() {
     }
   }
 
-  async function startAuctionCheckout(listingId: string) {
-    setStartingAuctionCheckoutId(listingId);
+  async function startTransactionCheckout(transaction: PaymentNeededView) {
+    setStartingAuctionCheckoutId(transaction.id);
 
     const {
       data: { session },
@@ -676,7 +679,10 @@ export default function OrdersPage() {
     }
 
     try {
-      const response = await fetch(`/api/auctions/${listingId}/checkout`, {
+      const checkoutUrl = transaction.transactionType === "accepted_offer"
+        ? `/api/offers/${transaction.id.replace(/^offer:/, "")}/checkout`
+        : `/api/auctions/${transaction.listingId}/checkout`;
+      const response = await fetch(checkoutUrl, {
         method: "POST",
         headers: {
           authorization: `Bearer ${session.access_token}`,
@@ -685,15 +691,30 @@ export default function OrdersPage() {
       const payload = (await response.json()) as { url?: string; error?: string };
 
       if (!response.ok || !payload.url) {
-        throw new Error(payload.error || "Auction checkout could not be started.");
+        throw new Error(payload.error || "Checkout could not be started.");
       }
 
       window.location.assign(payload.url);
     } catch (error) {
-      console.error("Orders auction checkout error:", error);
-      setNotice(error instanceof Error ? error.message : "Auction checkout could not be started.");
+      console.error("Orders transaction checkout error:", error);
+      setNotice(error instanceof Error ? error.message : "Checkout could not be started.");
       setStartingAuctionCheckoutId("");
     }
+  }
+
+  function startAuctionCheckout(listingId: string) {
+    void startTransactionCheckout({
+      id: `auction:${listingId}`,
+      transactionType: "auction",
+      listingId,
+      cardTitle: "GRAIL Auction",
+      amountDisplay: "",
+      status: "Payment Needed",
+      statusDetail: "",
+      paymentDueAt: null,
+      href: `/cards/${listingId}`,
+      canCompletePayment: true,
+    });
   }
 
   async function approveInspection(order: OrderView) {
@@ -959,7 +980,7 @@ export default function OrdersPage() {
             ? paymentNeeded.map((transaction) => (
                 <article key={transaction.id} className="order-row payment-needed-row">
                   <div>
-                    <span>Auction Won</span>
+                    <span>{transaction.transactionType === "accepted_offer" ? "Accepted Offer" : "Auction Won"}</span>
                     <h2>{transaction.cardTitle}</h2>
                     <p>{formatTimeRemaining(transaction.paymentDueAt)}</p>
                     <p>
@@ -977,14 +998,16 @@ export default function OrdersPage() {
                   <p className="order-summary-note">{transaction.statusDetail}</p>
                   <strong>{transaction.amountDisplay}</strong>
                   <div className="order-actions">
-                    <Link href={transaction.href}>View Auction</Link>
+                    <Link href={transaction.href}>
+                      {transaction.transactionType === "accepted_offer" ? "View Card" : "View Auction"}
+                    </Link>
                     {transaction.canCompletePayment ? (
                       <button
                         type="button"
-                        disabled={startingAuctionCheckoutId === transaction.listingId}
-                        onClick={() => startAuctionCheckout(transaction.listingId)}
+                        disabled={startingAuctionCheckoutId === transaction.id}
+                        onClick={() => startTransactionCheckout(transaction)}
                       >
-                        {startingAuctionCheckoutId === transaction.listingId
+                        {startingAuctionCheckoutId === transaction.id
                           ? "Opening Checkout..."
                           : "Complete Payment"}
                       </button>

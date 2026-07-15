@@ -319,6 +319,7 @@ async function refundReserveFeeIfNeeded(
           title: "Reserve Commitment Fee refunded",
           body: "Your reserve was met and the auction sold, so the Reserve Commitment Fee was refunded.",
           linkUrl: `/cards/${listingId}`,
+          type: "payment_received",
         },
       ]);
     }
@@ -458,6 +459,7 @@ async function handleAuctionReserveFeeCompleted(
       title: "Auction is live",
       body: "Your reserve auction is live on GRAIL.",
       linkUrl: `/cards/${listingId}`,
+      type: "listing_live",
     },
   ]);
 }
@@ -623,6 +625,25 @@ async function handleCheckoutSessionCompleted(
       throw listingUpdateError;
     }
 
+    if (isOfferSale && metadata.offerId) {
+      const { error: offerUpdateError } = await supabase
+        .from("offers")
+        .update({ status: "completed" })
+        .eq("id", metadata.offerId)
+        .eq("buyer_id", buyerId)
+        .eq("seller_id", sellerId);
+
+      if (offerUpdateError) {
+        console.error("Stripe webhook duplicate offer completion update error:", {
+          error: offerUpdateError,
+          errorMessage: offerUpdateError.message,
+          stripeSessionId: session.id,
+          offerId: metadata.offerId,
+        });
+        throw offerUpdateError;
+      }
+    }
+
     console.info("Stripe checkout.session.completed duplicate handled:", {
       stripeSessionId: session.id,
       paymentIntentId,
@@ -640,8 +661,11 @@ async function handleCheckoutSessionCompleted(
 
   const listingPrice = Number(listing.price || 0);
   const auctionPrice = Number(listing.auction_current_bid || 0);
+  const offerPrice = isOfferSale ? subtotalAmount || totalAmount : 0;
   const cardPrice = isAuctionSale && auctionPrice > 0
     ? auctionPrice
+    : isOfferSale && offerPrice > 0
+      ? offerPrice
     : listingPrice > 0
       ? listingPrice
       : subtotalAmount || totalAmount;
@@ -711,6 +735,25 @@ async function handleCheckoutSessionCompleted(
     throw listingUpdateError;
   }
 
+  if (isOfferSale && metadata.offerId) {
+    const { error: offerUpdateError } = await supabase
+      .from("offers")
+      .update({ status: "completed" })
+      .eq("id", metadata.offerId)
+      .eq("buyer_id", buyerId)
+      .eq("seller_id", sellerId);
+
+    if (offerUpdateError) {
+      console.error("Stripe webhook offer completion update error:", {
+        error: offerUpdateError,
+        errorMessage: offerUpdateError.message,
+        stripeSessionId: session.id,
+        offerId: metadata.offerId,
+      });
+      throw offerUpdateError;
+    }
+  }
+
   console.info("Stripe checkout.session.completed order recorded:", {
     stripeSessionId: session.id,
     transactionType,
@@ -722,19 +765,33 @@ async function handleCheckoutSessionCompleted(
   await createSystemNotifications(supabase, [
     {
       userId: sellerId,
-      title: isAuctionSale ? "Winner payment received" : "Your item sold",
+      title: isAuctionSale
+        ? "Winner payment received"
+        : isOfferSale
+          ? "Offer payment received"
+          : "Your item sold",
       body: isAuctionSale
         ? "The winning bidder paid. Add tracking from your Seller Dashboard."
+        : isOfferSale
+          ? "The buyer paid for the accepted offer. Add tracking from your Seller Dashboard."
         : "Your card sold. Add tracking from your Seller Dashboard.",
       linkUrl: "/seller-dashboard",
+      type: isAuctionSale ? "payment_received" : "card_sold",
     },
     {
       userId: buyerId,
-      title: isAuctionSale ? "Auction payment confirmed" : "Order confirmed",
+      title: isAuctionSale
+        ? "Auction payment confirmed"
+        : isOfferSale
+          ? "Accepted offer confirmed"
+          : "Order confirmed",
       body: isAuctionSale
         ? "Your winning auction payment was placed successfully."
+        : isOfferSale
+          ? "Your accepted-offer payment was placed successfully."
         : "Your GRAIL order was placed successfully.",
       linkUrl: "/orders",
+      type: "card_purchased",
     },
   ]);
 

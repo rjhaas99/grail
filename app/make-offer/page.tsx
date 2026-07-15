@@ -126,16 +126,32 @@ if (listing.price && numericAmount >= listing.price) {
         return;
       }
 
-      const { error } = await supabase.from("offers").insert({
-        listing_id: listing.id,
-        buyer_id: user.id,
-        seller_id: listing.seller_id,
-        amount: numericAmount,
-        message: offerMessage.trim() || null,
-        status: "pending",
-      });
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      if (error) throw error;
+      if (!session?.access_token) {
+        router.push(`/login?redirectTo=${encodeURIComponent(`/make-offer?listingId=${listing.id}`)}`);
+        return;
+      }
+
+      const response = await fetch("/api/offers", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          listingId: listing.id,
+          amount: numericAmount,
+          message: offerMessage.trim(),
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Offer could not be submitted.");
+      }
 
       setPageMessage("Offer submitted successfully.");
       router.push("/offers");

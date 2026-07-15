@@ -63,20 +63,6 @@ type ListingValueBadge = {
   title: string;
 };
 
-type LocalMockOffer = {
-  id: string;
-  listing_id: string;
-  cardTitle: string;
-  buyerName: string;
-  sellerName: string;
-  amount: number;
-  askingPrice: number;
-  message: string;
-  status: "pending";
-  createdAt: string;
-  cardRoute: string;
-};
-
 type ListingImageRow = {
   image_url: string | null;
   image_type: string | null;
@@ -147,7 +133,6 @@ type FeaturedSeller = {
   latestListedAt: string | null;
 };
 
-const mockOfferStorageKey = "grail-mock-offers";
 const mockConversationStorageKey = "grail-mock-conversations";
 
 const realListingAccents = [
@@ -257,25 +242,6 @@ function formatCurrency(value: number) {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(value);
-}
-
-function readLocalMockOffers() {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  try {
-    const storedOffers = window.localStorage.getItem(mockOfferStorageKey);
-    return storedOffers ? (JSON.parse(storedOffers) as LocalMockOffer[]) : [];
-  } catch (error) {
-    console.error("Mock offer read error:", error);
-    return [];
-  }
-}
-
-function saveLocalMockOffer(offer: LocalMockOffer) {
-  const offers = readLocalMockOffers();
-  window.localStorage.setItem(mockOfferStorageKey, JSON.stringify([offer, ...offers]));
 }
 
 function readLocalMockConversations() {
@@ -1715,21 +1681,8 @@ function BrowseContent() {
     }
 
     if (offerListing.source === "mock") {
-      saveLocalMockOffer({
-        id: `mock-offer-${Date.now()}`,
-        listing_id: offerListing.id,
-        cardTitle: offerListing.title,
-        buyerName: "You",
-        sellerName: offerListing.seller,
-        amount,
-        askingPrice: offerListing.askingPrice || offerListing.price || 0,
-        message: offerMessage.trim(),
-        status: "pending",
-        createdAt: new Date().toISOString(),
-        cardRoute: offerListing.href,
-      });
-      setOfferError("");
-      setSentOfferAmount(amount);
+      setOfferError("Offers can be submitted on live listings only.");
+      setSentOfferAmount(null);
       return;
     }
 
@@ -1750,12 +1703,8 @@ function BrowseContent() {
     }
 
     if (!offerListing.sellerId) {
-      console.warn("Supabase offers table not available; using mock offer flow.", {
-        reason: "Missing seller_id on listing.",
-        listingId: offerListing.id,
-      });
-      setOfferError("");
-      setSentOfferAmount(amount);
+      setOfferError("Seller was not found for this listing.");
+      setSentOfferAmount(null);
       return;
     }
 
@@ -1763,24 +1712,28 @@ function BrowseContent() {
     setOfferError("");
 
     try {
-      const { error } = await supabase.from("offers").insert({
-        listing_id: offerListing.id,
-        buyer_id: session.user.id,
-        seller_id: offerListing.sellerId,
-        amount,
-        message: offerMessage.trim() || null,
-        status: "pending",
+      const response = await fetch("/api/offers", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          listingId: offerListing.id,
+          amount,
+          message: offerMessage.trim(),
+        }),
       });
+      const payload = (await response.json()) as { error?: string };
 
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        throw new Error(payload.error || "Offer could not be sent.");
       }
 
       setSentOfferAmount(amount);
     } catch (error) {
-      console.error("Browse offer insert error:", error);
-      console.warn("Supabase offers table not available; using mock offer flow.", error);
-      setOfferError("Offer could not be sent.");
+      console.error("Browse offer submit error:", error);
+      setOfferError(error instanceof Error ? error.message : "Offer could not be sent.");
       setSentOfferAmount(null);
     } finally {
       setIsSubmittingOffer(false);

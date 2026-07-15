@@ -176,6 +176,7 @@ async function endAuctions(request: Request) {
               ? "Your auction ended without meeting reserve. No sale occurred."
               : "Your auction ended without bids.",
             linkUrl: `/cards/${auction.id}`,
+            type: "auction_ended",
           },
         ]);
         results.push({
@@ -225,12 +226,14 @@ async function endAuctions(request: Request) {
             title: "Reserve not met",
             body: "Your auction ended below reserve. No sale occurred.",
             linkUrl: `/cards/${auction.id}`,
+            type: "auction_ended",
           },
           ...losingBidderIds.map((bidderId) => ({
             userId: bidderId,
             title: "Auction ended",
             body: "This auction ended below reserve. No sale occurred.",
             linkUrl: `/cards/${auction.id}`,
+            type: "auction_lost",
           })),
         ]);
         results.push({ listingId: auction.id, status: "reserve_not_met" });
@@ -295,23 +298,33 @@ async function endAuctions(request: Request) {
           title: "Congratulations. You won the auction.",
           body: `You won ${auction.title || "this auction"}. Complete payment within 24 hours.`,
           linkUrl: `/orders`,
+          type: "auction_won",
+        },
+        {
+          userId: winnerId,
+          title: "Payment Needed",
+          body: `Complete payment for ${auction.title || "your winning auction"} within 24 hours.`,
+          linkUrl: "/orders",
+          type: "payment_needed",
         },
         {
           userId: auction.seller_id,
-          title: "Your auction ended",
-          body: `Winning bid: ${new Intl.NumberFormat("en-US", {
+          title: "Auction Finished",
+          body: `${auction.title || "Your auction"} finished. Winning bid: ${new Intl.NumberFormat("en-US", {
             style: "currency",
             currency: "USD",
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
           }).format(Number(highBid.amount || 0))}. Waiting for buyer payment.`,
           linkUrl: "/seller-dashboard",
+          type: "auction_finished",
         },
         ...losingBidderIds.map((bidderId) => ({
           userId: bidderId,
           title: "Auction ended",
           body: "You did not win this auction.",
           linkUrl: `/cards/${auction.id}`,
+          type: "auction_lost",
         })),
       ]);
       results.push({ listingId: auction.id, status: "awaiting_payment" });
@@ -370,12 +383,14 @@ async function endAuctions(request: Request) {
           title: "Winner payment expired",
           body: "The winning bidder did not pay within 24 hours. You can relist this card.",
           linkUrl: "/seller-dashboard",
+          type: "payment_expired",
         },
         {
           userId: auction.auction_winner_id,
           title: "Auction payment expired",
           body: "The 24-hour payment window expired, so this auction purchase was canceled.",
           linkUrl: "/orders",
+          type: "payment_expired",
         },
       ]);
 

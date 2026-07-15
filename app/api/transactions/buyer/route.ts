@@ -26,9 +26,19 @@ type AuctionListingRow = {
   reserve_fee_status: string | null;
 };
 
+type OfferRow = {
+  id: string;
+  listing_id: string | null;
+  buyer_id: string | null;
+  seller_id: string | null;
+  amount: number | null;
+  status: string | null;
+  created_at: string | null;
+};
+
 type PaymentNeededTransaction = {
   id: string;
-  transactionType: "auction";
+  transactionType: "auction" | "accepted_offer";
   listingId: string;
   cardTitle: string;
   amountDue: number;
@@ -228,6 +238,26 @@ export async function GET(request: Request) {
   }
 
   const bids = (bidData || []) as AuctionBidRow[];
+  const { data: acceptedOfferData, error: acceptedOfferError } = await supabase
+    .from("offers")
+    .select("id, listing_id, buyer_id, seller_id, amount, status, created_at")
+    .eq("buyer_id", user.id)
+    .eq("status", "accepted")
+    .order("created_at", { ascending: false });
+
+  if (acceptedOfferError) {
+    console.error("Buyer transactions accepted offer fetch error:", {
+      error: acceptedOfferError,
+      errorMessage: acceptedOfferError.message,
+      buyerId: user.id,
+    });
+    return NextResponse.json(
+      { error: "Accepted offer transactions could not be loaded." },
+      { status: 500 },
+    );
+  }
+
+  const acceptedOffers = (acceptedOfferData || []) as OfferRow[];
   const latestBidByListing = new Map<string, AuctionBidRow>();
 
   bids.forEach((bid) => {
@@ -265,8 +295,15 @@ export async function GET(request: Request) {
   }
 
   const wonListings = (wonListingData || []) as AuctionListingRow[];
+  const acceptedOfferListingIds = acceptedOffers
+    .map((offer) => offer.listing_id)
+    .filter((listingId): listingId is string => Boolean(listingId));
   const listingIds = Array.from(
-    new Set([...bidListingIds, ...wonListings.map((listing) => listing.id)]),
+    new Set([
+      ...bidListingIds,
+      ...wonListings.map((listing) => listing.id),
+      ...acceptedOfferListingIds,
+    ]),
   );
   const listingsById = new Map<string, AuctionListingRow>();
 
@@ -299,7 +336,7 @@ export async function GET(request: Request) {
     listingsById.set(listing.id, listing);
   });
 
-  const paymentNeeded: PaymentNeededTransaction[] = wonListings.map((listing) => {
+  const auctionPaymentNeeded: PaymentNeededTransaction[] = wonListings.map((listing) => {
     const isExpired = listing.auction_status === "payment_expired";
     const amountDue = Number(listing.auction_current_bid || 0);
 
@@ -331,6 +368,39 @@ export async function GET(request: Request) {
           },
     };
   });
+  const offerPaymentNeeded = acceptedOffers
+    .map<PaymentNeededTransaction | null>((offer) => {
+      if (!offer.listing_id) {
+        return null;
+      }
+
+      const listing = listingsById.get(offer.listing_id);
+      const amountDue = Number(offer.amount || 0);
+
+      if (!listing || amountDue <= 0) {
+        return null;
+      }
+
+      const isAvailable = listing.status === "active";
+
+      return {
+        id: `offer:${offer.id}`,
+        transactionType: "accepted_offer",
+        listingId: offer.listing_id,
+        cardTitle: listing.title || "Accepted Offer",
+        amountDue,
+        status: isAvailable ? "payment_needed" : "payment_expired",
+        statusLabel: isAvailable ? "Payment Needed" : "Payment Expired",
+        statusDetail: isAvailable
+          ? "Complete payment to start this accepted-offer order."
+          : "This accepted offer is no longer available for payment.",
+        paymentDueAt: null,
+        href: `/cards/${offer.listing_id}`,
+        canCompletePayment: isAvailable,
+      } satisfies PaymentNeededTransaction;
+    })
+    .filter((transaction): transaction is PaymentNeededTransaction => Boolean(transaction));
+  const paymentNeeded = [...auctionPaymentNeeded, ...offerPaymentNeeded];
 
   const myBids = Array.from(latestBidByListing.entries())
     .map(([listingId, bid]) => {

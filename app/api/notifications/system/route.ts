@@ -151,6 +151,7 @@ export async function POST(request: Request) {
       title: "Listing is live",
       body: "Your card is now listed on GRAIL.",
       linkUrl: `/cards/${listing.id}`,
+      type: "listing_live",
     });
 
     return NextResponse.json({ sent: true });
@@ -190,12 +191,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Buyer access denied." }, { status: 403 });
   }
 
-  if (payload.kind === "order_tracking_added" || payload.kind === "order_shipped") {
+  if (payload.kind === "order_tracking_added") {
+    await createSystemNotification(serviceSupabase, {
+      userId: order.buyer_id,
+      title: "Tracking added",
+      body: "Tracking has been added for your card.",
+      linkUrl: "/orders",
+      type: "order_tracking_added",
+    });
+  } else if (payload.kind === "order_shipped") {
     await createSystemNotification(serviceSupabase, {
       userId: order.buyer_id,
       title: "Your order shipped",
-      body: "Tracking has been added for your card.",
+      body: "The seller marked your card as shipped.",
       linkUrl: "/orders",
+      type: "order_shipped",
     });
   } else if (payload.kind === "order_delivered") {
     await createSystemNotification(serviceSupabase, {
@@ -203,6 +213,7 @@ export async function POST(request: Request) {
       title: "Inspection period started",
       body: "Your card was marked delivered. You have 3 days to inspect it or open a dispute.",
       linkUrl: "/orders",
+      type: "order_delivered",
     });
   } else if (payload.kind === "dispute_opened") {
     await createSystemNotification(serviceSupabase, {
@@ -210,6 +221,7 @@ export async function POST(request: Request) {
       title: "Dispute opened",
       body: "A dispute was opened for this order. Please upload evidence or respond if requested.",
       linkUrl: "/seller-dashboard",
+      type: "dispute_opened",
     });
   }
 

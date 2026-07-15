@@ -13,7 +13,7 @@ import {
   type ProgressionSummary,
 } from "../lib/progression";
 
-type OfferStatus = "Pending" | "Accepted" | "Countered" | "Declined";
+type OfferStatus = "Pending" | "Accepted" | "Countered" | "Declined" | "Withdrawn" | "Expired" | "Completed";
 type OrderStatus = "Processing" | "Shipped" | "Paid";
 type RewardTier = {
   rankName: string;
@@ -56,6 +56,26 @@ type WalletLedgerEntry = {
   amount: number;
   title: string;
   createdAt: string | null;
+};
+type DashboardOffer = {
+  id: string;
+  card: string;
+  buyer: string;
+  offer: string;
+  asking: string;
+  status: OfferStatus;
+  href: string;
+};
+type ApiOffer = {
+  id: string;
+  cardTitle: string;
+  cardHref: string;
+  buyerName: string;
+  amount: number;
+  askingPrice: number;
+  statusLabel: OfferStatus;
+  status: string;
+  role: "buyer" | "seller";
 };
 type DashboardOrder = {
   id: string;
@@ -160,10 +180,7 @@ type ActiveListingRow = {
   sportscardspro_estimated_value?: number | null;
 };
 
-const initialOffers = mockSellerDashboardData.incomingOffers.map((offer) => ({
-  ...offer,
-  status: offer.status as OfferStatus,
-}));
+const initialOffers: DashboardOffer[] = [];
 const initialOrders = mockSellerDashboardData.recentOrders.map((order) => ({
   ...order,
   status: order.status as OrderStatus,
@@ -499,6 +516,68 @@ export default function SellerDashboardPage() {
     }
 
     loadProgressionAndRewards();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadIncomingOffers() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        if (isMounted) {
+          setOffers([]);
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/offers", {
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+          },
+        });
+        const payload = (await response.json()) as {
+          offers?: ApiOffer[];
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Incoming offers could not be loaded.");
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        setOffers(
+          (payload.offers || [])
+            .filter((offer) => offer.role === "seller" && offer.status === "pending")
+            .map((offer) => ({
+              id: offer.id,
+              card: offer.cardTitle,
+              buyer: offer.buyerName,
+              offer: formatCurrency(Number(offer.amount || 0)),
+              asking: offer.askingPrice > 0 ? formatCurrency(Number(offer.askingPrice)) : "Ask unavailable",
+              status: offer.statusLabel,
+              href: offer.cardHref,
+            })),
+        );
+      } catch (error) {
+        console.error("Seller dashboard incoming offers fetch error:", error);
+        if (isMounted) {
+          setOffers([]);
+        }
+      }
+    }
+
+    loadIncomingOffers();
 
     return () => {
       isMounted = false;
@@ -1189,10 +1268,52 @@ export default function SellerDashboardPage() {
     return "";
   }
 
-  function updateOffer(id: string, status: OfferStatus) {
-    setOffers((items) =>
-      items.map((offer) => (offer.id === id ? { ...offer, status } : offer)),
-    );
+  async function updateOffer(id: string, status: OfferStatus) {
+    if (status === "Countered") {
+      setDashboardMessage("Open Offers to send a counter amount.");
+      return;
+    }
+
+    const action = status === "Accepted" ? "accept" : status === "Declined" ? "decline" : "";
+
+    if (!action) {
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setDashboardMessage("Sign in to manage offers.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/offers", {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ offerId: id, action }),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Offer could not be updated.");
+      }
+
+      setOffers((items) => items.filter((offer) => offer.id !== id));
+      setDashboardMessage(
+        status === "Accepted"
+          ? "Offer accepted. Buyer payment is now needed."
+          : "Offer declined.",
+      );
+    } catch (error) {
+      console.error("Seller dashboard offer update error:", error);
+      setDashboardMessage(error instanceof Error ? error.message : "Offer could not be updated.");
+    }
   }
 
   const payoutConnected = Boolean(payoutStatus?.connected);
@@ -1239,7 +1360,7 @@ export default function SellerDashboardPage() {
 
         <section className="stats-grid">
           <StatCard label="Active Listings" value={String(activeInventoryCount)} />
-          <StatCard label="Pending Offers" value={mockSellerDashboardData.stats.pendingOffers} />
+          <StatCard label="Pending Offers" value={String(offers.length)} />
           <StatCard label="Orders This Month" value={mockSellerDashboardData.stats.ordersThisMonth} />
           <StatCard label="Total Earnings" value={mockSellerDashboardData.stats.totalEarnings} />
           <StatCard label="Seller Level" value={mockSellerDashboardData.stats.sellerLevel} />
@@ -1394,10 +1515,18 @@ export default function SellerDashboardPage() {
                       <button type="button" onClick={() => updateOffer(offer.id, "Declined")}>
                         Decline
                       </button>
-                      <Link href="/messages">Message</Link>
+                      <Link href={offer.href}>View Card</Link>
                     </div>
                   </article>
                 ))}
+                {offers.length === 0 ? (
+                  <article className="table-row offer-row">
+                    <div>
+                      <strong>No active offers</strong>
+                      <span>New buyer offers will appear here.</span>
+                    </div>
+                  </article>
+                ) : null}
               </div>
             </section>
 

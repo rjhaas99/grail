@@ -889,6 +889,8 @@ export async function processRewardEvent({
   const walletLedgerEntries: WalletLedgerEntry[] = [];
   let walletCreditAwarded = 0;
   let walletNotificationSent = false;
+  let collectorNotificationCount = 0;
+  const collectorNotificationTitles: string[] = [];
   let walletReason = "No wallet reward was available for this event.";
   let actualBuyerPercent: number | null = null;
   let actualSellerPercent: number | null = null;
@@ -953,11 +955,40 @@ export async function processRewardEvent({
     }
   }
 
-  const progression = await getCurrentProgressionSummary(supabase, userId);
+  const progression =
+    (await getCurrentProgressionSummary(supabase, userId)) || calculateProgression(0);
 
   const totalAwarded = awarded
     .filter((item) => !item.alreadyAwarded)
     .reduce((total, item) => total + Math.max(0, item.xpAmount), 0);
+
+  if (marketplace.switches.notificationsEnabled && totalAwarded > 0) {
+    if (progression.level > rewardContext.level) {
+      await createSystemNotification(supabase, {
+        userId,
+        title: "Level Up",
+        body: `You reached Level ${progression.level}: ${progression.title}.`,
+        linkUrl: "/profile",
+        type: "level_up",
+      });
+      collectorNotificationCount += 1;
+      collectorNotificationTitles.push("Level Up");
+    }
+
+    for (const achievement of unlockedAchievements) {
+      await createSystemNotification(supabase, {
+        userId,
+        title: "Achievement Unlocked",
+        body: `${achievement.title}: ${achievement.description}`,
+        linkUrl: "/profile",
+        type: "achievement_unlocked",
+      });
+      collectorNotificationCount += 1;
+      collectorNotificationTitles.push(`Achievement Unlocked: ${achievement.title}`);
+    }
+  } else if (!marketplace.switches.notificationsEnabled && totalAwarded > 0) {
+    skipped.push("Collector progression notifications skipped because notifications are disabled.");
+  }
 
   const walletAwardPlan = await buildWalletAwardPlan({
     supabase,
@@ -1050,7 +1081,7 @@ export async function processRewardEvent({
       actualBuyerMultiplier,
       actualSellerMultiplier,
       walletMultiplierUsed,
-      notificationSent: walletNotificationSent,
+      notificationSent: walletNotificationSent || collectorNotificationCount > 0,
     });
   } else {
     skipped.push("Reward event history is disabled in GRAIL Control Center.");
@@ -1080,8 +1111,11 @@ export async function processRewardEvent({
       unlocked: unlockedAchievements,
     },
     notifications: {
-      sent: walletNotificationSent ? 1 : 0,
-      planned: walletAwardPlan ? [walletAwardPlan.notificationTitle] : [],
+      sent: (walletNotificationSent ? 1 : 0) + collectorNotificationCount,
+      planned: [
+        ...collectorNotificationTitles,
+        ...(walletAwardPlan ? [walletAwardPlan.notificationTitle] : []),
+      ],
     },
     future: {
       grailPassBonusApplied: false,

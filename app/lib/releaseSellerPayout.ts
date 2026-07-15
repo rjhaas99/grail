@@ -348,12 +348,14 @@ export async function releaseSellerPayoutForOrder({
         title: "Payout sent",
         body: "Payment has been sent. Card passed inspection.",
         linkUrl: "/seller-dashboard",
+        type: "seller_payout_released",
       },
       {
         userId: order.buyer_id,
         title: "Order complete",
         body: "Your order is complete.",
         linkUrl: "/orders",
+        type: "inspection_complete",
       },
     ]);
 

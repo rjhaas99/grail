@@ -186,6 +186,7 @@ export async function POST(request: Request) {
     title: "Card passed inspection",
     body: "The buyer approved the order. Payment will be sent automatically.",
     linkUrl: "/seller-dashboard",
+    type: "inspection_complete",
   });
 
   const payoutResult = await releaseSellerPayoutForOrder({
@@ -198,6 +199,16 @@ export async function POST(request: Request) {
     console.info("Inspection approved; seller payout queued for retry:", {
       orderId: order.id,
       detail: payoutResult.detail,
+    });
+  }
+
+  if (payoutResult.status !== "paid" && payoutResult.status !== "already_paid") {
+    await createSystemNotification(serviceSupabase, {
+      userId: order.buyer_id,
+      title: "Inspection complete",
+      body: "Your inspection approval was recorded. The seller payout is queued.",
+      linkUrl: "/orders",
+      type: "inspection_complete",
     });
   }
 
