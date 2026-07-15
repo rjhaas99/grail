@@ -6,9 +6,11 @@ import type { Session } from "@supabase/supabase-js";
 import { useEffect, useMemo, useState } from "react";
 import Header from "../components/Header";
 import {
+  auctionDurationSelectOptions,
   getAuctionEndsAt,
+  getAuctionStorageDurationDays,
   isValidAuctionDuration,
-  oneMinuteAuctionDurationDays,
+  testingOneMinuteAuctionDuration,
 } from "../lib/auctionDurations";
 import type { XpSource } from "../lib/progression";
 import { supabase } from "../../lib/supabase";
@@ -918,13 +920,11 @@ export default function ListCardPage() {
 
     if (isAuctionMode) {
       const startingBid = Number(auctionStartingBid);
-      const duration = Number(auctionDurationDays);
-
       if (!Number.isFinite(startingBid) || startingBid < 0.99) {
         return "Auction starting bid must be at least $0.99.";
       }
 
-      if (!isValidAuctionDuration(duration)) {
+      if (!isValidAuctionDuration(auctionDurationDays)) {
         return "Choose a valid auction duration.";
       }
 
@@ -1264,7 +1264,9 @@ export default function ListCardPage() {
           ? "scheduled"
           : "active"
         : null,
-      auction_duration_days: isAuctionMode ? Number(auctionDurationDays) : null,
+      auction_duration_days: isAuctionMode
+        ? getAuctionStorageDurationDays(auctionDurationDays)
+        : null,
       auction_starts_at: auctionStartsAt ? auctionStartsAt.toISOString() : null,
       auction_ends_at: auctionEndsAt,
       auction_starting_bid: isAuctionMode ? Number(auctionStartingBid) : null,
@@ -1588,7 +1590,7 @@ export default function ListCardPage() {
           },
           body: JSON.stringify({
             listingId: createdListing.id,
-            auctionDurationDays: Number(auctionDurationDays),
+            auctionDurationOption: auctionDurationDays,
           }),
         });
         const payload = (await response.json()) as { url?: string; error?: string; detail?: string };
@@ -2041,13 +2043,11 @@ export default function ListCardPage() {
                         value={auctionDurationDays}
                         onChange={(event) => setAuctionDurationDays(event.target.value)}
                       >
-                        <option value="1">1 day</option>
-                        <option value={String(oneMinuteAuctionDurationDays)}>
-                          1 minute (testing only)
-                        </option>
-                        <option value="3">3 days</option>
-                        <option value="5">5 days</option>
-                        <option value="7">7 days</option>
+                        {auctionDurationSelectOptions.map((durationOption) => (
+                          <option key={durationOption.option} value={durationOption.option}>
+                            {durationOption.label}
+                          </option>
+                        ))}
                       </select>
                     </label>
                     <label className="toggle-field">
@@ -2079,8 +2079,7 @@ export default function ListCardPage() {
                     No-reserve auctions are free to create and must sell to the
                     highest valid bidder.
                   </p>
-                  {Math.abs(Number(auctionDurationDays) - oneMinuteAuctionDurationDays) <
-                  0.000001 ? (
+                  {auctionDurationDays === testingOneMinuteAuctionDuration ? (
                     <p className="reserve-fee-note">
                       <strong>Testing duration.</strong> The 1 minute auction duration is temporary
                       and intended only for development testing.
