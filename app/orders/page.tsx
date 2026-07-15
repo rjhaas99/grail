@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import CollectorMomentLayer from "../components/CollectorMomentLayer";
 import Header from "../components/Header";
+import type { CollectorMoment } from "../lib/collectorMoments";
 import { mockOrders } from "../lib/mockData";
 
 type SupabaseOrderRow = {
@@ -33,29 +35,6 @@ type SupabaseOrderRow = {
 type ListingRow = {
   id: string;
   title: string | null;
-};
-
-type AuctionBidRow = {
-  id: string;
-  listing_id: string | null;
-  amount: number | null;
-  status: string | null;
-  created_at: string | null;
-};
-
-type AuctionBidListingRow = {
-  id: string;
-  title: string | null;
-  status: string | null;
-  sale_format: string | null;
-  auction_status: string | null;
-  auction_current_bid: number | null;
-  auction_winner_id: string | null;
-  auction_payment_due_at: string | null;
-  auction_ends_at: string | null;
-  auction_bid_count: number | null;
-  auction_reserve_met_at: string | null;
-  reserve_fee_status: string | null;
 };
 
 type ProfileRow = {
@@ -100,6 +79,58 @@ type MyBidView = {
   paymentDueAt: string | null;
   href: string;
   canCompletePayment: boolean;
+};
+
+type PaymentNeededView = {
+  id: string;
+  listingId: string;
+  cardTitle: string;
+  amountDisplay: string;
+  status: string;
+  statusDetail: string;
+  paymentDueAt: string | null;
+  href: string;
+  canCompletePayment: boolean;
+  collectorMoment?: {
+    id: string;
+    occurredAt: string | null;
+    title: string;
+    amountDisplay: string;
+  };
+};
+
+type BuyerTransactionResponse = {
+  paymentNeeded?: Array<{
+    id: string;
+    listingId: string;
+    cardTitle: string;
+    amountDue: number;
+    statusLabel: string;
+    statusDetail: string;
+    paymentDueAt: string | null;
+    href: string;
+    canCompletePayment: boolean;
+    collectorMoment?: {
+      id: string;
+      occurredAt: string | null;
+      title: string;
+      amountDisplay: string;
+    };
+  }>;
+  myBids?: Array<{
+    id: string;
+    listingId: string;
+    cardTitle: string;
+    amount: number;
+    currentBid: number;
+    status: string;
+    statusDetail: string;
+    createdAt: string | null;
+    paymentDueAt: string | null;
+    href: string;
+    canCompletePayment: boolean;
+  }>;
+  error?: string;
 };
 
 const mockOrderViews: OrderView[] = mockOrders.map((order) => ({
@@ -166,6 +197,37 @@ function formatDateTime(value?: string | null) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function formatTimeRemaining(value?: string | null) {
+  if (!value) {
+    return "Deadline pending";
+  }
+
+  const remainingMs = new Date(value).getTime() - Date.now();
+
+  if (!Number.isFinite(remainingMs)) {
+    return "Deadline pending";
+  }
+
+  if (remainingMs <= 0) {
+    return "Expired";
+  }
+
+  const totalMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) {
+    return hours > 0 ? `${days}d ${hours}h remaining` : `${days}d remaining`;
+  }
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m remaining` : `${hours}h remaining`;
+  }
+
+  return `${minutes}m remaining`;
 }
 
 function shortId(value?: string | null) {
@@ -249,72 +311,13 @@ function getSimpleOrderStatus(order: OrderView) {
   return "Paid";
 }
 
-function getBidLifecycleStatus({
-  bid,
-  listing,
-  currentUserId,
-}: {
-  bid: AuctionBidRow;
-  listing: AuctionBidListingRow;
-  currentUserId: string;
-}) {
-  const auctionStatus = listing.auction_status || "unknown";
-  const bidAmount = Number(bid.amount || 0);
-  const currentBid = Number(listing.auction_current_bid || 0);
-  const isWinner = listing.auction_winner_id === currentUserId;
-
-  if (auctionStatus === "active") {
-    return bidAmount >= currentBid
-      ? { status: "Current Bid", detail: "You currently have the highest bid." }
-      : { status: "Outbid", detail: "Another collector currently has the highest bid." };
-  }
-
-  if (auctionStatus === "finalizing") {
-    return {
-      status: "Finalizing Auction",
-      detail: "GRAIL is confirming the winning bid.",
-    };
-  }
-
-  if (auctionStatus === "awaiting_payment") {
-    return isWinner
-      ? {
-          status: "Payment Pending",
-          detail: `Complete payment by ${formatDateTime(listing.auction_payment_due_at)}.`,
-        }
-      : { status: "Lost Auction", detail: "Another bidder won this auction." };
-  }
-
-  if (auctionStatus === "paid") {
-    return isWinner
-      ? { status: "Completed", detail: "Auction payment was completed." }
-      : { status: "Lost Auction", detail: "Another bidder won this auction." };
-  }
-
-  if (auctionStatus === "payment_expired") {
-    return isWinner
-      ? {
-          status: "Payment Expired",
-          detail: "The 24-hour payment window expired.",
-        }
-      : { status: "Lost Auction", detail: "Another bidder won this auction." };
-  }
-
-  if (auctionStatus === "ended_reserve_not_met") {
-    return {
-      status: "Reserve Not Met",
-      detail: "The auction ended below reserve. No sale occurred.",
-    };
-  }
-
-  return { status: "Lost Auction", detail: "This auction has ended." };
-}
-
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderView[]>(mockOrderViews);
+  const [paymentNeeded, setPaymentNeeded] = useState<PaymentNeededView[]>([]);
   const [myBids, setMyBids] = useState<MyBidView[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingBids, setIsLoadingBids] = useState(true);
+  const [auctionWonMoments, setAuctionWonMoments] = useState<CollectorMoment[]>([]);
   const [notice, setNotice] = useState("Demo orders");
   const [updatingOrderId, setUpdatingOrderId] = useState("");
   const [startingAuctionCheckoutId, setStartingAuctionCheckoutId] = useState("");
@@ -326,6 +329,11 @@ export default function OrdersPage() {
   const [collapsedEvidenceUploads, setCollapsedEvidenceUploads] = useState<Record<string, boolean>>({});
   const [uploadingEvidenceId, setUploadingEvidenceId] = useState("");
   const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
+
+  const collectorMoments = useMemo(
+    () => auctionWonMoments,
+    [auctionWonMoments],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -488,8 +496,12 @@ export default function OrdersPage() {
   useEffect(() => {
     let isMounted = true;
 
-    async function loadMyBids() {
-      setIsLoadingBids(true);
+    async function loadBuyerTransactions(options: { showLoading?: boolean } = {}) {
+      const { showLoading = true } = options;
+
+      if (showLoading) {
+        setIsLoadingBids(true);
+      }
 
       const {
         data: { session },
@@ -498,115 +510,125 @@ export default function OrdersPage() {
       if (!session?.user.id) {
         if (isMounted) {
           setMyBids([]);
+          setPaymentNeeded([]);
           setIsLoadingBids(false);
         }
         return;
       }
 
       try {
-        const { data: bidData, error: bidError } = await supabase
-          .from("auction_bids")
-          .select("id, listing_id, amount, status, created_at")
-          .eq("bidder_id", session.user.id)
-          .eq("status", "valid")
-          .order("created_at", { ascending: false });
-
-        if (bidError) {
-          throw bidError;
-        }
-
-        const bids = (bidData || []) as AuctionBidRow[];
-        const latestBidByListing = new Map<string, AuctionBidRow>();
-
-        bids.forEach((bid) => {
-          if (!bid.listing_id) {
-            return;
-          }
-
-          const existing = latestBidByListing.get(bid.listing_id);
-
-          if (!existing || Number(bid.amount || 0) > Number(existing.amount || 0)) {
-            latestBidByListing.set(bid.listing_id, bid);
-          }
+        const response = await fetch("/api/transactions/buyer", {
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+          },
         });
+        const payload = (await response.json()) as BuyerTransactionResponse;
 
-        const listingIds = Array.from(latestBidByListing.keys());
-
-        if (listingIds.length === 0) {
-          if (isMounted) {
-            setMyBids([]);
-          }
-          return;
+        if (!response.ok) {
+          throw new Error(payload.error || "Buyer transactions could not be loaded.");
         }
-
-        const { data: listingData, error: listingError } = await supabase
-          .from("listings")
-          .select(
-            "id, title, status, sale_format, auction_status, auction_current_bid, auction_winner_id, auction_payment_due_at, auction_ends_at, auction_bid_count, auction_reserve_met_at, reserve_fee_status",
-          )
-          .in("id", listingIds);
-
-        if (listingError) {
-          throw listingError;
-        }
-
-        const listingsById = new Map<string, AuctionBidListingRow>();
-        ((listingData || []) as AuctionBidListingRow[]).forEach((listing) => {
-          listingsById.set(listing.id, listing);
-        });
-
-        const views = Array.from(latestBidByListing.entries())
-          .map(([listingId, bid]) => {
-            const listing = listingsById.get(listingId);
-
-            if (!listing || listing.sale_format !== "auction") {
-              return null;
-            }
-
-            const lifecycle = getBidLifecycleStatus({
-              bid,
-              listing,
-              currentUserId: session.user.id,
-            });
-
-            return {
-              id: bid.id,
-              listingId,
-              cardTitle: listing.title || "GRAIL Auction",
-              amountDisplay: formatCurrency(Number(bid.amount || 0)),
-              currentBidDisplay: formatCurrency(Number(listing.auction_current_bid || 0)),
-              status: lifecycle.status,
-              statusDetail: lifecycle.detail,
-              date: formatDate(bid.created_at),
-              paymentDueAt: listing.auction_payment_due_at,
-              href: `/cards/${listingId}`,
-              canCompletePayment:
-                listing.auction_status === "awaiting_payment" &&
-                listing.auction_winner_id === session.user.id,
-            } satisfies MyBidView;
-          })
-          .filter((view): view is MyBidView => Boolean(view));
 
         if (isMounted) {
-          setMyBids(views);
+          const mappedPaymentNeeded = (payload.paymentNeeded || []).map((transaction) => ({
+            id: transaction.id,
+            listingId: transaction.listingId,
+            cardTitle: transaction.cardTitle,
+            amountDisplay: formatCurrency(Number(transaction.amountDue || 0)),
+            status: transaction.statusLabel,
+            statusDetail: transaction.statusDetail,
+            paymentDueAt: transaction.paymentDueAt,
+            href: transaction.href,
+            canCompletePayment: transaction.canCompletePayment,
+            collectorMoment: transaction.collectorMoment,
+          }));
+          const mappedBids = (payload.myBids || []).map((bid) => ({
+            id: bid.id,
+            listingId: bid.listingId,
+            cardTitle: bid.cardTitle,
+            amountDisplay: formatCurrency(Number(bid.amount || 0)),
+            currentBidDisplay: formatCurrency(Number(bid.currentBid || 0)),
+            status: bid.status,
+            statusDetail: bid.statusDetail,
+            date: formatDate(bid.createdAt),
+            paymentDueAt: bid.paymentDueAt,
+            href: bid.href,
+            canCompletePayment: bid.canCompletePayment,
+          }));
+
+          setPaymentNeeded(mappedPaymentNeeded);
+          setMyBids(mappedBids);
+
+          const unseenMoments = mappedPaymentNeeded
+            .map((transaction) => transaction.collectorMoment)
+            .filter(
+              (moment): moment is NonNullable<PaymentNeededView["collectorMoment"]> =>
+                Boolean(moment),
+            )
+            .filter((moment) => {
+              if (typeof window === "undefined") {
+                return false;
+              }
+
+              const storageKey = `grail-collector-moment:${moment.id}`;
+
+              if (window.localStorage.getItem(storageKey)) {
+                return false;
+              }
+
+              window.localStorage.setItem(storageKey, "seen");
+              return true;
+            })
+            .map<CollectorMoment>((moment) => ({
+              id: moment.id,
+              kind: "auction_won",
+              priority: "major",
+              eyebrow: "Auction Won",
+              title: "You Won the Auction",
+              primaryText: moment.amountDisplay,
+              secondaryText: "Payment Needed",
+              storyLines: [moment.title, "Complete payment within 24 hours."],
+              footer: "Complete Payment",
+              referenceType: "auction",
+              referenceId: moment.id.split(":")[1] || null,
+              occurredAt: moment.occurredAt,
+            }));
+
+          setAuctionWonMoments((existing) => {
+            const existingIds = new Set(existing.map((moment) => moment.id));
+            return [
+              ...existing,
+              ...unseenMoments.filter((moment) => !existingIds.has(moment.id)),
+            ];
+          });
         }
       } catch (error) {
-        console.error("Orders My Bids fetch error:", error);
+        console.error("Orders buyer transactions fetch error:", error);
 
         if (isMounted) {
           setMyBids([]);
+          setPaymentNeeded([]);
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && showLoading) {
           setIsLoadingBids(false);
         }
       }
     }
 
-    loadMyBids();
+    void loadBuyerTransactions();
+    const refreshTimer = window.setInterval(() => {
+      void loadBuyerTransactions({ showLoading: false });
+    }, 30000);
+    const refreshOnFocus = () => {
+      void loadBuyerTransactions({ showLoading: false });
+    };
+
+    window.addEventListener("focus", refreshOnFocus);
 
     return () => {
       isMounted = false;
+      window.clearInterval(refreshTimer);
+      window.removeEventListener("focus", refreshOnFocus);
     };
   }, []);
 
@@ -915,6 +937,64 @@ export default function OrdersPage() {
 
         {notice ? <p className="orders-notice">{notice}</p> : null}
 
+        <section className="orders-list panel payment-needed-panel" aria-labelledby="payment-needed-title">
+          <div className="orders-section-heading">
+            <div>
+              <span>Transactions</span>
+              <h2 id="payment-needed-title">Payment Needed</h2>
+              <p>Won auctions appear here before an order is created. Orders begin after Stripe payment succeeds.</p>
+            </div>
+          </div>
+
+          {isLoadingBids ? <p className="empty-orders">Loading payment-needed transactions...</p> : null}
+
+          {!isLoadingBids && paymentNeeded.length === 0 ? (
+            <article className="empty-orders">
+              <h2>No payment needed.</h2>
+              <p>Won auctions awaiting payment will appear here immediately.</p>
+            </article>
+          ) : null}
+
+          {!isLoadingBids
+            ? paymentNeeded.map((transaction) => (
+                <article key={transaction.id} className="order-row payment-needed-row">
+                  <div>
+                    <span>Auction Won</span>
+                    <h2>{transaction.cardTitle}</h2>
+                    <p>{formatTimeRemaining(transaction.paymentDueAt)}</p>
+                    <p>
+                      {transaction.paymentDueAt
+                        ? `Pay by ${formatDateTime(transaction.paymentDueAt)}`
+                        : "Payment deadline pending"}
+                    </p>
+                  </div>
+                  <div className="order-status-stack">
+                    <strong className={`status status-${transaction.status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
+                      {transaction.status}
+                    </strong>
+                    <span>{transaction.amountDisplay} due</span>
+                  </div>
+                  <p className="order-summary-note">{transaction.statusDetail}</p>
+                  <strong>{transaction.amountDisplay}</strong>
+                  <div className="order-actions">
+                    <Link href={transaction.href}>View Auction</Link>
+                    {transaction.canCompletePayment ? (
+                      <button
+                        type="button"
+                        disabled={startingAuctionCheckoutId === transaction.listingId}
+                        onClick={() => startAuctionCheckout(transaction.listingId)}
+                      >
+                        {startingAuctionCheckoutId === transaction.listingId
+                          ? "Opening Checkout..."
+                          : "Complete Payment"}
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ))
+            : null}
+        </section>
+
         <section className="orders-list panel my-bids-panel" aria-labelledby="my-bids-title">
           <div className="orders-section-heading">
             <div>
@@ -1174,6 +1254,10 @@ export default function OrdersPage() {
           </section>
         </div>
       ) : null}
+      <CollectorMomentLayer
+        moments={collectorMoments}
+        isReady
+      />
     </main>
   );
 }

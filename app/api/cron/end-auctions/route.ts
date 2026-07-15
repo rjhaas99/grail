@@ -292,7 +292,7 @@ async function endAuctions(request: Request) {
       await createSystemNotifications(supabase, [
         {
           userId: winnerId,
-          title: "Congratulations! You won the auction.",
+          title: "Congratulations. You won the auction.",
           body: `You won ${auction.title || "this auction"}. Complete payment within 24 hours.`,
           linkUrl: `/orders`,
         },
@@ -304,8 +304,8 @@ async function endAuctions(request: Request) {
         },
         ...losingBidderIds.map((bidderId) => ({
           userId: bidderId,
-          title: "You were outbid",
-          body: "This auction ended and another bidder won.",
+          title: "Auction ended",
+          body: "You did not win this auction.",
           linkUrl: `/cards/${auction.id}`,
         })),
       ]);
