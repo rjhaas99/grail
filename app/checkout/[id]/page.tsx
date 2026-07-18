@@ -351,10 +351,9 @@ export default function CheckoutPage() {
     }
   }
 
-  const platformFee = Math.round(card.price * 0.035);
   const shipping = 14;
   const estimatedTax = Math.round(card.price * 0.07);
-  const total = card.price + platformFee + shipping + estimatedTax;
+  const total = card.price + shipping + estimatedTax;
   const isOwnerCheckout = Boolean(currentUserId) && card.sellerId === currentUserId;
   const isCollectionCheckout = card.status === "collection";
   const showStripeCheckoutButton =
@@ -469,7 +468,6 @@ export default function CheckoutPage() {
           <aside className="summary-panel panel">
             <h2>Order Summary</h2>
             <SummaryRow label="Item price" value={formatCurrency(card.price)} />
-            <SummaryRow label="Platform fee placeholder" value={formatCurrency(platformFee)} />
             <SummaryRow label="Shipping" value={formatCurrency(shipping)} />
             <SummaryRow label="Estimated tax" value={formatCurrency(estimatedTax)} />
             <div className="summary-total">

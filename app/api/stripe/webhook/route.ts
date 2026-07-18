@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { getAuctionEndsAt } from "../../../lib/auctionDurations";
+import { getSellerFeeQuote } from "../../../lib/sellerFees";
 import { createSystemNotifications } from "../../../lib/serverNotifications";
 import { getTransactionTypeFromStripeCheckoutType } from "../../../lib/transactionCheckout";
 
@@ -670,12 +671,15 @@ async function handleCheckoutSessionCompleted(
       ? listingPrice
       : subtotalAmount || totalAmount;
   const buyerFee = Math.max(totalAmount - cardPrice, 0);
-  const platformFee = roundCurrency(cardPrice * 0.075);
-  const processingFee = roundCurrency(buyerFee);
-  const sellerPayoutAmount = Math.max(
-    roundCurrency(cardPrice - platformFee - processingFee),
-    0,
-  );
+  const sellerFeeQuote = await getSellerFeeQuote({
+    supabase,
+    sellerId,
+    cardPrice,
+    processingFee: buyerFee,
+  });
+  const platformFee = sellerFeeQuote.platformFee;
+  const processingFee = sellerFeeQuote.processingFee;
+  const sellerPayoutAmount = sellerFeeQuote.sellerPayoutAmount;
 
   const orderPayload: OrderInsert = {
     listing_id: listingId,
@@ -760,6 +764,9 @@ async function handleCheckoutSessionCompleted(
     paymentIntentId,
     latestChargeId: latestChargeId || null,
     orderId: insertedOrder?.id,
+    sellerFeePercent: sellerFeeQuote.sellerFeePercent,
+    sellerFeeTier: sellerFeeQuote.rewardTier,
+    sellerLevel: sellerFeeQuote.sellerLevel,
   });
 
   await createSystemNotifications(supabase, [

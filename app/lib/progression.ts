@@ -37,6 +37,21 @@ export type ProgressionLevel = {
   icon: string;
   border: string;
   accent: string;
+  rankStartLevel: number;
+  rankEndLevel: number;
+  rankLevel: number;
+  isRankUnlock: boolean;
+};
+
+export type ProgressionRank = {
+  title: ProgressionTitle;
+  startLevel: number;
+  endLevel: number;
+  minXp: number;
+  tagline: string;
+  icon: string;
+  border: string;
+  accent: string;
 };
 
 export type ProgressionSummary = {
@@ -51,6 +66,14 @@ export type ProgressionSummary = {
   nextLevelXp: number | null;
   progressPercentage: number;
   xpToNext: number;
+  rankStartLevel: number;
+  rankEndLevel: number;
+  rankLevel: number;
+  nextRankTitle: ProgressionTitle | null;
+  nextRankLevel: number | null;
+  nextRankXp: number | null;
+  rankProgressPercentage: number;
+  xpToNextRank: number;
   achievementsCount: number;
 };
 
@@ -74,10 +97,11 @@ export type XpActivity = {
   href: string | null;
 };
 
-export const progressionLevels: ProgressionLevel[] = [
+export const progressionRanks: ProgressionRank[] = [
   {
-    level: 1,
     title: "SEEKER",
+    startLevel: 1,
+    endLevel: 5,
     minXp: 0,
     tagline: "Every grail begins with the search.",
     icon: "S",
@@ -85,8 +109,9 @@ export const progressionLevels: ProgressionLevel[] = [
     accent: "#C9CDD3",
   },
   {
-    level: 2,
     title: "COLLECTOR",
+    startLevel: 6,
+    endLevel: 10,
     minXp: 250,
     tagline: "The hunt becomes a collection.",
     icon: "C",
@@ -94,8 +119,9 @@ export const progressionLevels: ProgressionLevel[] = [
     accent: "#E7DED0",
   },
   {
-    level: 3,
     title: "CURATOR",
+    startLevel: 11,
+    endLevel: 15,
     minXp: 750,
     tagline: "A collection worth showing.",
     icon: "CR",
@@ -103,8 +129,9 @@ export const progressionLevels: ProgressionLevel[] = [
     accent: "#D2D6DC",
   },
   {
-    level: 4,
     title: "DEALER",
+    startLevel: 16,
+    endLevel: 20,
     minXp: 1500,
     tagline: "Trusted to move great cards.",
     icon: "D",
@@ -112,8 +139,9 @@ export const progressionLevels: ProgressionLevel[] = [
     accent: "#D6BC75",
   },
   {
-    level: 5,
     title: "VETERAN",
+    startLevel: 21,
+    endLevel: 25,
     minXp: 3000,
     tagline: "A respected member of the hobby.",
     icon: "V",
@@ -121,8 +149,9 @@ export const progressionLevels: ProgressionLevel[] = [
     accent: "#EBEBF0",
   },
   {
-    level: 6,
     title: "ELITE",
+    startLevel: 26,
+    endLevel: 30,
     minXp: 6000,
     tagline: "Recognized across GRAIL.",
     icon: "E",
@@ -130,8 +159,9 @@ export const progressionLevels: ProgressionLevel[] = [
     accent: "#E1CE9C",
   },
   {
-    level: 7,
     title: "ICON",
+    startLevel: 31,
+    endLevel: 35,
     minXp: 10000,
     tagline: "A collector everyone knows.",
     icon: "I",
@@ -139,8 +169,9 @@ export const progressionLevels: ProgressionLevel[] = [
     accent: "#FFFFFF",
   },
   {
-    level: 8,
     title: "VAULT",
+    startLevel: 36,
+    endLevel: 40,
     minXp: 17500,
     tagline: "A collection worthy of protection.",
     icon: "VLT",
@@ -148,8 +179,9 @@ export const progressionLevels: ProgressionLevel[] = [
     accent: "#C7CAD0",
   },
   {
-    level: 9,
     title: "BLACK LABEL",
+    startLevel: 41,
+    endLevel: 45,
     minXp: 30000,
     tagline: "The highest standard.",
     icon: "BL",
@@ -157,8 +189,9 @@ export const progressionLevels: ProgressionLevel[] = [
     accent: "#F4F4F5",
   },
   {
-    level: 10,
     title: "GRAIL",
+    startLevel: 46,
+    endLevel: 50,
     minXp: 50000,
     tagline: "The pinnacle of collecting.",
     icon: "G",
@@ -166,6 +199,39 @@ export const progressionLevels: ProgressionLevel[] = [
     accent: "#E7DED0",
   },
 ];
+
+function getRankLevelXp(rankIndex: number, rank: ProgressionRank, rankLevel: number) {
+  if (rankLevel <= 1) {
+    return rank.minXp;
+  }
+
+  const nextRank = progressionRanks[rankIndex + 1] || null;
+  const previousRank = progressionRanks[rankIndex - 1] || null;
+  const rankStep = nextRank
+    ? (nextRank.minXp - rank.minXp) / 5
+    : previousRank
+      ? (rank.minXp - previousRank.minXp) / 5
+      : 250;
+
+  return rank.minXp + Math.round(rankStep * (rankLevel - 1));
+}
+
+export const progressionLevels: ProgressionLevel[] = progressionRanks.flatMap(
+  (rank, rankIndex) =>
+    Array.from({ length: rank.endLevel - rank.startLevel + 1 }, (_, index) => ({
+      level: rank.startLevel + index,
+      title: rank.title,
+      minXp: getRankLevelXp(rankIndex, rank, index + 1),
+      tagline: rank.tagline,
+      icon: rank.icon,
+      border: rank.border,
+      accent: rank.accent,
+      rankStartLevel: rank.startLevel,
+      rankEndLevel: rank.endLevel,
+      rankLevel: index + 1,
+      isRankUnlock: index === 0,
+    })),
+);
 
 export const xpSources: Record<XpSource, number> = {
   buy_card: 25,
@@ -387,6 +453,13 @@ export function calculateProgression(
   const progressPercentage = nextLevel
     ? Math.min(100, Math.max(0, Math.round((progressInLevel / levelSpan) * 100)))
     : 100;
+  const currentRank = getProgressionRankForLevel(currentLevel.level);
+  const nextRank = getNextProgressionRank(currentLevel.level);
+  const rankProgressSpan = nextRank ? nextRank.minXp - currentRank.minXp : 0;
+  const progressInRank = xp - currentRank.minXp;
+  const rankProgressPercentage = nextRank
+    ? Math.min(100, Math.max(0, Math.round((progressInRank / rankProgressSpan) * 100)))
+    : 100;
 
   return {
     xp,
@@ -400,10 +473,36 @@ export function calculateProgression(
     nextLevelXp: nextLevel?.minXp ?? null,
     progressPercentage,
     xpToNext: nextLevel ? Math.max(0, nextLevel.minXp - xp) : 0,
+    rankStartLevel: currentLevel.rankStartLevel,
+    rankEndLevel: currentLevel.rankEndLevel,
+    rankLevel: currentLevel.rankLevel,
+    nextRankTitle: nextRank?.title ?? null,
+    nextRankLevel: nextRank?.startLevel ?? null,
+    nextRankXp: nextRank?.minXp ?? null,
+    rankProgressPercentage,
+    xpToNextRank: nextRank ? Math.max(0, nextRank.minXp - xp) : 0,
     achievementsCount,
   };
 }
 
 export function getNextProgressionLevel(level: number) {
   return progressionLevels.find((item) => item.level === level + 1) || null;
+}
+
+export function getProgressionRankForLevel(level: number) {
+  const safeLevel = Math.max(1, Math.min(50, Math.floor(Number(level) || 1)));
+
+  return (
+    progressionRanks.find(
+      (rank) => safeLevel >= rank.startLevel && safeLevel <= rank.endLevel,
+    ) || progressionRanks[0]
+  );
+}
+
+export function getNextProgressionRank(level: number) {
+  const currentRank = getProgressionRankForLevel(level);
+
+  return (
+    progressionRanks.find((rank) => rank.startLevel > currentRank.startLevel) || null
+  );
 }

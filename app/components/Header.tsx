@@ -30,7 +30,7 @@ const accountItems = [
   { label: "GRAIL Pass", href: "/grail-pass" },
   { label: "Billing & Payouts", href: "/billing-payouts" },
   { label: "Orders", href: "/orders" },
-  { label: "Seller Rewards", href: "/seller-rewards" },
+  { label: "Rewards", href: "/rewards" },
   { label: "Settings", href: "/settings" },
 ];
 
@@ -669,7 +669,7 @@ export default function Header() {
                     <span
                       style={{
                         display: "block",
-                        width: `${progression.progressPercentage}%`,
+                        width: `${progression.rankProgressPercentage}%`,
                         height: "100%",
                         borderRadius: "inherit",
                         background: `linear-gradient(90deg, ${progression.accent}, #E7DED0)`,
@@ -677,7 +677,7 @@ export default function Header() {
                     />
                   </div>
                   <Link
-                    href="/profile#xp-guide"
+                    href="/rewards#xp-guide"
                     onClick={closeMenus}
                     style={{
                       marginTop: "9px",

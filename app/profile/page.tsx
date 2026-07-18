@@ -12,9 +12,7 @@ import PublicTrustSection from "../components/PublicTrustSection";
 import { supabase } from "../../lib/supabase";
 import {
   calculateProgression,
-  xpGuideItems,
   type ProgressionSummary,
-  type XpActivity,
 } from "../lib/progression";
 
 type WalletSummary = {
@@ -65,24 +63,23 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function formatActivityDate(value: string | null) {
-  if (!value) {
-    return "Recently";
-  }
-
-  return new Date(value).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 2,
   }).format(value || 0);
+}
+
+function formatProfileDate(value: string | null) {
+  if (!value) {
+    return "Recently";
+  }
+
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
 }
 
 function formatPercent(value?: number | null) {
@@ -106,12 +103,10 @@ export default function ProfilePage() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<{ full_name: string | null; username: string | null } | null>(null);
   const [progression, setProgression] = useState<ProgressionSummary>(calculateProgression(0));
-  const [recentActivity, setRecentActivity] = useState<XpActivity[]>([]);
   const [wallet, setWallet] = useState<WalletSummary>(emptyWallet);
   const [rewardTier, setRewardTier] = useState<RewardTier | null>(null);
   const [nextRewardTier, setNextRewardTier] = useState<RewardTier | null>(null);
   const [marketplaceRewards, setMarketplaceRewards] = useState<RewardsMarketplace | null>(null);
-  const [showXpGuide, setShowXpGuide] = useState(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const displayName = String(
     profile?.full_name ||
@@ -172,7 +167,6 @@ export default function ProfilePage() {
           setUser(null);
           setProfile(null);
           setProgression(calculateProgression(0));
-          setRecentActivity([]);
           setWallet(emptyWallet);
           setRewardTier(null);
           setNextRewardTier(null);
@@ -234,9 +228,6 @@ export default function ProfilePage() {
       setProgression(
         (progressionResult as { progression?: ProgressionSummary }).progression ||
           calculateProgression(0),
-      );
-      setRecentActivity(
-        (progressionResult as { recentActivity?: XpActivity[] }).recentActivity || [],
       );
       setWallet((walletResult as { wallet?: WalletSummary }).wallet || emptyWallet);
       setRewardTier((rewardsResult as { tier?: RewardTier | null }).tier || null);
@@ -325,7 +316,7 @@ export default function ProfilePage() {
           initials={accountInitials}
           rankTitle={progression.title}
           levelLabel={`Level ${progression.level}`}
-          collectorSince={user?.created_at ? formatActivityDate(user.created_at) : "Recently"}
+          collectorSince={formatProfileDate(user?.created_at || null)}
           marketplaceEvent={currentMarketplaceEvent}
           featuredAchievement={
             progression.achievementsCount > 0
@@ -340,7 +331,9 @@ export default function ProfilePage() {
             {
               label: "Lifetime XP",
               value: progression.xp.toLocaleString(),
-              detail: `${progression.progressPercentage}% to next level`,
+              detail: progression.nextRankTitle
+                ? `${progression.rankProgressPercentage}% to ${progression.nextRankTitle}`
+                : "Highest rank reached",
             },
             {
               label: "Achievements",
@@ -377,33 +370,29 @@ export default function ProfilePage() {
             <h2>{progression.title}</h2>
             <p>{progression.tagline}</p>
             <p>
-              Earn XP by buying, selling, listing cards, completing your profile, and
-              participating in GRAIL.
+              Rewards now has the full XP guide, level ladder, perk previews, and
+              recent progression activity.
             </p>
             <div className="progression-track-label">
               <strong>{progression.xp.toLocaleString()} lifetime XP</strong>
               <span>
-                {progression.nextLevelXp
-                  ? `${progression.xpToNext.toLocaleString()} XP to Level ${progression.level + 1}`
-                  : "Max level reached"}
+                {progression.nextRankTitle
+                  ? `${progression.xpToNextRank.toLocaleString()} XP to ${progression.nextRankTitle}`
+                  : "Highest rank reached"}
               </span>
             </div>
             <div className="profile-progress-track">
-              <span style={{ width: `${progression.progressPercentage}%` }} />
+              <span style={{ width: `${progression.rankProgressPercentage}%` }} />
             </div>
-            <button
-              type="button"
-              className="xp-guide-toggle"
-              onClick={() => setShowXpGuide((current) => !current)}
-            >
-              {showXpGuide ? "Hide XP Guide" : "View XP Guide"}
-            </button>
+            <Link href="/rewards#xp-guide" className="xp-guide-toggle">
+              View Rewards
+            </Link>
           </div>
           <div className="progression-stats">
             <span>Current Level</span>
             <strong>{progression.level}</strong>
             <span>Progress</span>
-            <strong>{progression.progressPercentage}%</strong>
+            <strong>{progression.rankProgressPercentage}%</strong>
             <span>Achievements</span>
             <strong>{progression.achievementsCount}</strong>
           </div>
@@ -414,7 +403,7 @@ export default function ProfilePage() {
           <StatCard label="Watched Cards" value="37" />
           <StatCard label="Offers Sent" value="12" />
           <StatCard label="Completed Purchases" value="5" />
-          <StatCard label="GRAIL Level" value={`Level ${progression.level}`} />
+          <StatCard label="GRAIL Rank" value={`${progression.title} · L${progression.level}`} />
         </section>
 
         <section className="panel wallet-summary-panel">
@@ -475,81 +464,6 @@ export default function ProfilePage() {
               </strong>
             </div>
           </div>
-        </section>
-
-        <section id="xp-guide" className="xp-info-grid">
-          <div className="panel xp-guide-panel">
-            <div className="section-title-row">
-              <div>
-                <span>Progression</span>
-                <h2>How to Earn XP</h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowXpGuide((current) => !current)}
-              >
-                {showXpGuide ? "Collapse" : "Expand"}
-              </button>
-            </div>
-            {showXpGuide ? (
-              <>
-                <p className="xp-rule-note">
-                  Upload listing photos means the listing has at least one successfully
-                  uploaded card image. XP is awarded once per listing; re-uploading or
-                  editing the same listing does not award more XP.
-                </p>
-                <div className="xp-guide-list">
-                  {xpGuideItems.map((item) => (
-                    <div key={item.source} className="xp-guide-row">
-                      <div>
-                        <strong>{item.label}</strong>
-                        <span>{item.rule}</span>
-                      </div>
-                      <div className="xp-guide-value">
-                        <strong>+{item.xp} XP</strong>
-                        <em>{item.status === "live" ? "Live" : "Coming soon"}</em>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : null}
-          </div>
-
-          <aside className="panel xp-activity-panel">
-            <div className="section-title-row">
-              <div>
-                <span>History</span>
-                <h2>Recent XP Activity</h2>
-              </div>
-            </div>
-            {recentActivity.length > 0 ? (
-              <div className="xp-activity-list">
-                {recentActivity.map((activity) => (
-                  <div key={activity.id} className="xp-activity-row">
-                    <div>
-                      <strong>{activity.label}</strong>
-                      <span>{formatActivityDate(activity.createdAt)}</span>
-                      {activity.href ? (
-                        <Link href={activity.href}>
-                          {activity.referenceType === "listing"
-                            ? "View listing"
-                            : activity.href === "/seller-dashboard"
-                              ? "View seller dashboard"
-                              : "View orders"}
-                        </Link>
-                      ) : null}
-                    </div>
-                    <em>+{activity.xpAmount} XP</em>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="xp-rule-note">
-                No XP activity yet. List a card or upload listing photos to start earning.
-              </p>
-            )}
-          </aside>
         </section>
 
         <section className="content-grid">
@@ -718,6 +632,7 @@ const pageStyles = `
     font-size: 12px;
     line-height: 15px;
     font-weight: 900;
+    text-decoration: none;
     cursor: pointer;
   }
   .progression-stats {

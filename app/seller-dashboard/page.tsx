@@ -8,8 +8,7 @@ import Header from "../components/Header";
 import { mockSellerDashboardData } from "../lib/mockData";
 import {
   calculateProgression,
-  getNextProgressionLevel,
-  xpGuideItems,
+  getNextProgressionRank,
   type ProgressionSummary,
 } from "../lib/progression";
 
@@ -239,18 +238,6 @@ function normalizeOrderStatus(status?: string | null): OrderStatus {
   }
 
   return "Paid";
-}
-
-function roundCurrency(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
-function calculatePayout(order: SupabaseOrderRow) {
-  const cardPrice = Number(order.card_price || order.total_amount || 0);
-  const platformFee = roundCurrency(cardPrice * 0.075);
-  const processingFee = roundCurrency(Number(order.buyer_fee || 0));
-
-  return Math.max(roundCurrency(cardPrice - platformFee - processingFee), 0);
 }
 
 function formatDate(value?: string | null) {
@@ -676,7 +663,7 @@ export default function SellerDashboardPage() {
               ? listingsById.get(order.listing_id)
               : undefined;
             const total = Number(order.total_amount || order.card_price || 0);
-            const sellerPayoutAmount = Number(order.seller_payout_amount || calculatePayout(order));
+            const sellerPayoutAmount = Number(order.seller_payout_amount || 0);
 
             return {
               id: order.id,
@@ -686,7 +673,9 @@ export default function SellerDashboardPage() {
                 order.buyer_id,
               ),
               total: formatCurrency(total),
-              payoutDisplay: formatCurrency(sellerPayoutAmount),
+              payoutDisplay: sellerPayoutAmount > 0
+                ? formatCurrency(sellerPayoutAmount)
+                : "Pending",
               status: normalizeOrderStatus(order.status),
               orderDate: formatDate(order.created_at),
               fulfillmentStatus: order.fulfillment_status || "pending",
@@ -1340,7 +1329,7 @@ export default function SellerDashboardPage() {
           : "Finish Stripe Express onboarding to enable seller payouts.";
   const shouldShowPayoutButton = !isLoadingPayoutStatus && (!payoutConnected || payoutIncomplete);
   const payoutButtonLabel = payoutConnected ? "Continue Payout Setup" : "Set Up Payouts";
-  const upcomingProgressionLevel = getNextProgressionLevel(progression.level);
+  const upcomingProgressionRank = getNextProgressionRank(progression.level);
   const activeInventoryCount = activeListings.length + auctionListings.length;
 
   return (
@@ -1363,7 +1352,7 @@ export default function SellerDashboardPage() {
           <StatCard label="Pending Offers" value={String(offers.length)} />
           <StatCard label="Orders This Month" value={mockSellerDashboardData.stats.ordersThisMonth} />
           <StatCard label="Total Earnings" value={mockSellerDashboardData.stats.totalEarnings} />
-          <StatCard label="Seller Level" value={mockSellerDashboardData.stats.sellerLevel} />
+          <StatCard label="Seller Rank" value={`${progression.title} · L${progression.level}`} />
           <StatCard label="Response Rate" value={mockSellerDashboardData.stats.responseRate} />
         </section>
 
@@ -1736,27 +1725,37 @@ export default function SellerDashboardPage() {
               <div className="progress-block">
                 <div>
                   <span>
-                    {upcomingProgressionLevel
-                      ? `Progress to ${upcomingProgressionLevel.title}`
-                      : "Progress complete"}
+                    {upcomingProgressionRank
+                      ? `Progress to ${upcomingProgressionRank.title}`
+                      : "Highest rank reached"}
                   </span>
-                  <strong>{progression.progressPercentage}%</strong>
+                  <strong>{progression.rankProgressPercentage}%</strong>
                 </div>
                 <div className="progress-track">
-                  <span style={{ width: `${progression.progressPercentage}%` }} />
+                  <span style={{ width: `${progression.rankProgressPercentage}%` }} />
                 </div>
               </div>
               <div className="progression-stat-list">
-                <span>Current XP</span>
-                <strong>{progression.xp.toLocaleString()}</strong>
+                <span>Current Rank</span>
+                <strong>{progression.title}</strong>
+                <span>Current Level</span>
+                <strong>
+                  Level {progression.level} · {progression.rankLevel}/5
+                </strong>
                 <span>Lifetime XP</span>
                 <strong>{progression.xp.toLocaleString()}</strong>
                 <span>Achievements</span>
                 <strong>{progression.achievementsCount}</strong>
-                <span>Upcoming Level</span>
+                <span>XP Remaining</span>
                 <strong>
-                  {upcomingProgressionLevel
-                    ? `Level ${upcomingProgressionLevel.level}`
+                  {upcomingProgressionRank
+                    ? progression.xpToNextRank.toLocaleString()
+                    : "Complete"}
+                </strong>
+                <span>Next Rank</span>
+                <strong>
+                  {upcomingProgressionRank
+                    ? `${upcomingProgressionRank.title} · Level ${upcomingProgressionRank.startLevel}`
                     : "Max"}
                 </strong>
               </div>
@@ -1776,7 +1775,6 @@ export default function SellerDashboardPage() {
                 <em>Seller Fee {formatPercent(rewardTier?.sellerFeePercent)}</em>
                 <em>Buyer Reward {formatPercent(rewardTier?.buyerRewardPercent)}</em>
                 <em>Seller Reward {formatPercent(rewardTier?.sellerRewardPercent)}</em>
-                <em>Current Seller Reward % {formatPercent(rewardTier?.sellerRewardPercent)}</em>
                 <em>Lifetime Credit Earned {formatCurrency(walletSummary?.lifetimeEarned || 0)}</em>
                 <em>
                   Last Reward{" "}
@@ -1789,20 +1787,13 @@ export default function SellerDashboardPage() {
                   Wallet {marketplaceRewards?.currentMultipliers?.walletMultiplier || 1}x
                 </em>
               </div>
-              <div className="progression-xp-guide">
-                <span>How to earn XP</span>
-                {xpGuideItems.map((item) => (
-                  <div key={item.source}>
-                    <strong>{item.label}</strong>
-                    <em>+{item.xp} XP</em>
-                    <small>{item.status === "live" ? "Live" : "Coming soon"}</small>
-                  </div>
-                ))}
-              </div>
               <p>
-                Automatic GRAIL Credit rewards are awarded after eligible orders
-                complete. Current reward terms are pulled from GRAIL Economy.
+                View the full Rewards page for the rank roadmap, XP sources, perks,
+                and recent progression activity.
               </p>
+              <Link href="/rewards" className="progression-rewards-link">
+                View Rewards
+              </Link>
               <GrailPassPresenceCard
                 variant="compact"
                 eyebrow="Seller Preview"
@@ -2356,52 +2347,25 @@ const pageStyles = `
     font-weight: 900;
   }
 
-  .progression-xp-guide {
-    border: 1px solid rgba(201,205,211,0.14);
+  .progression-rewards-link {
+    border: 1px solid rgba(231,222,208,0.24);
     border-radius: 10px;
-    background: rgba(8,8,10,0.72);
-    padding: 10px;
-    display: grid;
-    gap: 7px;
-  }
-
-  .progression-xp-guide > span {
-    color: #85858f;
-    font-size: 10px;
-    line-height: 13px;
-    font-weight: 900;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .progression-xp-guide div {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 5px 8px;
+    background: rgba(231,222,208,0.055);
+    color: #E7DED0;
+    min-height: 34px;
+    padding: 0 12px;
+    display: inline-flex;
     align-items: center;
-  }
-
-  .progression-xp-guide strong {
-    color: #fff;
+    justify-content: center;
+    text-decoration: none;
     font-size: 12px;
     line-height: 15px;
     font-weight: 900;
   }
 
-  .progression-xp-guide em {
-    color: #E7DED0;
-    font-size: 11px;
-    line-height: 14px;
-    font-style: normal;
-    font-weight: 900;
-  }
-
-  .progression-xp-guide small {
-    grid-column: 1 / -1;
-    color: #85858f;
-    font-size: 10px;
-    line-height: 13px;
-    font-weight: 800;
+  .progression-rewards-link:hover {
+    border-color: rgba(231,222,208,0.42);
+    background: rgba(231,222,208,0.09);
   }
 
   .sidebar-panel {

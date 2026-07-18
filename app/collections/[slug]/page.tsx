@@ -1886,7 +1886,7 @@ export default function SellerCollectionPage() {
             </section>
 
             <section className="panel sidebar-panel">
-              <h2>Seller Rewards</h2>
+              <h2>Collector Rewards</h2>
               <Metric label="Current Level" value={seller.level} />
               <div className="progress-block">
                 <div>
@@ -1902,7 +1902,7 @@ export default function SellerCollectionPage() {
               <Metric label="Response Score" value={seller.responseScore} />
               <Metric label="Buyer Rating" value={seller.buyerRating} />
               <p className="sidebar-note">
-                Higher seller rewards can increase visibility on Browse.
+                Higher rewards can increase visibility across GRAIL.
               </p>
             </section>
 

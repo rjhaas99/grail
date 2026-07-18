@@ -28,6 +28,14 @@ type XpEventRow = {
   created_at: string | null;
 };
 
+type AchievementUnlockRow = {
+  id: string;
+  achievement_key: string | null;
+  title: string | null;
+  description: string | null;
+  unlocked_at: string | null;
+};
+
 function getRequiredEnv(name: string) {
   const value = process.env[name];
 
@@ -207,6 +215,35 @@ async function getRecentXpActivity(
   });
 }
 
+async function getRecentAchievementUnlocks(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+  userId: string,
+) {
+  const { data, error } = await supabase
+    .from("achievement_unlocks")
+    .select("id, achievement_key, title, description, unlocked_at")
+    .eq("user_id", userId)
+    .order("unlocked_at", { ascending: false })
+    .limit(6);
+
+  if (error) {
+    console.warn("Recent achievement unlocks unavailable:", {
+      message: error.message,
+      error,
+      userId,
+    });
+    return [];
+  }
+
+  return ((data || []) as AchievementUnlockRow[]).map((achievement) => ({
+    id: achievement.id,
+    key: achievement.achievement_key || "",
+    title: achievement.title || "Achievement Unlocked",
+    description: achievement.description || "A GRAIL achievement was unlocked.",
+    unlockedAt: achievement.unlocked_at,
+  }));
+}
+
 export async function GET(request: Request) {
   let serviceSupabase;
 
@@ -232,11 +269,15 @@ export async function GET(request: Request) {
   try {
     const row = await getOrCreateProgressRow(serviceSupabase, userId);
     const achievementsCount = await getAchievementCount(serviceSupabase, userId);
-    const recentActivity = await getRecentXpActivity(serviceSupabase, userId);
+    const [recentActivity, recentAchievements] = await Promise.all([
+      getRecentXpActivity(serviceSupabase, userId),
+      getRecentAchievementUnlocks(serviceSupabase, userId),
+    ]);
 
     return NextResponse.json({
       progression: calculateProgression(row.xp, achievementsCount),
       recentActivity,
+      recentAchievements,
     });
   } catch (error) {
     console.error("Progression GET error:", error);

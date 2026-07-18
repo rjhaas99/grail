@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import Header from "./components/Header";
 import { supabase } from "../lib/supabase";
 
@@ -85,26 +87,21 @@ type MarketSnapshot = {
   marketplaceVolume: number | null;
 };
 
-type MarketplaceBanner = {
-  title: string;
-  subtitle: string;
-  buttonLabel: string;
-  buttonHref: string;
-  background: string;
-  priority: number;
-  dismissible: boolean;
-  countdownEnabled: boolean;
-  countdown: {
-    status: string;
-    label: string;
-    startsIn: string | null;
-    endsIn: string | null;
-    targetAt: string | null;
-  };
+type HomepageBanner = {
+  id: string;
+  bannerType: string;
+  headline: string;
+  supportingText: string;
+  imageUrl: string | null;
+  primaryButtonLabel: string;
+  primaryButtonHref: string;
+  isVisible: boolean;
+  startAt: string | null;
+  endAt: string | null;
 };
 
-type MarketplaceStatusResponse = {
-  currentBanner?: MarketplaceBanner | null;
+type HomepageBannerResponse = {
+  banner?: HomepageBanner | null;
 };
 
 const featuredAccentPairs = [
@@ -163,25 +160,6 @@ const trustCards = [
     body: "If something is wrong, buyers and sellers can submit evidence for review.",
     badge: "Evidence review",
   },
-];
-
-const legalLinks = [
-  { title: "Terms", href: "/terms", subtitle: "Marketplace account and transaction rules." },
-  { title: "Privacy", href: "/privacy", subtitle: "How GRAIL handles marketplace information." },
-  {
-    title: "Buyer Protection",
-    href: "/buyer-protection",
-    subtitle: "GRAIL Protected Checkout and inspection basics.",
-  },
-  { title: "Seller Rules", href: "/seller-rules", subtitle: "Listing, shipping, and dispute expectations." },
-  { title: "Fees", href: "/fees", subtitle: "Seller fees, buyer costs, and fee examples." },
-  { title: "Shipping Policy", href: "/shipping-policy", subtitle: "Tracking, packaging, and delivery timelines." },
-  {
-    title: "Refunds & Disputes",
-    href: "/refund-dispute-policy",
-    subtitle: "How order issues and evidence review work.",
-  },
-  { title: "Prohibited Items", href: "/prohibited-items", subtitle: "Cards and listing behavior not allowed." },
 ];
 
 const carouselSlots = {
@@ -638,6 +616,291 @@ function MiniArtwork({ accent }: { accent: string }) {
   );
 }
 
+function HomepageBannerAction({
+  href,
+  label,
+}: {
+  href: string;
+  label: string;
+}) {
+  const actionStyle: CSSProperties = {
+    width: "max-content",
+    minWidth: "132px",
+    height: "44px",
+    borderRadius: "8px",
+    background: "#E7DED0",
+    color: "#111",
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0 18px",
+    fontSize: "13px",
+    lineHeight: "16px",
+    fontWeight: 900,
+    boxShadow: "0 16px 34px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.4)",
+  };
+
+  if (/^https?:\/\//i.test(href)) {
+    return (
+      <a href={href} style={actionStyle}>
+        {label}
+      </a>
+    );
+  }
+
+  return (
+    <Link href={href || "/browse"} style={actionStyle}>
+      {label}
+    </Link>
+  );
+}
+
+function HomepageBannerSection({ banner }: { banner: HomepageBanner }) {
+  const buttonLabel = banner.primaryButtonLabel?.trim() || "Explore GRAIL";
+  const buttonHref = banner.primaryButtonHref?.trim() || "/browse";
+
+  return (
+    <section
+      aria-label="Homepage announcement"
+      style={{
+        minHeight: "268px",
+        marginTop: "28px",
+        border: "1px solid rgba(231,222,208,0.16)",
+        borderRadius: "10px",
+        background:
+          "radial-gradient(circle at 76% 18%, rgba(231,222,208,0.11), transparent 30%), linear-gradient(135deg, rgba(255,255,255,0.044), rgba(255,255,255,0.008)), rgba(3,3,4,0.97)",
+        position: "relative",
+        overflow: "hidden",
+        boxShadow: "0 30px 70px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.045)",
+      }}
+    >
+      {banner.imageUrl ? (
+        <Image
+          src={banner.imageUrl}
+          alt=""
+          fill
+          sizes="1240px"
+          loading="lazy"
+          unoptimized
+          style={{
+            objectFit: "cover",
+            opacity: 0.24,
+            filter: "saturate(0.72) contrast(1.08) brightness(0.78)",
+          }}
+        />
+      ) : null}
+
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "radial-gradient(circle at 78% 24%, rgba(231,222,208,0.12), transparent 30%), radial-gradient(circle at 50% 50%, transparent 0, rgba(0,0,0,0.5) 74%), linear-gradient(90deg, rgba(0,0,0,0.96), rgba(0,0,0,0.8) 54%, rgba(0,0,0,0.92)), linear-gradient(180deg, rgba(0,0,0,0.32), rgba(0,0,0,0.68))",
+        }}
+      />
+
+      <div
+        style={{
+          position: "relative",
+          zIndex: 1,
+          minHeight: "268px",
+          boxSizing: "border-box",
+          padding: "42px 46px",
+          display: "flex",
+          alignItems: "center",
+        }}
+      >
+        <div style={{ maxWidth: "760px" }}>
+          <p
+            style={{
+              margin: "0 0 12px",
+              color: "#C9CDD3",
+              fontSize: "11px",
+              lineHeight: "14px",
+              fontWeight: 900,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+            }}
+          >
+            GRAIL Announcement
+          </p>
+          <h2
+            style={{
+              margin: 0,
+              color: "#fff",
+              fontSize: "48px",
+              lineHeight: "52px",
+              fontWeight: 900,
+              letterSpacing: "0",
+            }}
+          >
+            {banner.headline}
+          </h2>
+          {banner.supportingText ? (
+            <p
+              style={{
+                maxWidth: "560px",
+                margin: "16px 0 0",
+                color: "#d4d4d8",
+                fontSize: "15px",
+                lineHeight: "24px",
+                fontWeight: 700,
+                display: "-webkit-box",
+                overflow: "hidden",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 2,
+              }}
+            >
+              {banner.supportingText}
+            </p>
+          ) : null}
+          <div style={{ marginTop: "24px" }}>
+            <HomepageBannerAction href={buttonHref} label={buttonLabel} />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SaferCollectingSection() {
+  return (
+    <section style={{ marginTop: "24px" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          marginBottom: "14px",
+          gap: "18px",
+        }}
+      >
+        <div>
+          <p
+            style={{
+              margin: "0 0 8px",
+              color: "#C9CDD3",
+              fontSize: "11px",
+              lineHeight: "14px",
+              fontWeight: 900,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+            }}
+          >
+            GRAIL Protected Checkout
+          </p>
+          <h2
+            style={{
+              margin: 0,
+              color: "#fff",
+              fontSize: "28px",
+              lineHeight: "34px",
+              fontWeight: 900,
+            }}
+          >
+            Built for safer collecting.
+          </h2>
+        </div>
+        <Link
+          href="/buyer-protection"
+          style={{
+            color: "#E7DED0",
+            textDecoration: "none",
+            fontSize: "13px",
+            fontWeight: 900,
+          }}
+        >
+          Learn about protection
+        </Link>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, 1fr)",
+          gap: "14px",
+        }}
+      >
+        {trustCards.map((card) => (
+          <Link
+            key={card.title}
+            href={card.href}
+            className="market-card"
+            style={{
+              minHeight: "148px",
+              border: "1px solid rgba(231,222,208,0.16)",
+              borderRadius: "10px",
+              background:
+                "linear-gradient(180deg,rgba(255,255,255,0.034),rgba(255,255,255,0.006)), rgba(5,5,6,0.94)",
+              padding: "16px",
+              color: "#fff",
+              textDecoration: "none",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
+            }}
+          >
+            <div>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  minHeight: "24px",
+                  border: "1px solid rgba(231,222,208,0.28)",
+                  borderRadius: "999px",
+                  color: "#E7DED0",
+                  background: "rgba(231,222,208,0.055)",
+                  padding: "0 9px",
+                  fontSize: "10px",
+                  lineHeight: "12px",
+                  fontWeight: 900,
+                }}
+              >
+                {card.badge}
+              </span>
+              <h3
+                style={{
+                  margin: "13px 0 0",
+                  color: "#fff",
+                  fontSize: "19px",
+                  lineHeight: "23px",
+                  fontWeight: 900,
+                }}
+              >
+                {card.title}
+              </h3>
+              <p
+                style={{
+                  margin: "9px 0 0",
+                  color: "#a1a1aa",
+                  fontSize: "12px",
+                  lineHeight: "18px",
+                  fontWeight: 800,
+                }}
+              >
+                {card.body}
+              </p>
+            </div>
+            <span
+              style={{
+                color: "#C9CDD3",
+                fontSize: "11px",
+                lineHeight: "15px",
+                fontWeight: 900,
+              }}
+            >
+              View policy
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -893,8 +1156,7 @@ export default function Home() {
   });
   const [isLoadingHomeData, setIsLoadingHomeData] = useState(true);
   const [homeDataError, setHomeDataError] = useState("");
-  const [marketplaceBanner, setMarketplaceBanner] = useState<MarketplaceBanner | null>(null);
-  const [isBannerDismissed, setIsBannerDismissed] = useState(false);
+  const [homepageBanner, setHomepageBanner] = useState<HomepageBanner | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -904,16 +1166,15 @@ export default function Home() {
       setHomeDataError("");
 
       try {
-        const bannerResponse = await fetch("/api/marketplace/status")
+        const homepageBannerResponse = await fetch("/api/homepage/banner")
           .then((response) => response.json())
           .catch((error) => {
-            console.warn("Homepage marketplace banner unavailable:", error);
+            console.warn("Homepage banner unavailable:", error);
             return {};
-          }) as MarketplaceStatusResponse;
+          }) as HomepageBannerResponse;
 
         if (isMounted) {
-          setMarketplaceBanner(bannerResponse.currentBanner || null);
-          setIsBannerDismissed(false);
+          setHomepageBanner(homepageBannerResponse.banner || null);
         }
 
         let { data: listingData, error: listingError } =
@@ -1097,6 +1358,7 @@ export default function Home() {
         if (isMounted) {
           setFeaturedCards([]);
           setLiveCollections([]);
+          setHomepageBanner(null);
           setMarketSnapshot({
             activeListings: 0,
             newThisWeek: 0,
@@ -1195,117 +1457,11 @@ export default function Home() {
             border-color: rgba(231, 222, 208, 0.42) !important;
             box-shadow: 0 0 28px rgba(201, 205, 211, 0.08);
           }
-          .legal-card:hover {
-            border-color: rgba(231, 222, 208, 0.42) !important;
-            background: rgba(231, 222, 208, 0.08) !important;
-          }
         `}
       </style>
 
       <div style={{ width: "1240px", margin: "0 auto", padding: "8px 0 34px" }}>
         <Header />
-
-        {marketplaceBanner && !isBannerDismissed ? (
-          <section
-            style={{
-              marginTop: "10px",
-              border: "1px solid rgba(231,222,208,0.24)",
-              borderRadius: "10px",
-              background:
-                marketplaceBanner.background === "dark"
-                  ? "linear-gradient(90deg, rgba(8,8,10,0.96), rgba(24,24,27,0.82))"
-                  : "linear-gradient(90deg, rgba(231,222,208,0.14), rgba(201,205,211,0.06)), rgba(5,5,6,0.92)",
-              minHeight: "72px",
-              padding: "14px 16px",
-              boxSizing: "border-box",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "18px",
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <span
-                style={{
-                  color: "#C9CDD3",
-                  fontSize: "10px",
-                  lineHeight: "13px",
-                  fontWeight: 900,
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                }}
-              >
-                Marketplace Event
-              </span>
-              <h2
-                style={{
-                  margin: "4px 0 0",
-                  color: "#fff",
-                  fontSize: "20px",
-                  lineHeight: "24px",
-                  fontWeight: 900,
-                }}
-              >
-                {marketplaceBanner.title}
-              </h2>
-              <p
-                style={{
-                  margin: "4px 0 0",
-                  color: "#a1a1aa",
-                  fontSize: "12px",
-                  lineHeight: "16px",
-                  fontWeight: 800,
-                }}
-              >
-                {marketplaceBanner.subtitle}
-                {marketplaceBanner.countdownEnabled
-                  ? ` ${marketplaceBanner.countdown.label}.`
-                  : ""}
-              </p>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <Link
-                href={marketplaceBanner.buttonHref || "/browse"}
-                style={{
-                  height: "36px",
-                  borderRadius: "8px",
-                  background: "#E7DED0",
-                  color: "#111",
-                  textDecoration: "none",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "0 13px",
-                  fontSize: "12px",
-                  fontWeight: 900,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {marketplaceBanner.buttonLabel || "Browse Cards"}
-              </Link>
-              {marketplaceBanner.dismissible ? (
-                <button
-                  type="button"
-                  aria-label="Dismiss marketplace event banner"
-                  onClick={() => setIsBannerDismissed(true)}
-                  style={{
-                    width: "34px",
-                    height: "34px",
-                    borderRadius: "999px",
-                    border: "1px solid rgba(201,205,211,0.2)",
-                    background: "rgba(5,5,6,0.72)",
-                    color: "#fff",
-                    fontSize: "16px",
-                    fontWeight: 900,
-                    cursor: "pointer",
-                  }}
-                >
-                  x
-                </button>
-              ) : null}
-            </div>
-          </section>
-        ) : null}
 
         <section
           style={{
@@ -1660,6 +1816,8 @@ export default function Home() {
           </div>
         </section>
 
+        {homepageBanner ? <HomepageBannerSection banner={homepageBanner} /> : null}
+
         <section style={{ marginTop: "12px" }}>
           <div
             style={{
@@ -1732,138 +1890,6 @@ export default function Home() {
                   </p>
                 </div>
                 <MiniArtwork accent={category.accent} />
-              </Link>
-            ))}
-          </div>
-        </section>
-
-        <section style={{ marginTop: "24px" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-end",
-              justifyContent: "space-between",
-              marginBottom: "14px",
-              gap: "18px",
-            }}
-          >
-            <div>
-              <p
-                style={{
-                  margin: "0 0 8px",
-                  color: "#C9CDD3",
-                  fontSize: "11px",
-                  lineHeight: "14px",
-                  fontWeight: 900,
-                  letterSpacing: "0.14em",
-                  textTransform: "uppercase",
-                }}
-              >
-                GRAIL Protected Checkout
-              </p>
-              <h2
-                style={{
-                  margin: 0,
-                  color: "#fff",
-                  fontSize: "28px",
-                  lineHeight: "34px",
-                  fontWeight: 900,
-                }}
-              >
-                Built for safer collecting.
-              </h2>
-            </div>
-            <Link
-              href="/buyer-protection"
-              style={{
-                color: "#E7DED0",
-                textDecoration: "none",
-                fontSize: "13px",
-                fontWeight: 900,
-              }}
-            >
-              Learn about protection
-            </Link>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: "14px",
-            }}
-          >
-            {trustCards.map((card) => (
-              <Link
-                key={card.title}
-                href={card.href}
-                className="market-card"
-                style={{
-                  minHeight: "148px",
-                  border: "1px solid rgba(231,222,208,0.16)",
-                  borderRadius: "10px",
-                  background:
-                    "linear-gradient(180deg,rgba(255,255,255,0.034),rgba(255,255,255,0.006)), rgba(5,5,6,0.94)",
-                  padding: "16px",
-                  color: "#fff",
-                  textDecoration: "none",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
-                }}
-              >
-                <div>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      minHeight: "24px",
-                      border: "1px solid rgba(231,222,208,0.28)",
-                      borderRadius: "999px",
-                      color: "#E7DED0",
-                      background: "rgba(231,222,208,0.055)",
-                      padding: "0 9px",
-                      fontSize: "10px",
-                      lineHeight: "12px",
-                      fontWeight: 900,
-                    }}
-                  >
-                    {card.badge}
-                  </span>
-                  <h3
-                    style={{
-                      margin: "13px 0 0",
-                      color: "#fff",
-                      fontSize: "19px",
-                      lineHeight: "23px",
-                      fontWeight: 900,
-                    }}
-                  >
-                    {card.title}
-                  </h3>
-                  <p
-                    style={{
-                      margin: "9px 0 0",
-                      color: "#a1a1aa",
-                      fontSize: "12px",
-                      lineHeight: "18px",
-                      fontWeight: 800,
-                    }}
-                  >
-                    {card.body}
-                  </p>
-                </div>
-                <span
-                  style={{
-                    color: "#C9CDD3",
-                    fontSize: "11px",
-                    lineHeight: "15px",
-                    fontWeight: 900,
-                  }}
-                >
-                  View policy
-                </span>
               </Link>
             ))}
           </div>
@@ -2218,94 +2244,7 @@ export default function Home() {
           )}
         </section>
 
-        <section style={{ marginTop: "24px" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-end",
-              justifyContent: "space-between",
-              marginBottom: "14px",
-              gap: "18px",
-            }}
-          >
-            <div>
-              <h2
-                style={{
-                  margin: 0,
-                  color: "#fff",
-                  fontSize: "28px",
-                  lineHeight: "34px",
-                  fontWeight: 900,
-                }}
-              >
-                Legal & Protection
-              </h2>
-              <p
-                style={{
-                  margin: "8px 0 0",
-                  color: "#a1a1aa",
-                  fontSize: "13px",
-                  lineHeight: "18px",
-                  fontWeight: 800,
-                }}
-              >
-                Review GRAIL marketplace policies, protected checkout, fees,
-                shipping, and dispute rules.
-              </p>
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-              gap: "12px",
-            }}
-          >
-            {legalLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="legal-card"
-                style={{
-                  minHeight: "104px",
-                  border: "1px solid #1d1d22",
-                  borderRadius: "10px",
-                  background:
-                    "linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.006)), rgba(5,5,6,0.92)",
-                  padding: "14px",
-                  color: "#fff",
-                  textDecoration: "none",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  boxSizing: "border-box",
-                }}
-              >
-                <strong
-                  style={{
-                    color: "#E7DED0",
-                    fontSize: "14px",
-                    lineHeight: "18px",
-                    fontWeight: 900,
-                  }}
-                >
-                  {link.title}
-                </strong>
-                <span
-                  style={{
-                    color: "#9ca3af",
-                    fontSize: "11px",
-                    lineHeight: "15px",
-                    fontWeight: 700,
-                  }}
-                >
-                  {link.subtitle}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
+        <SaferCollectingSection />
       </div>
     </main>
   );

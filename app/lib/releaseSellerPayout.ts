@@ -11,6 +11,8 @@ type OrderRow = {
   card_price: number | null;
   total_amount: number | null;
   buyer_fee: number | null;
+  platform_fee: number | null;
+  processing_fee: number | null;
   seller_payout_amount: number | null;
   fulfillment_status: string | null;
   tracking_number: string | null;
@@ -65,29 +67,6 @@ function getRequiredEnv(name: string) {
   return value;
 }
 
-function roundCurrency(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
-function calculatePayout(order: OrderRow) {
-  const cardPrice = Number(order.card_price || order.total_amount || 0);
-  const platformFee = roundCurrency(cardPrice * 0.075);
-  const processingFee = roundCurrency(Number(order.buyer_fee || 0));
-
-  if (!order.card_price && order.total_amount) {
-    console.warn("Seller payout using total_amount because card_price is missing.", {
-      orderId: order.id,
-      totalAmount: order.total_amount,
-    });
-  }
-
-  return {
-    platformFee,
-    processingFee,
-    sellerPayoutAmount: Math.max(roundCurrency(cardPrice - platformFee - processingFee), 0),
-  };
-}
-
 function getStripeErrorDetail(error: unknown) {
   if (!error || typeof error !== "object") {
     return null;
@@ -128,7 +107,7 @@ export async function releaseSellerPayoutForOrder({
   const { data: orderData, error: orderError } = await supabase
     .from("orders")
     .select(
-      "id, listing_id, buyer_id, seller_id, card_price, total_amount, buyer_fee, seller_payout_amount, fulfillment_status, tracking_number, inspection_ends_at, dispute_status, transfer_status, refund_status, stripe_transfer_id",
+      "id, listing_id, buyer_id, seller_id, card_price, total_amount, buyer_fee, platform_fee, processing_fee, seller_payout_amount, fulfillment_status, tracking_number, inspection_ends_at, dispute_status, transfer_status, refund_status, stripe_transfer_id",
     )
     .eq("id", orderId)
     .maybeSingle();
@@ -240,16 +219,13 @@ export async function releaseSellerPayoutForOrder({
     };
   }
 
-  const calculated = calculatePayout(order);
-  const sellerPayoutAmount = Number(
-    order.seller_payout_amount || calculated.sellerPayoutAmount,
-  );
+  const sellerPayoutAmount = Number(order.seller_payout_amount || 0);
 
   if (!Number.isFinite(sellerPayoutAmount) || sellerPayoutAmount <= 0) {
     return {
       orderId,
       status: "skipped",
-      detail: "Seller payout amount is missing or invalid.",
+      detail: "Stored seller payout amount is missing or invalid.",
     };
   }
 
@@ -307,8 +283,6 @@ export async function releaseSellerPayoutForOrder({
       .from("orders")
       .update({
         seller_payout_amount: sellerPayoutAmount,
-        platform_fee: calculated.platformFee,
-        processing_fee: calculated.processingFee,
         transfer_status: "paid",
         stripe_transfer_id: transfer.id,
         payout_released_at: completedAt,

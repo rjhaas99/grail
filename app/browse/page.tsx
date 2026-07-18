@@ -3633,7 +3633,7 @@ function BrowseContent() {
               </div>
 
               <p className="seller-rewards-note">
-                Seller Rewards can boost your visibility on Browse.
+                Rewards can boost your visibility on Browse.
               </p>
             </section>
           </aside>

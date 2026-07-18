@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { getRewardTiers } from "../../lib/rewards";
 import { getRewardEngineSnapshot } from "../../lib/rewardsEngine";
 
 export const runtime = "nodejs";
@@ -89,8 +90,12 @@ export async function GET(request: Request) {
   }
 
   try {
-    const reward = await getRewardEngineSnapshot(serviceSupabase, userId);
-    return NextResponse.json(reward);
+    const [reward, tiers] = await Promise.all([
+      getRewardEngineSnapshot(serviceSupabase, userId),
+      getRewardTiers(serviceSupabase),
+    ]);
+
+    return NextResponse.json({ ...reward, tiers });
   } catch (error) {
     console.error("Rewards load error:", {
       error,

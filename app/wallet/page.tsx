@@ -318,9 +318,7 @@ export default function WalletPage() {
     marketplaceRewards?.upcomingEvent?.eventName ||
     "None";
   const rewardStatus = walletRewardsMessage || "Automatic GRAIL Credit rewards are active for completed eligible orders.";
-  const nextRankProgress = nextRewardTier?.minLevel
-    ? Math.min(100, Math.round((progression.level / nextRewardTier.minLevel) * 100))
-    : progression.progressPercentage;
+  const nextRankProgress = progression.rankProgressPercentage;
 
   useEffect(() => {
     let isMounted = true;
@@ -576,17 +574,20 @@ export default function WalletPage() {
                 <div className="next-rank-block">
                   <div>
                     <span>Next Rank</span>
-                    <strong>{nextRewardTier?.rankName || "Max tier"}</strong>
+                    <strong>{progression.nextRankTitle || nextRewardTier?.rankName || "Max tier"}</strong>
                   </div>
                   <em>
-                    {nextRewardTier?.minLevel
-                      ? `Level ${nextRewardTier.minLevel} unlock`
+                    {progression.nextRankLevel
+                      ? `${progression.xpToNextRank.toLocaleString()} XP to Level ${progression.nextRankLevel}`
                       : "Highest configured tier"}
                   </em>
                 </div>
                 <div className="premium-progress-track">
                   <span style={{ width: `${nextRankProgress}%` }} />
                 </div>
+                <Link href="/rewards" className="wallet-rewards-link">
+                  View Rewards
+                </Link>
               </article>
 
               <aside className="premium-panel pending-card">
@@ -655,10 +656,12 @@ export default function WalletPage() {
                 </div>
                 <div className="upcoming-list">
                   <div>
-                    <strong>{nextRewardTier?.rankName || "Top tier reached"}</strong>
+                    <strong>{progression.nextRankTitle || nextRewardTier?.rankName || "Top tier reached"}</strong>
                     <span>
                       {nextRewardTier
                         ? `${formatPercent(nextRewardTier.buyerRewardPercent)} buyer reward · ${formatPercent(nextRewardTier.sellerRewardPercent)} seller reward`
+                        : progression.nextRankTitle
+                          ? "Reward values will appear when the next rank tier is configured."
                         : "You are at the highest configured reward tier."}
                     </span>
                   </div>
@@ -1054,6 +1057,26 @@ const pageStyles = `
     border-radius: inherit;
     background: linear-gradient(90deg, #C9CDD3, #E7DED0);
     transition: width 420ms ease;
+  }
+  .wallet-rewards-link {
+    margin-top: 13px;
+    border: 1px solid rgba(231,222,208,0.24);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    color: #E7DED0;
+    min-height: 34px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    font-size: 12px;
+    line-height: 15px;
+    font-weight: 900;
+  }
+  .wallet-rewards-link:hover {
+    border-color: rgba(231,222,208,0.42);
+    background: rgba(231,222,208,0.09);
   }
   .pending-timeline {
     margin-top: 16px;

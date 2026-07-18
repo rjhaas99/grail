@@ -12,6 +12,7 @@ import {
   isValidAuctionDuration,
   testingOneMinuteAuctionDuration,
 } from "../lib/auctionDurations";
+import { cardImageStorageBucket, sanitizeImageFileName } from "../lib/imageUpload";
 import type { XpSource } from "../lib/progression";
 import { supabase } from "../../lib/supabase";
 
@@ -166,7 +167,7 @@ type SportsCardsProValueResponse = Partial<SportsCardsProValue> & {
   error?: string;
 };
 
-const storageBucket = "card-images";
+const storageBucket = cardImageStorageBucket;
 const draftStorageKey = "grail-listing-drafts";
 
 const photoTypes: PhotoType[] = [
@@ -288,19 +289,6 @@ function calculateReserveFee(reservePrice: number) {
 function clean(value: string) {
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
-}
-
-function sanitizeFileName(fileName: string) {
-  const safeName = fileName
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9._-]/g, "")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/^\.+/, "");
-
-  return safeName || "image";
 }
 
 function getErrorMessage(error: unknown) {
@@ -1323,7 +1311,7 @@ export default function ListCardPage() {
       const photo = entry.photo;
       if (!photo) continue;
 
-      const safeFileName = sanitizeFileName(photo.file.name);
+      const safeFileName = sanitizeImageFileName(photo.file.name);
       const uploadTimestamp = new Date().toISOString().replace(/[^0-9]/g, "");
       const filePath = `listings/${listingId}/${entry.imageType}-${uploadTimestamp}-${safeFileName}`;
 
