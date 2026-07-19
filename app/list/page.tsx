@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Header from "../components/Header";
 import {
   auctionDurationSelectOptions,
@@ -59,6 +59,7 @@ type ExistingListingRow = {
   condition: string | null;
   price: number | null;
   status: string | null;
+  collection_note?: string | null;
   sale_format?: string | null;
   auction_status?: string | null;
   auction_starting_bid?: number | null;
@@ -93,6 +94,7 @@ type CreatedListing = {
 type ListingDraft = {
   id: string;
   title: string;
+  listingDescription?: string;
   category: string;
   subject: string;
   year: string;
@@ -167,8 +169,114 @@ type SportsCardsProValueResponse = Partial<SportsCardsProValue> & {
   error?: string;
 };
 
+type ListingAssistantFieldKey =
+  | "category"
+  | "sport"
+  | "player"
+  | "year"
+  | "brand"
+  | "set"
+  | "cardNumber"
+  | "manufacturer"
+  | "team"
+  | "parallel"
+  | "grader"
+  | "grade"
+  | "certificationNumber"
+  | "rookieStatus"
+  | "suggestedTitle"
+  | "suggestedDescription";
+
+type ListingAssistantField = {
+  value: string;
+  confidence: number;
+};
+
+type ListingAssistantAnalysis = {
+  status: "completed" | "unconfigured" | "failed";
+  provider: string;
+  overallConfidence: number;
+  confidenceLabel: "high" | "medium" | "low";
+  fields: Record<ListingAssistantFieldKey, ListingAssistantField>;
+  warnings: string[];
+  analyzedAt: string;
+};
+
+type ListingAssistantResponse = {
+  assistantStatus: "completed" | "unconfigured" | "failed";
+  analysis: ListingAssistantAnalysis;
+  autofill?: {
+    title: string;
+    category: string;
+    sport: string;
+    player: string;
+    year: string;
+    brand: string;
+    set: string;
+    cardNumber: string;
+    team: string;
+    manufacturer: string;
+    parallel: string;
+    rookieStatus: string;
+    cardType: CardType | "";
+    grader: string;
+    grade: string;
+    certificationNumber: string;
+    suggestedAskingPrice: number | null;
+    estimatedMarketValue: number | null;
+    productName: string;
+    setName: string;
+    description: string;
+  };
+  sportsCardsPro: {
+    status: string;
+    candidates: SportsCardsProCandidate[];
+    selectedValue: SportsCardsProValue | null;
+    message: string;
+  };
+  psa: {
+    status: string;
+    verification: PsaVerificationResponse | null;
+    message: string;
+  };
+  steps: string[];
+  message: string;
+  error?: string;
+};
+
+type ListingAssistantCacheRecord = {
+  result: ListingAssistantResponse;
+  cachedAt: string;
+};
+
+type ListingUserControlledField =
+  | "category"
+  | "subject"
+  | "year"
+  | "setName"
+  | "cardNumber"
+  | "cardType"
+  | "grader"
+  | "grade"
+  | "certNumber"
+  | "title"
+  | "listingDescription"
+  | "askingPrice"
+  | "marketValue"
+  | "minimumOffer"
+  | "condition";
+
+type AssistantTimelineStatus = "complete" | "active" | "pending" | "warning" | "error";
+
+type AssistantTimelineItem = {
+  label: string;
+  detail: string;
+  status: AssistantTimelineStatus;
+};
+
 const storageBucket = cardImageStorageBucket;
 const draftStorageKey = "grail-listing-drafts";
+const listingAssistantStorageKey = "grail-listing-assistant-results";
 
 const photoTypes: PhotoType[] = [
   { label: "Front", imageType: "front" },
@@ -261,6 +369,25 @@ const sellerPolicyLinks = [
   { label: "Prohibited Items", href: "/prohibited-items" },
 ];
 
+const listingAssistantFieldLabels: Record<ListingAssistantFieldKey, string> = {
+  category: "Category",
+  sport: "Sport",
+  player: "Player",
+  year: "Year",
+  brand: "Brand",
+  set: "Set",
+  cardNumber: "Card Number",
+  manufacturer: "Manufacturer",
+  team: "Team",
+  parallel: "Parallel",
+  grader: "Grader",
+  grade: "Grade",
+  certificationNumber: "Certification Number",
+  rookieStatus: "Rookie Status",
+  suggestedTitle: "Suggested Title",
+  suggestedDescription: "Description",
+};
+
 function formatCurrency(value: string | number) {
   const number = Number(value);
   if (!number) return "$0";
@@ -317,6 +444,130 @@ function writeDrafts(drafts: ListingDraft[]) {
   window.localStorage.setItem(draftStorageKey, JSON.stringify(drafts));
 }
 
+function buildListingAssistantPhotoKey(
+  front: SelectedPhoto | undefined,
+  back: SelectedPhoto | undefined,
+) {
+  if (!front?.file || !back?.file) {
+    return "";
+  }
+
+  return [
+    "smart-autofill-v2",
+    front.file.name,
+    front.file.size,
+    front.file.lastModified,
+    back.file.name,
+    back.file.size,
+    back.file.lastModified,
+  ].join(":");
+}
+
+function readListingAssistantCache(cacheKey: string) {
+  if (typeof window === "undefined" || !cacheKey) {
+    return null;
+  }
+
+  try {
+    const storedCache = window.localStorage.getItem(listingAssistantStorageKey);
+    const cache = storedCache
+      ? (JSON.parse(storedCache) as Record<string, ListingAssistantCacheRecord>)
+      : {};
+
+    return cache[cacheKey]?.result || null;
+  } catch (error) {
+    console.error("Listing Assistant cache read error:", error);
+    return null;
+  }
+}
+
+function writeListingAssistantCache(
+  cacheKey: string,
+  result: ListingAssistantResponse,
+) {
+  if (typeof window === "undefined" || !cacheKey) {
+    return;
+  }
+
+  try {
+    const storedCache = window.localStorage.getItem(listingAssistantStorageKey);
+    const cache = storedCache
+      ? (JSON.parse(storedCache) as Record<string, ListingAssistantCacheRecord>)
+      : {};
+
+    cache[cacheKey] = {
+      result,
+      cachedAt: new Date().toISOString(),
+    };
+
+    window.localStorage.setItem(listingAssistantStorageKey, JSON.stringify(cache));
+  } catch (error) {
+    console.error("Listing Assistant cache write error:", error);
+  }
+}
+
+function formatConfidence(confidence: number) {
+  return `${Math.round(Math.max(0, Math.min(1, confidence)) * 100)}%`;
+}
+
+function isHighConfidence(field: ListingAssistantField | undefined) {
+  return Boolean(field?.value && field.confidence >= 0.78);
+}
+
+function isMediumConfidence(field: ListingAssistantField | undefined) {
+  return Boolean(field?.value && field.confidence >= 0.55);
+}
+
+function normalizeAssistantCategory(value: string) {
+  const lowerValue = value.toLowerCase();
+
+  if (
+    lowerValue.includes("pokemon") ||
+    lowerValue.includes("magic") ||
+    lowerValue.includes("tcg") ||
+    lowerValue.includes("yu-gi-oh")
+  ) {
+    return "TCG";
+  }
+
+  return "Sports";
+}
+
+function normalizeAssistantGrader(value: string) {
+  const upperValue = value.toUpperCase();
+
+  if (graders.includes(upperValue)) {
+    return upperValue;
+  }
+
+  if (upperValue.includes("BECKETT")) {
+    return "BGS";
+  }
+
+  return value.trim() ? "Other" : "PSA";
+}
+
+function getPriceDifferenceLabel(askingPriceValue: string, marketValueValue: number) {
+  const askingPriceNumber = Number(askingPriceValue);
+
+  if (!Number.isFinite(askingPriceNumber) || askingPriceNumber <= 0 || marketValueValue <= 0) {
+    return "Set an asking price to compare.";
+  }
+
+  const difference = askingPriceNumber - marketValueValue;
+  const percentage = marketValueValue > 0
+    ? Math.round((Math.abs(difference) / marketValueValue) * 100)
+    : 0;
+
+  if (Math.abs(difference) < 0.01) {
+    return "Matches market value.";
+  }
+
+  return difference > 0
+    ? `${formatCurrencyWithCents(difference)} above market · ${percentage}%`
+    : `${formatCurrencyWithCents(Math.abs(difference))} below market · ${percentage}%`;
+}
+
 function fileToDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -358,6 +609,7 @@ export default function ListCardPage() {
   const [auctionDurationDays, setAuctionDurationDays] = useState("7");
   const [reserveFeeAcknowledged, setReserveFeeAcknowledged] = useState(false);
   const [isAutoTitle, setIsAutoTitle] = useState(true);
+  const [listingDescription, setListingDescription] = useState("");
   const [category, setCategory] = useState("Sports");
   const [cardType, setCardType] = useState<CardType>("Graded");
   const [title, setTitle] = useState("");
@@ -387,9 +639,61 @@ export default function ListCardPage() {
   const [isSearchingSportsCardsPro, setIsSearchingSportsCardsPro] = useState(false);
   const [isFetchingSportsCardsProValue, setIsFetchingSportsCardsProValue] =
     useState(false);
+  const [listingAssistantStatus, setListingAssistantStatus] =
+    useState<PublishStatus | null>(null);
+  const [listingAssistantResult, setListingAssistantResult] =
+    useState<ListingAssistantResponse | null>(null);
+  const [isAnalyzingListing, setIsAnalyzingListing] = useState(false);
+  const [isAskingPriceUserControlled, setIsAskingPriceUserControlled] =
+    useState(false);
+  const listingAssistantPhotoKeyRef = useRef("");
+  const listingAssistantInFlightKeyRef = useRef("");
+  const userControlledFieldsRef = useRef<Set<ListingUserControlledField>>(new Set());
   const [selectedPhotos, setSelectedPhotos] = useState<
     Partial<Record<ImageType, SelectedPhoto>>
   >({});
+
+  const markUserControlledField = useCallback((field: ListingUserControlledField) => {
+    userControlledFieldsRef.current.add(field);
+    if (field === "askingPrice") {
+      setIsAskingPriceUserControlled(true);
+    }
+  }, []);
+
+  const markLoadedFieldsAsUserControlled = useCallback(() => {
+    userControlledFieldsRef.current = new Set<ListingUserControlledField>([
+      "category",
+      "subject",
+      "year",
+      "setName",
+      "cardNumber",
+      "cardType",
+      "grader",
+      "grade",
+      "certNumber",
+      "title",
+      "listingDescription",
+      "askingPrice",
+      "marketValue",
+      "minimumOffer",
+      "condition",
+    ]);
+    setIsAskingPriceUserControlled(true);
+  }, []);
+
+  const clearUserControlledFields = useCallback(() => {
+    userControlledFieldsRef.current = new Set();
+    setIsAskingPriceUserControlled(false);
+  }, []);
+
+  const applyAssistantValue = useCallback(
+    (field: ListingUserControlledField, applyValue: () => void) => {
+      if (!userControlledFieldsRef.current.has(field)) {
+        applyValue();
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -448,6 +752,7 @@ export default function ListCardPage() {
       setEditingDraftId(draft.id);
       setTitle(draft.title);
       setIsAutoTitle(false);
+      setListingDescription(draft.listingDescription || "");
       setCategory(draft.category);
       setSubject(draft.subject);
       setYear(draft.year);
@@ -500,6 +805,7 @@ export default function ListCardPage() {
           : null,
       );
       setDraftImagePreview(draft.imagePreview);
+      markLoadedFieldsAsUserControlled();
       setStatus({ type: "info", text: "Draft loaded." });
     }, 0);
 
@@ -507,7 +813,7 @@ export default function ListCardPage() {
       window.clearTimeout(modeTimer);
       window.clearTimeout(preloadTimer);
     };
-  }, []);
+  }, [markLoadedFieldsAsUserControlled]);
 
   useEffect(() => {
     const listingId = new URLSearchParams(window.location.search).get("edit");
@@ -563,6 +869,7 @@ export default function ListCardPage() {
               condition,
               price,
               status,
+              collection_note,
               sale_format,
               auction_status,
               auction_starting_bid,
@@ -632,6 +939,7 @@ export default function ListCardPage() {
         setReserveFeeAcknowledged(listing.reserve_fee_status === "paid");
         setTitle(listing.title || "");
         setIsAutoTitle(false);
+        setListingDescription(listing.collection_note || "");
         setYear(listing.year || "");
         setSetName(listing.brand || "");
         setCardNumber(listing.card_number || "");
@@ -687,10 +995,16 @@ export default function ListCardPage() {
             : null,
         );
         setSportsCardsProCandidates([]);
+        setListingAssistantStatus(null);
+        setListingAssistantResult(null);
+        listingAssistantPhotoKeyRef.current = "";
+        listingAssistantInFlightKeyRef.current = "";
+        setIsAnalyzingListing(false);
         setSelectedPhotos({});
         setDraftImagePreview("");
         setExistingImageUrls(nextImageUrls);
         setPublishedListingId("");
+        markLoadedFieldsAsUserControlled();
         setStatus({ type: "info", text: "Listing loaded for editing." });
       } catch (error) {
         console.error("Edit listing load error:", error);
@@ -710,12 +1024,369 @@ export default function ListCardPage() {
     return () => {
       isMounted = false;
     };
-  }, [isCheckingAuth, session?.user.id]);
+  }, [isCheckingAuth, markLoadedFieldsAsUserControlled, session?.user.id]);
 
   const gradeOptions = grader === "PSA" ? psaGrades : standardGrades;
   const isEditMode = Boolean(editListingId);
   const isCollectionMode = listingMode === "collection";
   const isAuctionMode = !isCollectionMode && saleFormat === "auction";
+
+  const assistantPhotoKey = useMemo(
+    () =>
+      buildListingAssistantPhotoKey(
+        selectedPhotos.front,
+        selectedPhotos.back,
+      ),
+    [selectedPhotos.back, selectedPhotos.front],
+  );
+
+  const applyListingAssistantResult = useCallback(
+    (result: ListingAssistantResponse, options: { fromCache?: boolean } = {}) => {
+      setListingAssistantResult(result);
+
+      if (result.analysis.status === "unconfigured") {
+        setListingAssistantStatus({
+          type: "info",
+          text: "Listing Assistant is ready, but the server vision provider is not configured yet.",
+        });
+        return;
+      }
+
+      if (result.analysis.status === "failed") {
+        setListingAssistantStatus({
+          type: "error",
+          text: result.message || "Listing Assistant could not analyze these photos.",
+        });
+        return;
+      }
+
+      const fields = result.analysis.fields;
+      const autofill = result.autofill;
+
+      if (autofill) {
+        if (autofill.category) {
+          applyAssistantValue("category", () =>
+            setCategory(normalizeAssistantCategory(autofill.category)),
+          );
+        }
+
+        if (autofill.player) {
+          applyAssistantValue("subject", () => setSubject(autofill.player));
+        }
+
+        if (autofill.year) {
+          applyAssistantValue("year", () => setYear(autofill.year));
+        }
+
+        if (autofill.set || autofill.brand) {
+          applyAssistantValue("setName", () =>
+            setSetName(autofill.set || autofill.brand),
+          );
+        }
+
+        if (autofill.cardNumber) {
+          applyAssistantValue("cardNumber", () =>
+            setCardNumber(autofill.cardNumber.replace(/^#/, "")),
+          );
+        }
+
+        const autofillCardType = autofill.cardType;
+        if (autofillCardType) {
+          applyAssistantValue("cardType", () => setCardType(autofillCardType));
+        }
+
+        if (autofill.grader) {
+          applyAssistantValue("grader", () =>
+            setGrader(normalizeAssistantGrader(autofill.grader)),
+          );
+        }
+
+        if (autofill.grade) {
+          applyAssistantValue("grade", () => setGrade(autofill.grade));
+        }
+
+        if (autofill.certificationNumber) {
+          applyAssistantValue("certNumber", () =>
+            setCertNumber(autofill.certificationNumber.replace(/[^0-9]/g, "")),
+          );
+        }
+
+        if (autofill.title) {
+          applyAssistantValue("title", () => {
+            setTitle(autofill.title);
+            setIsAutoTitle(false);
+          });
+        }
+
+        if (autofill.description) {
+          applyAssistantValue("listingDescription", () =>
+            setListingDescription(autofill.description),
+          );
+        }
+
+        if (autofill.estimatedMarketValue !== null) {
+          applyAssistantValue("marketValue", () =>
+            setMarketValue(String(autofill.estimatedMarketValue)),
+          );
+        }
+
+        if (
+          autofill.suggestedAskingPrice !== null &&
+          !isCollectionMode &&
+          !isAuctionMode
+        ) {
+          applyAssistantValue("askingPrice", () =>
+            setAskingPrice(String(autofill.suggestedAskingPrice)),
+          );
+        }
+      }
+
+      if (isHighConfidence(fields.sport)) {
+        applyAssistantValue("category", () =>
+          setCategory(normalizeAssistantCategory(fields.sport.value)),
+        );
+      }
+
+      if (isHighConfidence(fields.player)) {
+        applyAssistantValue("subject", () => setSubject(fields.player.value));
+      }
+
+      if (isHighConfidence(fields.year)) {
+        applyAssistantValue("year", () => setYear(fields.year.value));
+      }
+
+      const setField = isHighConfidence(fields.set) ? fields.set : fields.brand;
+
+      if (isHighConfidence(setField)) {
+        applyAssistantValue("setName", () => setSetName(setField.value));
+      }
+
+      if (isHighConfidence(fields.cardNumber)) {
+        applyAssistantValue("cardNumber", () =>
+          setCardNumber(fields.cardNumber.value.replace(/^#/, "")),
+        );
+      }
+
+      if (
+        isHighConfidence(fields.grader) ||
+        isHighConfidence(fields.grade) ||
+        isHighConfidence(fields.certificationNumber)
+      ) {
+        applyAssistantValue("cardType", () => setCardType("Graded"));
+      }
+
+      if (isHighConfidence(fields.grader)) {
+        applyAssistantValue("grader", () =>
+          setGrader(normalizeAssistantGrader(fields.grader.value)),
+        );
+      }
+
+      if (isHighConfidence(fields.grade)) {
+        applyAssistantValue("grade", () => setGrade(fields.grade.value));
+      }
+
+      if (isHighConfidence(fields.certificationNumber)) {
+        applyAssistantValue("certNumber", () =>
+          setCertNumber(fields.certificationNumber.value.replace(/[^0-9]/g, "")),
+        );
+      }
+
+      if (isHighConfidence(fields.suggestedTitle)) {
+        applyAssistantValue("title", () => {
+          setTitle(fields.suggestedTitle.value);
+          setIsAutoTitle(false);
+        });
+      }
+
+      const sportsCardsProValue = result.sportsCardsPro.selectedValue;
+
+      if (sportsCardsProValue) {
+        setSportsCardsProValue(sportsCardsProValue);
+        setSportsCardsProCandidates([]);
+        if (sportsCardsProValue.estimatedValue !== null) {
+          applyAssistantValue("marketValue", () =>
+            setMarketValue(String(sportsCardsProValue.estimatedValue)),
+          );
+          if (!isCollectionMode && !isAuctionMode) {
+            applyAssistantValue("askingPrice", () =>
+              setAskingPrice(String(sportsCardsProValue.estimatedValue)),
+            );
+          }
+        }
+        if (sportsCardsProValue.setName) {
+          applyAssistantValue("setName", () => setSetName(sportsCardsProValue.setName));
+        }
+        if (
+          sportsCardsProValue.productName &&
+          !autofill?.title &&
+          !isHighConfidence(fields.suggestedTitle)
+        ) {
+          applyAssistantValue("title", () => {
+            setTitle(sportsCardsProValue.productName);
+            setIsAutoTitle(false);
+          });
+        }
+        setSportsCardsProStatus({
+          type: "success",
+          text: "SportsCardsPro estimate matched by Listing Assistant.",
+        });
+      } else if (result.sportsCardsPro.candidates.length > 1) {
+        setSportsCardsProCandidates(result.sportsCardsPro.candidates);
+        setSportsCardsProStatus({
+          type: "success",
+          text: "Listing Assistant found possible SportsCardsPro matches.",
+        });
+      }
+
+      const verification = result.psa.verification;
+
+      const verifiedCertNumber = verification?.certNumber;
+
+      if (result.psa.status === "verified" && verification && verifiedCertNumber) {
+        applyAssistantValue("cardType", () => setCardType("Graded"));
+        applyAssistantValue("grader", () => setGrader("PSA"));
+        applyAssistantValue("grade", () =>
+          setGrade(verification.grade || fields.grade.value || "10"),
+        );
+        applyAssistantValue("certNumber", () => setCertNumber(verifiedCertNumber));
+        if (!userControlledFieldsRef.current.has("certNumber")) {
+          setPsaVerification({
+            verified: true,
+            certNumber: verifiedCertNumber,
+            grade: verification.grade || fields.grade.value || "",
+            cardName: verification.cardName || fields.suggestedTitle.value || "",
+            verifiedAt: verification.verifiedAt || new Date().toISOString(),
+          });
+          setPsaStatus({
+            type: "success",
+            text: "PSA certification verified by Listing Assistant.",
+          });
+        }
+      }
+
+      setListingAssistantStatus({
+        type: result.analysis.confidenceLabel === "low" ? "info" : "success",
+        text: options.fromCache
+          ? "Saved Listing Assistant suggestions loaded. Review before publishing."
+          : result.message,
+      });
+    },
+    [applyAssistantValue, isAuctionMode, isCollectionMode],
+  );
+
+  const analyzeSelectedCardPhotos = useCallback(
+    async (cacheKey: string, options: { force?: boolean } = {}) => {
+      const front = selectedPhotos.front;
+      const back = selectedPhotos.back;
+
+      if (!front?.file || !back?.file) {
+        setListingAssistantStatus({
+          type: "info",
+          text: "Upload front and back photos to use Listing Assistant.",
+        });
+        return;
+      }
+
+      if (!session?.access_token) {
+        setListingAssistantStatus({
+          type: "error",
+          text: "Sign in to use Listing Assistant.",
+        });
+        return;
+      }
+
+      if (listingAssistantInFlightKeyRef.current === cacheKey) {
+        return;
+      }
+
+      if (listingAssistantPhotoKeyRef.current !== cacheKey) {
+        return;
+      }
+
+      if (!options.force) {
+        const cachedResult = readListingAssistantCache(cacheKey);
+
+        if (cachedResult) {
+          applyListingAssistantResult(cachedResult, { fromCache: true });
+          return;
+        }
+      }
+
+      setIsAnalyzingListing(true);
+      listingAssistantInFlightKeyRef.current = cacheKey;
+      setListingAssistantStatus({
+        type: "info",
+        text: "GRAIL is identifying the card while you keep working.",
+      });
+
+      try {
+        const formData = new FormData();
+        formData.append("front", front.file);
+        formData.append("back", back.file);
+
+        const response = await fetch("/api/listing-assistant/analyze", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+          },
+          body: formData,
+        });
+        const payload = (await response.json()) as ListingAssistantResponse;
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Listing Assistant could not analyze these photos.");
+        }
+
+        if (listingAssistantPhotoKeyRef.current !== cacheKey) {
+          return;
+        }
+
+        writeListingAssistantCache(cacheKey, payload);
+        applyListingAssistantResult(payload);
+      } catch (error) {
+        console.error("Listing Assistant analysis error:", error);
+        setListingAssistantStatus({
+          type: "error",
+          text: error instanceof Error
+            ? error.message
+            : "Listing Assistant is unavailable right now.",
+        });
+      } finally {
+        if (listingAssistantInFlightKeyRef.current === cacheKey) {
+          listingAssistantInFlightKeyRef.current = "";
+        }
+        setIsAnalyzingListing(false);
+      }
+    },
+    [
+      applyListingAssistantResult,
+      selectedPhotos.back,
+      selectedPhotos.front,
+      session,
+    ],
+  );
+
+  useEffect(() => {
+    if (!assistantPhotoKey || !session?.access_token) {
+      return;
+    }
+
+    if (assistantPhotoKey === listingAssistantPhotoKeyRef.current) {
+      return;
+    }
+
+    listingAssistantPhotoKeyRef.current = assistantPhotoKey;
+    const analysisTimer = window.setTimeout(() => {
+      void analyzeSelectedCardPhotos(assistantPhotoKey);
+    }, 0);
+
+    return () => window.clearTimeout(analysisTimer);
+  }, [
+    analyzeSelectedCardPhotos,
+    assistantPhotoKey,
+    session,
+  ]);
+
   const auctionReserveNumber = Number(auctionReservePrice);
   const reserveFeeAmount =
     isAuctionMode && auctionReserveEnabled && Number.isFinite(auctionReserveNumber) && auctionReserveNumber > 0
@@ -749,6 +1420,143 @@ export default function ListCardPage() {
     return next;
   }, [cardType, marketValue]);
   const previewTitle = buildTitle() || "Untitled Card";
+  const listingCompletionIssue = validateForm();
+  const isListingReady = !listingCompletionIssue;
+  const hasAssistantPhotos = Boolean(selectedPhotos.front?.file && selectedPhotos.back?.file);
+  const assistantMarketValue =
+    sportsCardsProValue?.estimatedValue ??
+    listingAssistantResult?.autofill?.estimatedMarketValue ??
+    null;
+  const assistantSuggestedAskingPrice =
+    listingAssistantResult?.autofill?.suggestedAskingPrice ??
+    sportsCardsProValue?.estimatedValue ??
+    null;
+  const askingPriceIsUserControlled = isAskingPriceUserControlled;
+  const listingAssistantSuggestions = useMemo(() => {
+    const fields = listingAssistantResult?.analysis.fields;
+
+    if (!fields) {
+      return [];
+    }
+
+    return (Object.entries(fields) as [ListingAssistantFieldKey, ListingAssistantField][])
+      .filter(([, field]) => isMediumConfidence(field))
+      .map(([key, field]) => ({
+        key,
+        label: listingAssistantFieldLabels[key],
+        value: field.value,
+        confidence: field.confidence,
+        confidenceLabel:
+          field.confidence >= 0.78
+            ? "Filled automatically"
+            : `Review · ${formatConfidence(field.confidence)} confidence`,
+      }));
+  }, [listingAssistantResult]);
+  const assistantAnalysisStatus = listingAssistantResult?.analysis.status;
+  const assistantAnalysisConfidenceLabel =
+    listingAssistantResult?.analysis.confidenceLabel;
+  const assistantSportsCardsProStatus =
+    listingAssistantResult?.sportsCardsPro.status;
+  const assistantPsaStatus = listingAssistantResult?.psa.status;
+  const assistantTimelineItems: AssistantTimelineItem[] = [
+    {
+      label: "Images uploaded",
+      detail: hasAssistantPhotos
+        ? "Front and back photos are ready."
+        : "Add front and back photos to begin.",
+      status: hasAssistantPhotos ? "complete" : "pending",
+    },
+    {
+      label:
+        assistantAnalysisStatus === "completed"
+          ? "Card identified"
+          : "Identifying card",
+      detail:
+        assistantAnalysisStatus === "completed"
+          ? assistantAnalysisConfidenceLabel === "low"
+            ? "Review the identified details."
+            : "Card details filled for review."
+          : assistantAnalysisStatus === "failed"
+            ? "Manual listing is still available."
+            : assistantAnalysisStatus === "unconfigured"
+              ? "Listing Assistant is ready for provider setup."
+              : isAnalyzingListing
+                ? "Reading card details."
+                : "Waiting for photos.",
+      status:
+        assistantAnalysisStatus === "completed"
+          ? assistantAnalysisConfidenceLabel === "low"
+            ? "warning"
+            : "complete"
+          : assistantAnalysisStatus === "failed"
+            ? "error"
+            : assistantAnalysisStatus === "unconfigured"
+              ? "warning"
+              : isAnalyzingListing
+                ? "active"
+                : "pending",
+    },
+    {
+      label:
+        assistantSportsCardsProStatus === "matched"
+          ? "Market value found"
+          : assistantSportsCardsProStatus === "multiple_matches"
+            ? "Multiple matches found"
+            : "Checking market value",
+      detail:
+        assistantSportsCardsProStatus === "matched"
+          ? "Suggested price prepared."
+          : assistantSportsCardsProStatus === "multiple_matches"
+            ? "Choose the exact SportsCardsPro match."
+            : assistantSportsCardsProStatus === "failed" ||
+                assistantSportsCardsProStatus === "matched_no_value"
+              ? "Market value can be added manually."
+              : isAnalyzingListing
+                ? "Searching current card values."
+                : "Market lookup runs after identification.",
+      status:
+        assistantSportsCardsProStatus === "matched"
+          ? "complete"
+          : assistantSportsCardsProStatus === "multiple_matches" ||
+              assistantSportsCardsProStatus === "failed" ||
+              assistantSportsCardsProStatus === "matched_no_value"
+            ? "warning"
+            : isAnalyzingListing
+              ? "active"
+              : "pending",
+    },
+    {
+      label:
+        assistantPsaStatus === "verified" || psaVerification
+          ? "PSA verified"
+          : "Checking certification",
+      detail:
+        assistantPsaStatus === "verified" || psaVerification
+          ? "Certification details filled."
+          : assistantPsaStatus === "failed"
+            ? "Certification can be verified manually."
+            : assistantPsaStatus === "skipped"
+              ? "No confident PSA cert detected."
+              : isAnalyzingListing
+                ? "Looking for a certification number."
+                : "Runs when a PSA cert is detected.",
+      status:
+        assistantPsaStatus === "verified" || psaVerification
+          ? "complete"
+          : assistantPsaStatus === "failed"
+            ? "warning"
+            : isAnalyzingListing
+              ? "active"
+              : "pending",
+    },
+    {
+      label: isListingReady ? "Listing ready" : "Listing check",
+      detail: isListingReady
+        ? "Your listing is ready to publish."
+        : listingCompletionIssue || "Finish required fields.",
+      status: isListingReady ? "complete" : "pending",
+    },
+  ];
 
   function buildTitle() {
     if (!isAutoTitle && title.trim()) {
@@ -785,6 +1593,13 @@ export default function ListCardPage() {
     if (imageType === "front") {
       setDraftImagePreview("");
     }
+    setListingAssistantResult(null);
+    listingAssistantPhotoKeyRef.current = "";
+    listingAssistantInFlightKeyRef.current = "";
+    setListingAssistantStatus({
+      type: "info",
+      text: "Upload front and back photos to start Listing Assistant.",
+    });
     setPublishedListingId("");
     setStatus({ type: "info", text: "Photo selected." });
   }
@@ -807,6 +1622,7 @@ export default function ListCardPage() {
     return {
       id: existingDraft?.id || `draft-${now.replace(/[^0-9]/g, "")}`,
       title: draftTitle,
+      listingDescription,
       category,
       subject,
       year,
@@ -1189,10 +2005,22 @@ export default function ListCardPage() {
       } satisfies SportsCardsProValue;
 
       setSportsCardsProValue(value);
-      setMarketValue(String(value.estimatedValue));
+      applyAssistantValue("marketValue", () => setMarketValue(String(value.estimatedValue)));
+      if (!isCollectionMode && !isAuctionMode) {
+        applyAssistantValue("askingPrice", () => setAskingPrice(String(value.estimatedValue)));
+      }
+      if (value.setName) {
+        applyAssistantValue("setName", () => setSetName(value.setName));
+      }
+      if (value.productName && (!title.trim() || isAutoTitle)) {
+        applyAssistantValue("title", () => {
+          setTitle(value.productName);
+          setIsAutoTitle(false);
+        });
+      }
       setSportsCardsProStatus({
         type: "success",
-        text: "SportsCardsPro estimate selected.",
+        text: "SportsCardsPro estimate selected and listing updated.",
       });
     } catch (error) {
       console.error("SportsCardsPro value error:", error);
@@ -1210,6 +2038,7 @@ export default function ListCardPage() {
 
   function useSportsCardsProAskingPrice() {
     if (sportsCardsProValue?.estimatedValue) {
+      markUserControlledField("askingPrice");
       setAskingPrice(String(sportsCardsProValue.estimatedValue));
       setStatus({
         type: "success",
@@ -1232,6 +2061,12 @@ export default function ListCardPage() {
       Number.isFinite(manualMarketValue) && manualMarketValue > 0
         ? manualMarketValue
         : sportsCardsProValue?.estimatedValue || null;
+    const collectionNote = [
+      listingDescription.trim(),
+      serialDisplay ? `Serial Number: ${serialDisplay}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     return {
       title: buildTitle(),
@@ -1274,7 +2109,7 @@ export default function ListCardPage() {
           : "none"
         : "none",
       estimated_value: savedEstimatedValue,
-      collection_note: serialDisplay ? `Serial Number: ${serialDisplay}` : null,
+      collection_note: collectionNote || null,
       psa_verified: shouldStorePsa ? Boolean(verification?.verified) : false,
       psa_cert_number: shouldStorePsa ? cleanCert : null,
       psa_grade: shouldStorePsa ? verification?.grade || null : null,
@@ -1661,6 +2496,7 @@ export default function ListCardPage() {
     setReserveFeeAcknowledged(false);
     setTitle("");
     setIsAutoTitle(true);
+    setListingDescription("");
     setYear("");
     setSetName("");
     setCardNumber("");
@@ -1679,11 +2515,17 @@ export default function ListCardPage() {
     setSportsCardsProCandidates([]);
     setSportsCardsProValue(null);
     setSportsCardsProStatus(null);
+    setListingAssistantStatus(null);
+    setListingAssistantResult(null);
+    listingAssistantPhotoKeyRef.current = "";
+    listingAssistantInFlightKeyRef.current = "";
+    setIsAnalyzingListing(false);
     setSelectedPhotos({});
     setDraftImagePreview("");
     setExistingImageUrls({});
     setEditingDraftId("");
     setPublishedListingId("");
+    clearUserControlledFields();
     setStatus({ type: "info", text: "Ready to list another card." });
   }
 
@@ -1784,6 +2626,120 @@ export default function ListCardPage() {
                   );
                 })}
               </div>
+              <div className="listing-assistant-panel">
+                <div className="listing-assistant-header">
+                  <div>
+                    <span>Listing Assistant</span>
+                    <h3>Upload two photos. We&apos;ll help complete the rest.</h3>
+                    <p>
+                      Front and back images are analyzed server-side. High-confidence details
+                      fill automatically; everything still waits for your review.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={
+                      isAnalyzingListing ||
+                      !selectedPhotos.front?.file ||
+                      !selectedPhotos.back?.file ||
+                      !session
+                    }
+                    onClick={() => {
+                      const nextKey = assistantPhotoKey || buildListingAssistantPhotoKey(
+                        selectedPhotos.front,
+                        selectedPhotos.back,
+                      );
+                      if (nextKey) {
+                        listingAssistantPhotoKeyRef.current = nextKey;
+                        void analyzeSelectedCardPhotos(nextKey, { force: true });
+                      }
+                    }}
+                  >
+                    {isAnalyzingListing ? "Analyzing..." : "Analyze Again"}
+                  </button>
+                </div>
+
+                <div className="assistant-timeline" aria-live="polite">
+                  {assistantTimelineItems.map((item) => (
+                    <div key={item.label} className={`assistant-timeline-item ${item.status}`}>
+                      <span aria-hidden="true" />
+                      <div>
+                        <strong>{item.label}</strong>
+                        <small>{item.detail}</small>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {listingAssistantStatus ? (
+                  <p className={`assistant-status ${listingAssistantStatus.type}`}>
+                    {listingAssistantStatus.text}
+                  </p>
+                ) : null}
+
+                {listingAssistantSuggestions.length > 0 ? (
+                  <div className="assistant-suggestion-grid">
+                    {listingAssistantSuggestions.map((suggestion) => (
+                      <div key={suggestion.key}>
+                        <span>{suggestion.label}</span>
+                        <strong>{suggestion.value}</strong>
+                        <small>{suggestion.confidenceLabel}</small>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {assistantMarketValue ? (
+                  <div className="assistant-price-panel">
+                    <div>
+                      <span>Market Value</span>
+                      <strong>{formatCurrencyWithCents(assistantMarketValue)}</strong>
+                    </div>
+                    <div>
+                      <span>Suggested Asking Price</span>
+                      <strong>
+                        {assistantSuggestedAskingPrice
+                          ? formatCurrencyWithCents(assistantSuggestedAskingPrice)
+                          : "Review"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Difference from Market</span>
+                      <strong>{getPriceDifferenceLabel(askingPrice, assistantMarketValue)}</strong>
+                    </div>
+                    {askingPriceIsUserControlled ? (
+                      <p>Manual asking price kept.</p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {isListingReady ? (
+                  <p className="assistant-ready-note">Your listing is ready to publish.</p>
+                ) : null}
+
+                {listingAssistantResult?.sportsCardsPro.candidates.length &&
+                !listingAssistantResult.sportsCardsPro.selectedValue ? (
+                  <div className="assistant-match-panel">
+                    <div>
+                      <span>Possible Matches</span>
+                      <strong>Choose the exact SportsCardsPro card.</strong>
+                    </div>
+                    <div className="assistant-match-grid">
+                      {listingAssistantResult.sportsCardsPro.candidates.map((candidate) => (
+                        <button
+                          key={candidate.sportsCardsProId}
+                          type="button"
+                          disabled={isFetchingSportsCardsProValue}
+                          onClick={() => void selectSportsCardsProCandidate(candidate)}
+                        >
+                          <strong>{candidate.productName}</strong>
+                          <span>{candidate.setName || "SportsCardsPro product"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </section>
 
             <section className="panel form-section">
@@ -1793,7 +2749,10 @@ export default function ListCardPage() {
                   <span>Category</span>
                   <select
                     value={category}
-                    onChange={(event) => setCategory(event.target.value)}
+                    onChange={(event) => {
+                      markUserControlledField("category");
+                      setCategory(event.target.value);
+                    }}
                   >
                     {categories.map((item) => (
                       <option key={item}>{item}</option>
@@ -1805,6 +2764,7 @@ export default function ListCardPage() {
                   <input
                     value={isAutoTitle ? generatedTitle : title}
                     onChange={(event) => {
+                      markUserControlledField("title");
                       setIsAutoTitle(false);
                       setTitle(event.target.value);
                     }}
@@ -1815,28 +2775,58 @@ export default function ListCardPage() {
                 </label>
                 <label>
                   <span>Year</span>
-                  <input value={year} onChange={(event) => setYear(event.target.value)} />
+                  <input
+                    value={year}
+                    onChange={(event) => {
+                      markUserControlledField("year");
+                      setYear(event.target.value);
+                    }}
+                  />
                 </label>
                 <label>
                   <span>Set</span>
                   <input
                     value={setName}
-                    onChange={(event) => setSetName(event.target.value)}
+                    onChange={(event) => {
+                      markUserControlledField("setName");
+                      setSetName(event.target.value);
+                    }}
                   />
                 </label>
                 <label>
                   <span>Card number</span>
                   <input
                     value={cardNumber}
-                    onChange={(event) => setCardNumber(event.target.value)}
+                    onChange={(event) => {
+                      markUserControlledField("cardNumber");
+                      setCardNumber(event.target.value);
+                    }}
                   />
                 </label>
                 <label>
                   <span>Player / Character</span>
                   <input
                     value={subject}
-                    onChange={(event) => setSubject(event.target.value)}
+                    onChange={(event) => {
+                      markUserControlledField("subject");
+                      setSubject(event.target.value);
+                    }}
                   />
+                </label>
+                <label className="full-width">
+                  <span>Listing description</span>
+                  <textarea
+                    value={listingDescription}
+                    rows={4}
+                    placeholder="Officially identified card. Real front and back photos included. Protected checkout through GRAIL."
+                    onChange={(event) => {
+                      markUserControlledField("listingDescription");
+                      setListingDescription(event.target.value);
+                    }}
+                  />
+                  <small>
+                    The assistant can draft this, and you can edit it before publishing.
+                  </small>
                 </label>
                 <label>
                   <span>Serial Number</span>
@@ -1861,7 +2851,13 @@ export default function ListCardPage() {
                 ) : null}
                 <label className="toggle-field">
                   <span>Title mode</span>
-                  <button type="button" onClick={() => setIsAutoTitle(true)}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      userControlledFieldsRef.current.delete("title");
+                      setIsAutoTitle(true);
+                    }}
+                  >
                     Use Auto Title
                   </button>
                 </label>
@@ -1870,6 +2866,7 @@ export default function ListCardPage() {
                   <select
                     value={cardType}
                     onChange={(event) => {
+                      markUserControlledField("cardType");
                       setCardType(event.target.value as CardType);
                       clearPsaVerification();
                     }}
@@ -1883,7 +2880,10 @@ export default function ListCardPage() {
                     <span>Condition</span>
                     <select
                       value={condition}
-                      onChange={(event) => setCondition(event.target.value)}
+                      onChange={(event) => {
+                        markUserControlledField("condition");
+                        setCondition(event.target.value);
+                      }}
                     >
                       {rawConditions.map((item) => (
                         <option key={item}>{item}</option>
@@ -1897,6 +2897,7 @@ export default function ListCardPage() {
                       <select
                         value={grader}
                         onChange={(event) => {
+                          markUserControlledField("grader");
                           setGrader(event.target.value);
                           clearPsaVerification();
                         }}
@@ -1910,7 +2911,10 @@ export default function ListCardPage() {
                       <span>Grade</span>
                       <select
                         value={grade}
-                        onChange={(event) => setGrade(event.target.value)}
+                        onChange={(event) => {
+                          markUserControlledField("grade");
+                          setGrade(event.target.value);
+                        }}
                       >
                         {gradeOptions.map((item) => (
                           <option key={item}>{item}</option>
@@ -1924,6 +2928,7 @@ export default function ListCardPage() {
                         inputMode="numeric"
                         placeholder={grader === "PSA" ? "PSA cert number" : "Optional cert number"}
                         onChange={(event) => {
+                          markUserControlledField("certNumber");
                           setCertNumber(event.target.value);
                           clearPsaVerification();
                         }}
@@ -1997,11 +3002,15 @@ export default function ListCardPage() {
                           ? "0.99"
                           : undefined
                     }
-                    onChange={(event) =>
-                      isAuctionMode
-                        ? setAuctionStartingBid(event.target.value)
-                        : setAskingPrice(event.target.value)
-                    }
+                    onChange={(event) => {
+                      if (isAuctionMode) {
+                        setAuctionStartingBid(event.target.value);
+                        return;
+                      }
+
+                      markUserControlledField("askingPrice");
+                      setAskingPrice(event.target.value);
+                    }}
                   />
                 </label>
                 <label>
@@ -2010,7 +3019,10 @@ export default function ListCardPage() {
                     value={minimumOffer}
                     inputMode="decimal"
                     placeholder={isCollectionMode ? "Optional minimum offer" : undefined}
-                    onChange={(event) => setMinimumOffer(event.target.value)}
+                    onChange={(event) => {
+                      markUserControlledField("minimumOffer");
+                      setMinimumOffer(event.target.value);
+                    }}
                   />
                 </label>
                 <label>
@@ -2018,7 +3030,10 @@ export default function ListCardPage() {
                   <input
                     value={marketValue}
                     inputMode="decimal"
-                    onChange={(event) => setMarketValue(event.target.value)}
+                    onChange={(event) => {
+                      markUserControlledField("marketValue");
+                      setMarketValue(event.target.value);
+                    }}
                   />
                 </label>
               </div>
@@ -2497,10 +3512,49 @@ const pageStyles = `
   .upload-box span, label span { color: #C9CDD3; font-size: 12px; font-weight: 900; }
   .upload-box span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .upload-preview { width: 100%; max-height: 58px; border-radius: 7px; object-fit: cover; }
+  .listing-assistant-panel { margin-top: 14px; border: 1px solid rgba(231,222,208,0.18); border-radius: 12px; background: radial-gradient(circle at 20% 0%, rgba(231,222,208,0.08), transparent 34%), rgba(8,8,10,0.82); padding: 14px; display: grid; gap: 12px; }
+  .listing-assistant-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .listing-assistant-header span, .assistant-match-panel span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+  .listing-assistant-header h3 { margin: 6px 0 0; color: #fff; font-size: 18px; line-height: 22px; font-weight: 900; }
+  .listing-assistant-header p { margin: 6px 0 0; color: #a1a1aa; font-size: 12px; line-height: 17px; font-weight: 800; max-width: 560px; }
+  .assistant-timeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .assistant-timeline-item { min-height: 74px; border: 1px solid rgba(201,205,211,0.12); border-radius: 11px; background: rgba(3,3,4,0.74); padding: 10px; display: grid; gap: 8px; align-content: start; }
+  .assistant-timeline-item > span { width: 18px; height: 18px; border: 1px solid rgba(201,205,211,0.2); border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; color: #C9CDD3; }
+  .assistant-timeline-item > span::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: currentColor; opacity: 0.72; }
+  .assistant-timeline-item.complete { border-color: rgba(52,211,153,0.2); background: rgba(52,211,153,0.035); }
+  .assistant-timeline-item.complete > span { border-color: rgba(231,222,208,0.38); color: #E7DED0; }
+  .assistant-timeline-item.active { border-color: rgba(231,222,208,0.44); background: rgba(231,222,208,0.07); }
+  .assistant-timeline-item.active > span { color: #E7DED0; box-shadow: 0 0 0 4px rgba(231,222,208,0.06); }
+  .assistant-timeline-item.warning { border-color: rgba(251,191,36,0.22); background: rgba(251,191,36,0.045); }
+  .assistant-timeline-item.error { border-color: rgba(248,113,113,0.24); background: rgba(248,113,113,0.06); }
+  .assistant-timeline-item strong { color: #fff; font-size: 12px; line-height: 16px; font-weight: 900; }
+  .assistant-timeline-item small { display: block; margin-top: 4px; color: #a1a1aa; font-size: 10px; line-height: 14px; font-weight: 800; }
+  .assistant-status { margin: 0; border-radius: 9px; padding: 10px; color: #C9CDD3; background: rgba(201,205,211,0.055); border: 1px solid rgba(201,205,211,0.14); font-size: 12px; line-height: 17px; font-weight: 900; }
+  .assistant-status.success { color: #E7DED0; border-color: rgba(231,222,208,0.22); background: rgba(231,222,208,0.06); }
+  .assistant-status.error { color: #fca5a5; border-color: rgba(248,113,113,0.24); background: rgba(248,113,113,0.07); }
+  .assistant-suggestion-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .assistant-suggestion-grid div { border: 1px solid rgba(201,205,211,0.13); border-radius: 10px; background: rgba(3,3,4,0.72); padding: 10px; min-width: 0; }
+  .assistant-suggestion-grid span { color: #85858f; font-size: 10px; line-height: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; }
+  .assistant-suggestion-grid strong { display: block; margin-top: 5px; color: #fff; font-size: 13px; line-height: 17px; font-weight: 900; overflow-wrap: anywhere; }
+  .assistant-suggestion-grid small { display: block; margin-top: 5px; color: #C9CDD3; font-size: 10px; line-height: 14px; font-weight: 800; }
+  .assistant-match-panel { border-top: 1px solid rgba(201,205,211,0.12); padding-top: 12px; display: grid; gap: 10px; }
+  .assistant-match-panel strong { display: block; margin-top: 4px; color: #fff; font-size: 14px; line-height: 18px; font-weight: 900; }
+  .assistant-match-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .assistant-match-grid button { min-height: auto; padding: 10px; display: grid; justify-items: start; text-align: left; }
+  .assistant-match-grid button strong { margin: 0; font-size: 13px; line-height: 17px; }
+  .assistant-match-grid button span { margin-top: 4px; color: #a1a1aa; letter-spacing: 0; text-transform: none; }
+  .assistant-price-panel { border: 1px solid rgba(231,222,208,0.18); border-radius: 11px; background: rgba(231,222,208,0.045); padding: 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .assistant-price-panel div { min-width: 0; }
+  .assistant-price-panel span { color: #85858f; font-size: 10px; line-height: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; }
+  .assistant-price-panel strong { display: block; margin-top: 5px; color: #fff; font-size: 13px; line-height: 17px; font-weight: 900; }
+  .assistant-price-panel p { grid-column: 1 / -1; margin: 0; color: #C9CDD3; font-size: 11px; line-height: 15px; font-weight: 800; }
+  .assistant-ready-note { margin: 0; border: 1px solid rgba(52,211,153,0.22); border-radius: 10px; background: rgba(52,211,153,0.055); color: #d1fae5; padding: 10px; font-size: 12px; line-height: 17px; font-weight: 900; }
   .field-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .field-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .full-width { grid-column: 1 / -1; }
   label { display: grid; gap: 7px; }
-  input, select { border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; min-height: 42px; padding: 0 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none; }
+  input, select, textarea { border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; min-height: 42px; padding: 0 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none; }
+  textarea { min-height: 92px; padding: 11px 12px; resize: vertical; line-height: 18px; }
   input:disabled { color: #85858f; cursor: not-allowed; }
   label small { color: #85858f; font-size: 11px; line-height: 15px; font-weight: 800; }
   .sale-format-toggle { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -2568,5 +3622,5 @@ const pageStyles = `
   .seller-trust-grid span { border: 1px solid rgba(201,205,211,0.14); border-radius: 10px; background: rgba(201,205,211,0.04); color: #C9CDD3; padding: 10px; font-size: 11px; line-height: 16px; font-weight: 800; }
   .seller-trust-links { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
   .seller-trust-links a { min-height: 30px; border: 1px solid rgba(231,222,208,0.22); border-radius: 8px; background: rgba(231,222,208,0.055); color: #E7DED0; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 11px; font-weight: 900; }
-  @media (max-width: 1100px) { .page-shell { width: min(1240px, calc(100vw - 32px)); } .list-layout, .field-grid, .field-grid.three, .upload-grid, .preview-modal-body, .preview-detail-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success, .psa-verification-box, .market-value-header { align-items: flex-start; flex-direction: column; } }
+  @media (max-width: 1100px) { .page-shell { width: min(1240px, calc(100vw - 32px)); } .list-layout, .field-grid, .field-grid.three, .upload-grid, .assistant-timeline, .assistant-suggestion-grid, .assistant-match-grid, .assistant-price-panel, .preview-modal-body, .preview-detail-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success, .psa-verification-box, .market-value-header, .listing-assistant-header { align-items: flex-start; flex-direction: column; } }
 `;

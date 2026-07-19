@@ -78,7 +78,10 @@ export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [message, setMessage] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [resendMessage, setResendMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResending, setIsResending] = useState(false);
 
   const field =
     "h-16 w-full border-0 bg-transparent pl-16 pr-5 text-base text-white outline-none placeholder:text-[#98999c] sm:h-[82px] sm:pl-16 sm:pr-6 sm:text-[19px]";
@@ -135,38 +138,78 @@ export default function SignupPage() {
         return;
       }
 
-      const { error } = await supabase.auth.signUp({
-  email: cleanEmail,
-  password,
-  options: {
-    emailRedirectTo: `${window.location.origin}/login`,
-    data: {
-      full_name: fullName.trim(),
-      username: cleanUsername,
-      birthdate,
-    },
-  },
-});
+      const { data, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/login?verified=1`,
+          data: {
+            full_name: fullName.trim(),
+            username: cleanUsername,
+            birthdate,
+          },
+        },
+      });
 
       if (error) throw error;
 
-      
+      if (data.session) {
+        await supabase.auth.signOut();
+      }
 
-      setMessage("Account created. Check your email to confirm.");
+      setVerificationEmail(cleanEmail);
+      setResendMessage("");
+      setMessage("");
     } catch (error: unknown) {
-  console.error("Signup error:", error);
+      console.error("Signup error:", error);
 
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error
-  ) {
-    setMessage(String(error.message));
-  } else {
-    setMessage("Account creation failed. Please try again.");
-  }
-} finally {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error
+      ) {
+        setMessage(String(error.message));
+      } else {
+        setMessage("Account creation failed. Please try again.");
+      }
+    } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleResendVerification() {
+    const cleanEmail = verificationEmail.trim().toLowerCase();
+
+    if (!cleanEmail) {
+      setResendMessage("Enter your email again to resend verification.");
+      return;
+    }
+
+    try {
+      setIsResending(true);
+      setResendMessage("Sending verification email...");
+
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: cleanEmail,
+        options: {
+          emailRedirectTo: `${window.location.origin}/login?verified=1`,
+        },
+      });
+
+      if (error) throw error;
+
+      setResendMessage("Verification email sent. Check your inbox.");
+    } catch (error: unknown) {
+      console.error("Verification resend error:", error);
+
+      if (typeof error === "object" && error !== null && "message" in error) {
+        setResendMessage(String(error.message));
+      } else {
+        setResendMessage("Verification email could not be resent. Please try again.");
+      }
+    } finally {
+      setIsResending(false);
     }
   }
 
@@ -178,19 +221,88 @@ export default function SignupPage() {
             GRAIL
           </p>
 
-          <h1 className="mt-16 text-[34px] font-semibold tracking-[-0.02em] sm:mt-[48px] sm:text-[42px]">
-            Welcome to GRAIL
-          </h1>
+          {verificationEmail ? (
+            <>
+              <h1 className="mt-16 text-[34px] font-semibold tracking-[-0.02em] sm:mt-[48px] sm:text-[42px]">
+                Check your email.
+              </h1>
 
-          <p className="mt-4 text-[17px] text-[#999a9d] sm:mt-7 sm:text-[25px]">
-            Create an account to continue.
-          </p>
+              <p className="mt-4 text-[17px] text-[#999a9d] sm:mt-7 sm:text-[25px]">
+                Verify your email to activate your GRAIL account.
+              </p>
+            </>
+          ) : (
+            <>
+              <h1 className="mt-16 text-[34px] font-semibold tracking-[-0.02em] sm:mt-[48px] sm:text-[42px]">
+                Welcome to GRAIL
+              </h1>
+
+              <p className="mt-4 text-[17px] text-[#999a9d] sm:mt-7 sm:text-[25px]">
+                Create an account to continue.
+              </p>
+            </>
+          )}
         </header>
 
-        <form
-          onSubmit={handleSignup}
-          className="mt-10 space-y-4 sm:mt-[42px] sm:space-y-5"
-        >
+        {verificationEmail ? (
+          <section className="mt-10 rounded-[24px] border border-[#232527] bg-black/80 p-6 text-center shadow-2xl shadow-black/40 sm:mt-[42px] sm:p-8">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-[#e2e2e2]/30 bg-white/[0.04] text-[#e2e2e2]">
+              <Icon name="mail" />
+            </div>
+            <p className="mt-6 text-sm uppercase tracking-[0.24em] text-[#8e8f92]">
+              Verification Required
+            </p>
+            <h2 className="mt-3 text-2xl font-semibold text-white">
+              We sent a verification link to:
+            </h2>
+            <p className="mt-3 break-words text-lg font-semibold text-[#e2e2e2]">
+              {verificationEmail}
+            </p>
+            <p className="mt-5 text-base leading-7 text-[#999a9d]">
+              Open the email and verify your account before signing in. Your
+              GRAIL profile, wallet, rewards, and marketplace access activate
+              after Supabase confirms your email.
+            </p>
+
+            <div className="mt-8 grid gap-3">
+              <button
+                type="button"
+                disabled={isResending}
+                onClick={handleResendVerification}
+                className="h-14 rounded-[14px] border border-[#e2e2e2] text-base font-semibold text-white transition hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isResending ? "Sending..." : "Resend Email"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setVerificationEmail("");
+                  setResendMessage("");
+                  setMessage("");
+                }}
+                className="h-14 rounded-[14px] border border-[#232527] text-base font-semibold text-[#d0d1d4] transition hover:border-[#e2e2e2]/50 hover:text-white"
+              >
+                Change Email
+              </button>
+              <Link
+                href="/login"
+                className="flex h-14 items-center justify-center rounded-[14px] border border-[#232527] text-base font-semibold text-[#d0d1d4] transition hover:border-[#e2e2e2]/50 hover:text-white"
+              >
+                Sign In
+              </Link>
+            </div>
+
+            {resendMessage ? (
+              <p aria-live="polite" className="mt-5 text-sm text-[#a5a6a9]">
+                {resendMessage}
+              </p>
+            ) : null}
+          </section>
+        ) : (
+          <form
+            onSubmit={handleSignup}
+            className="mt-10 space-y-4 sm:mt-[42px] sm:space-y-5"
+          >
           <div className="grid grid-cols-2 gap-3 sm:gap-4">
             <label className="relative rounded-[16px] border border-[#232527] bg-black">
               <span className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-[#a3a4a7] sm:left-7">
@@ -340,7 +452,8 @@ export default function SignupPage() {
               Sign In
             </Link>
           </p>
-        </form>
+          </form>
+        )}
       </section>
     </main>
   );

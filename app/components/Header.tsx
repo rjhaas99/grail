@@ -183,10 +183,13 @@ export default function Header() {
     let active = true;
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const nextUser = session?.user ?? null;
+      const nextUser = session?.user?.email_confirmed_at ? session.user : null;
+      if (session?.user && !session.user.email_confirmed_at) {
+        await supabase.auth.signOut();
+      }
       const [nextProfile, nextProgression] = await Promise.all([
         getProfile(nextUser),
-        getProgression(session?.access_token),
+        getProgression(nextUser ? session?.access_token : undefined),
       ]);
 
       if (!active) {
@@ -201,10 +204,13 @@ export default function Header() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const nextUser = session?.user ?? null;
+      const nextUser = session?.user?.email_confirmed_at ? session.user : null;
+      if (session?.user && !session.user.email_confirmed_at) {
+        await supabase.auth.signOut();
+      }
       const [nextProfile, nextProgression] = await Promise.all([
         getProfile(nextUser),
-        getProgression(session?.access_token),
+        getProgression(nextUser ? session?.access_token : undefined),
       ]);
       setUser(nextUser);
       setProfile(nextProfile);

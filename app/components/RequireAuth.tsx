@@ -27,6 +27,14 @@ export default function RequireAuth({ children }: { children: ReactNode }) {
         return;
       }
 
+      if (!user.email_confirmed_at) {
+        await supabase.auth.signOut();
+        const redirectTo = encodeURIComponent(pathname || "/");
+        const verifyEmail = encodeURIComponent(user.email || "");
+        router.replace(`/login?redirectTo=${redirectTo}&verifyEmail=${verifyEmail}`);
+        return;
+      }
+
       setAllowed(true);
       setChecking(false);
     }

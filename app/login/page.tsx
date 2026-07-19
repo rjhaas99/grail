@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 
 type IconName = "mail" | "lock" | "eye" | "eyeOff";
@@ -52,14 +52,42 @@ function Icon({ name }: { name: IconName }) {
   );
 }
 
-export default function LoginPage() {
-  const router = useRouter();
+function LoginFallback() {
+  return (
+    <main className="min-h-[100svh] bg-[#020304] px-6 text-white ring-1 ring-inset ring-[#1c1e20]">
+      <section className="mx-auto w-full max-w-[520px] pb-16 pt-14 text-center sm:pt-[70px]">
+        <p className="text-[24px] font-semibold tracking-[0.43em] sm:text-[28px]">
+          GRAIL
+        </p>
+        <h1 className="mt-12 text-[34px] font-semibold tracking-[-0.02em] sm:mt-[48px] sm:text-[42px]">
+          Loading sign in.
+        </h1>
+      </section>
+    </main>
+  );
+}
 
-  const [email, setEmail] = useState("");
+function LoginContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialVerificationEmail =
+    searchParams.get("verifyEmail")?.trim().toLowerCase() || "";
+  const initialMessage = initialVerificationEmail
+    ? "Please verify your email before continuing."
+    : searchParams.get("verified")
+      ? "Email verified. Sign in to continue."
+      : "";
+
+  const [email, setEmail] = useState(initialVerificationEmail);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(initialMessage);
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState(
+    initialVerificationEmail,
+  );
+  const [resendMessage, setResendMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResending, setIsResending] = useState(false);
 
   const field =
     "grail-auth-input h-16 w-full border-0 bg-transparent pl-16 pr-5 text-base text-white outline-none placeholder:text-[#98999c] sm:h-[82px] sm:pl-16 sm:pr-6 sm:text-[19px]";
@@ -77,8 +105,9 @@ export default function LoginPage() {
       setIsSubmitting(true);
       setMessage("Signing in...");
 
+      const cleanEmail = email.trim().toLowerCase();
       const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         password,
       });
 
@@ -89,24 +118,38 @@ export default function LoginPage() {
         }
 
         if (error.message.toLowerCase().includes("email not confirmed")) {
-          setMessage("Please confirm your email before signing in.");
+          setPendingVerificationEmail(cleanEmail);
+          setResendMessage("");
+          setMessage("Please verify your email before continuing.");
           return;
         }
 
         throw error;
       }
 
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user && !user.email_confirmed_at) {
+        await supabase.auth.signOut();
+        setPendingVerificationEmail(user.email || cleanEmail);
+        setResendMessage("");
+        setMessage("Please verify your email before continuing.");
+        return;
+      }
+
       setMessage("Signed in successfully.");
 
       const params = new URLSearchParams(window.location.search);
-const redirectTo = params.get("redirectTo") || "/";
-const safeRedirect =
-  redirectTo.startsWith("/") && !redirectTo.startsWith("//")
-    ? redirectTo
-    : "/";
+      const redirectTo = params.get("redirectTo") || "/";
+      const safeRedirect =
+        redirectTo.startsWith("/") && !redirectTo.startsWith("//")
+          ? redirectTo
+          : "/";
 
-router.push(safeRedirect);
-router.refresh();
+      router.push(safeRedirect);
+      router.refresh();
     } catch (error: unknown) {
       console.error("Login error:", error);
 
@@ -121,6 +164,43 @@ router.refresh();
       }
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleResendVerification() {
+    const cleanEmail = (pendingVerificationEmail || email).trim().toLowerCase();
+
+    if (!cleanEmail) {
+      setResendMessage("Enter your email to resend verification.");
+      return;
+    }
+
+    try {
+      setIsResending(true);
+      setResendMessage("Sending verification email...");
+
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: cleanEmail,
+        options: {
+          emailRedirectTo: `${window.location.origin}/login?verified=1`,
+        },
+      });
+
+      if (error) throw error;
+
+      setPendingVerificationEmail(cleanEmail);
+      setResendMessage("Verification email sent. Check your inbox.");
+    } catch (error: unknown) {
+      console.error("Verification resend error:", error);
+
+      if (typeof error === "object" && error !== null && "message" in error) {
+        setResendMessage(String(error.message));
+      } else {
+        setResendMessage("Verification email could not be resent. Please try again.");
+      }
+    } finally {
+      setIsResending(false);
     }
   }
 
@@ -227,6 +307,31 @@ router.refresh();
             </p>
           )}
 
+          {pendingVerificationEmail ? (
+            <div className="rounded-[18px] border border-[#232527] bg-black/80 p-5 text-center">
+              <p className="text-sm leading-6 text-[#a5a6a9]">
+                Verification is required for{" "}
+                <span className="font-semibold text-white">
+                  {pendingVerificationEmail}
+                </span>
+                . Use the link in your email to activate your GRAIL account.
+              </p>
+              <button
+                type="button"
+                disabled={isResending}
+                onClick={handleResendVerification}
+                className="mt-4 h-12 w-full rounded-[14px] border border-[#e2e2e2] text-sm font-semibold text-white transition hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isResending ? "Sending..." : "Resend Verification Email"}
+              </button>
+              {resendMessage ? (
+                <p aria-live="polite" className="mt-3 text-sm text-[#a5a6a9]">
+                  {resendMessage}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           <p className="pt-7 text-center text-[16px] text-[#98999c] sm:pt-[30px] sm:text-[19px]">
             Don&apos;t have an account?{" "}
             <Link href="/signup" className="font-semibold text-white">
@@ -236,5 +341,13 @@ router.refresh();
         </form>
       </section>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <LoginContent />
+    </Suspense>
   );
 }

@@ -49,6 +49,7 @@ export async function GET(request: Request, context: RouteContext) {
         condition,
         price,
         status,
+        collection_note,
         is_collection_card,
         is_public_collection,
         psa_verified,

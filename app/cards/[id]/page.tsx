@@ -88,6 +88,7 @@ type SupabaseListingRow = {
   condition: string | null;
   price: number | null;
   status: string | null;
+  collection_note?: string | null;
   is_collection_card?: boolean | null;
   is_public_collection?: boolean | null;
   psa_verified?: boolean | null;
@@ -540,7 +541,7 @@ function mapSupabaseCard(
           listing.psa_cert_number ||
           listing.cert_number ||
           "Not available",
-        notes: "Live Supabase listing.",
+        notes: listing.collection_note || "Live Supabase listing.",
       },
       psaVerified: Boolean(listing.psa_verified),
       psaCertNumber: listing.psa_cert_number || listing.cert_number,
