@@ -18,11 +18,21 @@ type CreateTransactionCheckoutSessionParams = {
   sellerId: string;
   buyerId?: string | null;
   amount: number;
+  shippingAmount?: number;
+  shippingLabel?: string;
   title: string;
   imageUrl?: string | null;
   successPath?: string;
   cancelPath?: string;
   extraMetadata?: Record<string, MetadataValue>;
+};
+
+type StripeErrorLike = {
+  type?: string;
+  code?: string;
+  message?: string;
+  param?: string;
+  stack?: string;
 };
 
 export const stripeTransactionCheckoutTypes = {
@@ -79,22 +89,80 @@ function getAbsoluteCheckoutUrl(path: string) {
   return `${getConfiguredSiteUrl()}${normalizedPath}`;
 }
 
-function getStripeProductImages(imageUrl?: string | null) {
+function getCheckoutStackLocation(error: unknown) {
+  const stack = error instanceof Error ? error.stack : undefined;
+
+  return stack?.split("\n").map((line) => line.trim()).find((line) => line.startsWith("at ")) || null;
+}
+
+function getStripeErrorDiagnostic(error: unknown) {
+  const stripeError = error as StripeErrorLike;
+
+  return {
+    type: stripeError.type || null,
+    code: stripeError.code || null,
+    param: stripeError.param || null,
+    message:
+      stripeError.message ||
+      (error instanceof Error ? error.message : "Stripe checkout failed."),
+    stackLocation: getCheckoutStackLocation(error),
+  };
+}
+
+function isLikelyStripeImageError(error: unknown) {
+  const diagnostic = getStripeErrorDiagnostic(error);
+  const param = diagnostic.param?.toLowerCase() || "";
+  const message = diagnostic.message.toLowerCase();
+
+  return param.includes("image") || message.includes("image");
+}
+
+function logTransactionCheckoutDiagnostic(
+  event: string,
+  details: Record<string, unknown>,
+) {
+  console.info("Transaction checkout diagnostic:", {
+    event,
+    ...details,
+  });
+}
+
+function getValidStripeProductImageUrl(imageUrl?: string | null) {
   const trimmedUrl = imageUrl?.trim();
 
   if (!trimmedUrl) {
-    return undefined;
+    return null;
   }
 
-  if (trimmedUrl.startsWith("https://") || trimmedUrl.startsWith("http://")) {
-    return [trimmedUrl];
-  }
+  try {
+    const url = trimmedUrl.startsWith("/")
+      ? new URL(trimmedUrl, getConfiguredSiteUrl())
+      : new URL(trimmedUrl);
 
-  if (trimmedUrl.startsWith("/")) {
-    return [getAbsoluteCheckoutUrl(trimmedUrl)];
-  }
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      return null;
+    }
 
-  return undefined;
+    if (
+      url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1" ||
+      url.hostname === "::1"
+    ) {
+      return null;
+    }
+
+    url.hash = "";
+
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function getStripeProductImages(imageUrl?: string | null) {
+  const validImageUrl = getValidStripeProductImageUrl(imageUrl);
+
+  return validImageUrl ? [validImageUrl] : undefined;
 }
 
 export function getStripeCheckoutTypeForTransaction(
@@ -147,6 +215,8 @@ export async function createTransactionCheckoutSession({
   sellerId,
   buyerId,
   amount,
+  shippingAmount = 0,
+  shippingLabel = "Shipping",
   title,
   imageUrl,
   successPath,
@@ -171,41 +241,141 @@ export async function createTransactionCheckoutSession({
 
   const stripe = new Stripe(getRequiredEnv("STRIPE_SECRET_KEY"));
   const unitAmount = Math.round(amount * 100);
+  const shippingUnitAmount = Math.round(Math.max(shippingAmount, 0) * 100);
   const metadata = buildTransactionCheckoutMetadata({
     transactionType,
     listingId,
     sellerId,
     buyerId,
-    extraMetadata,
+    extraMetadata: {
+      cardAmount: amount,
+      shippingAmount,
+      shippingLabel,
+      ...extraMetadata,
+    },
   });
   const resolvedSuccessPath =
     successPath || `/checkout/${listingId}?success=true&session_id={CHECKOUT_SESSION_ID}`;
   const resolvedCancelPath = cancelPath || `/checkout/${listingId}?canceled=true`;
   const productImages = getStripeProductImages(imageUrl);
-
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    client_reference_id: buyerId || undefined,
-    line_items: [
-      {
+  const successUrl = getAbsoluteCheckoutUrl(resolvedSuccessPath);
+  const cancelUrl = getAbsoluteCheckoutUrl(resolvedCancelPath);
+  const cardLineItem = {
+    quantity: 1,
+    price_data: {
+      currency: "usd",
+      unit_amount: unitAmount,
+      product_data: {
+        name: title,
+        ...(productImages ? { images: productImages } : {}),
+      },
+    },
+  } satisfies Stripe.Checkout.SessionCreateParams.LineItem;
+  const cardLineItemWithoutImage = {
+    quantity: 1,
+    price_data: {
+      currency: "usd",
+      unit_amount: unitAmount,
+      product_data: {
+        name: title,
+      },
+    },
+  } satisfies Stripe.Checkout.SessionCreateParams.LineItem;
+  const shippingLineItem = shippingUnitAmount > 0
+    ? ({
         quantity: 1,
         price_data: {
           currency: "usd",
-          unit_amount: unitAmount,
+          unit_amount: shippingUnitAmount,
           product_data: {
-            name: title,
-            ...(productImages ? { images: productImages } : {}),
+            name: shippingLabel,
           },
         },
-      },
-    ],
-    success_url: getAbsoluteCheckoutUrl(resolvedSuccessPath),
-    cancel_url: getAbsoluteCheckoutUrl(resolvedCancelPath),
+      } satisfies Stripe.Checkout.SessionCreateParams.LineItem)
+    : null;
+  const lineItems = shippingLineItem
+    ? [cardLineItem, shippingLineItem]
+    : [cardLineItem];
+  const lineItemsWithoutImage = shippingLineItem
+    ? [cardLineItemWithoutImage, shippingLineItem]
+    : [cardLineItemWithoutImage];
+
+  const sessionParams = {
+    mode: "payment",
+    client_reference_id: buyerId || undefined,
+    line_items: lineItems,
+    success_url: successUrl,
+    cancel_url: cancelUrl,
     metadata,
     payment_intent_data: {
       metadata,
     },
+  } satisfies Stripe.Checkout.SessionCreateParams;
+
+  logTransactionCheckoutDiagnostic("stripe_checkout.payload", {
+    transactionType,
+    stripeCheckoutType: metadata.type,
+    listingId,
+    sellerId,
+    buyerId: buyerId || null,
+    amount,
+    unitAmount,
+    shippingAmount,
+    shippingUnitAmount,
+    shippingLabel,
+    title,
+    successUrl,
+    cancelUrl,
+    rawImageUrl: imageUrl || null,
+    imageUrlSent: productImages?.[0] || null,
+    imageOmittedReason: imageUrl && !productImages ? "invalid_or_non_public_url" : null,
   });
+
+  let session: Stripe.Checkout.Session;
+
+  try {
+    session = await stripe.checkout.sessions.create(sessionParams);
+  } catch (error) {
+    const diagnostic = getStripeErrorDiagnostic(error);
+
+    console.error("Stripe checkout session create error:", {
+      transactionType,
+      stripeCheckoutType: metadata.type,
+      listingId,
+      sellerId,
+      buyerId: buyerId || null,
+      amount,
+      shippingAmount,
+      imageUrlSent: productImages?.[0] || null,
+      ...diagnostic,
+    });
+
+    if (!productImages || !isLikelyStripeImageError(error)) {
+      throw error;
+    }
+
+    const retrySessionParams = {
+      ...sessionParams,
+      line_items: lineItemsWithoutImage,
+    } satisfies Stripe.Checkout.SessionCreateParams;
+
+    logTransactionCheckoutDiagnostic("stripe_checkout.retry_without_image", {
+      transactionType,
+      stripeCheckoutType: metadata.type,
+      listingId,
+      sellerId,
+      buyerId: buyerId || null,
+      amount,
+      shippingAmount,
+      omittedImageUrl: productImages[0],
+      stripeErrorType: diagnostic.type,
+      stripeErrorCode: diagnostic.code,
+      stripeErrorParam: diagnostic.param,
+      stripeErrorMessage: diagnostic.message,
+    });
+
+    session = await stripe.checkout.sessions.create(retrySessionParams);
+  }
 
   console.info("Unified transaction checkout session created:", {
     stripeSessionId: session.id,
@@ -215,6 +385,8 @@ export async function createTransactionCheckoutSession({
     sellerId,
     buyerId: buyerId || null,
     amount,
+    shippingAmount,
+    imageUrlSent: productImages?.[0] || null,
   });
 
   return {

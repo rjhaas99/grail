@@ -13,6 +13,7 @@ import {
   getNextProgressionRank,
   type ProgressionSummary,
 } from "../lib/progression";
+import { getShippingProfile } from "../lib/shippingProfiles";
 
 type OfferStatus = "Pending" | "Accepted" | "Countered" | "Declined" | "Withdrawn" | "Expired" | "Completed";
 type OrderStatus = "Processing" | "Shipped" | "Paid";
@@ -102,6 +103,10 @@ type DashboardOrder = {
   carrier: string;
   shippingStatus: string;
   shippingService: string;
+  shippingProfileId: string;
+  shippingProfileLabel: string;
+  shippingTrackingSupported: boolean;
+  shippingLabelRequired: boolean;
   labelUrl?: string | null;
   labelCost: number;
   shippoEta?: string | null;
@@ -130,6 +135,10 @@ type SupabaseOrderRow = {
   carrier?: string | null;
   shipping_status?: string | null;
   shipping_service?: string | null;
+  shipping_profile_id?: string | null;
+  shipping_profile_label?: string | null;
+  shipping_tracking_supported?: boolean | null;
+  shipping_label_required?: boolean | null;
   label_url?: string | null;
   label_cost?: number | string | null;
   shippo_eta?: string | null;
@@ -246,6 +255,10 @@ const initialOrders = mockSellerDashboardData.recentOrders.map((order) => ({
   carrier: "",
   shippingStatus: "pending",
   shippingService: "",
+  shippingProfileId: "usps_ground_advantage",
+  shippingProfileLabel: "USPS Ground Advantage",
+  shippingTrackingSupported: true,
+  shippingLabelRequired: true,
   labelUrl: null,
   labelCost: 0,
   shippoEta: null,
@@ -406,6 +419,14 @@ function getInspectionStatus(order: DashboardOrder) {
     return "Dispute opened. Payout blocked.";
   }
 
+  if (!order.shippingLabelRequired && order.shippingStatus === "mailed") {
+    return "Mailed by Plain White Envelope. No tracking is included.";
+  }
+
+  if (!order.shippingLabelRequired && order.fulfillmentStatus === "pending") {
+    return "Paid. Mark the Plain White Envelope mailed when it is sent.";
+  }
+
   if (!order.labelUrl) {
     return "Paid. Purchase a shipping label to ship this order.";
   }
@@ -466,11 +487,19 @@ function getSellerOrderStatus(order: DashboardOrder) {
     return "Ready to Print Label";
   }
 
+  if (order.shippingStatus === "mailed") {
+    return "Shipped";
+  }
+
   if (order.fulfillmentStatus === "shipped") {
     return "Shipped";
   }
 
-  return order.labelUrl ? "Ready to Print Label" : "Ready to Ship";
+  return order.labelUrl
+    ? "Ready to Print Label"
+    : order.shippingLabelRequired
+      ? "Ready to Ship"
+      : "Paid";
 }
 
 function getSellerPayoutLabel(order: DashboardOrder) {
@@ -843,6 +872,7 @@ export default function SellerDashboardPage() {
             const cardPrice = Number(order.card_price || 0);
             const sellerFee = Number(order.platform_fee || 0);
             const paymentProcessingFee = Number(order.processing_fee || 0);
+            const shippingProfile = getShippingProfile(order.shipping_profile_id);
 
             return {
               id: order.id,
@@ -870,6 +900,14 @@ export default function SellerDashboardPage() {
               carrier: order.carrier || "",
               shippingStatus: order.shipping_status || "pending",
               shippingService: order.shipping_service || "",
+              shippingProfileId: shippingProfile.id,
+              shippingProfileLabel: order.shipping_profile_label || shippingProfile.label,
+              shippingTrackingSupported:
+                order.shipping_tracking_supported ??
+                shippingProfile.capabilities.trackingSupported,
+              shippingLabelRequired:
+                order.shipping_label_required ??
+                shippingProfile.capabilities.labelGenerationSupported,
               labelUrl: order.label_url,
               labelCost: Number(order.label_cost || 0),
               shippoEta: order.shippo_eta,
@@ -1259,6 +1297,7 @@ export default function SellerDashboardPage() {
         order?: {
           carrier?: string | null;
           shipping_service?: string | null;
+          shipping_profile_label?: string | null;
           tracking_number?: string | null;
           label_url?: string | null;
           label_cost?: number | string | null;
@@ -1271,6 +1310,7 @@ export default function SellerDashboardPage() {
         shipping?: {
           carrier?: string;
           service?: string;
+          shippingProfile?: string;
           trackingNumber?: string;
           labelUrl?: string;
           labelCost?: number;
@@ -1289,6 +1329,12 @@ export default function SellerDashboardPage() {
       updateLocalOrder(shippingLabelOrderId, {
         carrier: payload.order.carrier || payload.shipping?.carrier || "USPS",
         shippingService: payload.order.shipping_service || payload.shipping?.service || "USPS Ground Advantage",
+        shippingProfileLabel:
+          payload.order.shipping_profile_label ||
+          payload.shipping?.shippingProfile ||
+          payload.order.shipping_service ||
+          payload.shipping?.service ||
+          "USPS Ground Advantage",
         trackingNumber: payload.order.tracking_number || payload.shipping?.trackingNumber || "",
         labelUrl: payload.order.label_url || payload.shipping?.labelUrl || null,
         labelCost: Number(payload.order.label_cost || payload.shipping?.labelCost || 0),
@@ -1311,6 +1357,78 @@ export default function SellerDashboardPage() {
       console.error("Seller dashboard Shippo label error:", error);
       setDashboardMessage(
         error instanceof Error ? error.message : "Shipping label could not be purchased.",
+      );
+    } finally {
+      setUpdatingOrderId("");
+    }
+  }
+
+  async function markOrderMailed(order: DashboardOrder) {
+    const accessToken = await getAccessToken();
+
+    if (!accessToken) {
+      setDashboardMessage("Sign in to update shipping.");
+      return;
+    }
+
+    setUpdatingOrderId(order.id);
+    setDashboardMessage("Marking envelope mailed...");
+
+    try {
+      const response = await fetch("/api/orders/mark-mailed", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        order?: {
+          carrier?: string | null;
+          shipping_service?: string | null;
+          shipping_profile_label?: string | null;
+          tracking_number?: string | null;
+          label_url?: string | null;
+          label_cost?: number | string | null;
+          shipping_status?: string | null;
+          fulfillment_status?: string | null;
+          seller_payout_amount?: number | string | null;
+        };
+      };
+
+      if (!response.ok || !payload.order) {
+        throw new Error(payload.error || "Order could not be marked mailed.");
+      }
+
+      updateLocalOrder(order.id, {
+        carrier: payload.order.carrier || "USPS",
+        shippingService:
+          payload.order.shipping_service ||
+          payload.order.shipping_profile_label ||
+          order.shippingProfileLabel,
+        shippingProfileLabel:
+          payload.order.shipping_profile_label || order.shippingProfileLabel,
+        trackingNumber: payload.order.tracking_number || "",
+        labelUrl: payload.order.label_url || null,
+        labelCost: Number(payload.order.label_cost || 0),
+        shippingStatus: payload.order.shipping_status || "mailed",
+        fulfillmentStatus: payload.order.fulfillment_status || "shipped",
+        sellerPayoutAmount: Number(
+          payload.order.seller_payout_amount || order.sellerPayoutAmount,
+        ),
+        payoutDisplay:
+          Number(payload.order.seller_payout_amount || order.sellerPayoutAmount) > 0
+            ? formatCurrency(Number(payload.order.seller_payout_amount || order.sellerPayoutAmount))
+            : order.payoutDisplay,
+        transferStatus: "not_ready",
+      });
+      setDashboardMessage("Envelope marked mailed. Buyer notification sent.");
+    } catch (error) {
+      console.error("Seller dashboard mark mailed error:", error);
+      setDashboardMessage(
+        error instanceof Error ? error.message : "Order could not be marked mailed.",
       );
     } finally {
       setUpdatingOrderId("");
@@ -1519,7 +1637,7 @@ export default function SellerDashboardPage() {
                       <span>Active inventory</span>
                       <span>Fixed price</span>
                       <div className="row-actions">
-                        <Link href={`/edit-listing/${listing.id}`}>Edit</Link>
+                        <Link href={`/list?edit=${listing.id}`}>Edit</Link>
                         <Link href={listing.href}>View</Link>
                       </div>
                     </article>
@@ -1670,6 +1788,7 @@ export default function SellerDashboardPage() {
                   const blockReason = getPayoutBlockReason(order);
                   const hasTracking = Boolean(order.carrier && order.trackingNumber);
                   const hasShippoLabel = Boolean(order.labelUrl);
+                  const isPwe = order.shippingProfileId === "plain_white_envelope";
                   const trackingUrl = getTrackingUrl(order);
                   const simpleStatus = getSellerOrderStatus(order);
                   const payoutLabel = getSellerPayoutLabel(order);
@@ -1682,8 +1801,15 @@ export default function SellerDashboardPage() {
                   const showEvidenceUpload =
                     isExpanded && canUploadEvidence && !collapsedEvidenceUploads[order.id];
                   const canPurchaseLabel =
+                    order.shippingLabelRequired &&
                     order.fulfillmentStatus === "pending" &&
                     !hasShippoLabel &&
+                    order.refundStatus !== "refunded" &&
+                    order.transferStatus !== "paid";
+                  const canMarkMailed =
+                    !order.shippingLabelRequired &&
+                    order.fulfillmentStatus === "pending" &&
+                    order.shippingStatus !== "mailed" &&
                     order.refundStatus !== "refunded" &&
                     order.transferStatus !== "paid";
 
@@ -1703,6 +1829,7 @@ export default function SellerDashboardPage() {
                           <strong>{order.card}</strong>
                           <span>Order {order.id}</span>
                           <span>Buyer {order.buyer}</span>
+                          {isPwe ? <span>PWE · No tracking</span> : null}
                         </div>
                       </div>
                       <div>
@@ -1751,8 +1878,21 @@ export default function SellerDashboardPage() {
                             Purchase Shipping Label
                           </button>
                         ) : null}
-                        {order.fulfillmentStatus === "pending" && !hasTracking && !canPurchaseLabel ? (
-                          <span className="payout-reason">Purchase a shipping label to continue</span>
+                        {canMarkMailed ? (
+                          <button
+                            type="button"
+                            disabled={updatingOrderId === order.id}
+                            onClick={() => markOrderMailed(order)}
+                          >
+                            Mark Mailed
+                          </button>
+                        ) : null}
+                        {order.fulfillmentStatus === "pending" && !hasTracking && !canPurchaseLabel && !canMarkMailed ? (
+                          <span className="payout-reason">
+                            {order.shippingLabelRequired
+                              ? "Purchase a shipping label to continue"
+                              : "Mark the envelope mailed to continue"}
+                          </span>
                         ) : null}
                         {showPayoutReason ? (
                           <span className="payout-reason">{blockReason}</span>
@@ -1760,8 +1900,13 @@ export default function SellerDashboardPage() {
                       </div>
                       {isExpanded ? (
                         <div className="seller-order-details">
+                          <span>Shipping method {order.shippingProfileLabel || order.shippingService || "Pending"}</span>
                           <span>Carrier {order.carrier || "Pending"}</span>
-                          <span>Tracking {order.trackingNumber || "Pending"}</span>
+                          <span>
+                            Tracking{" "}
+                            {order.trackingNumber ||
+                              (order.shippingTrackingSupported ? "Pending" : "Not included")}
+                          </span>
                           <span>Shipment {formatShippingStatus(order.shippingStatus)}</span>
                           <span>Service {order.shippingService || "Pending"}</span>
                           <span>Estimated delivery {formatDate(order.shippoEta)}</span>
@@ -1783,7 +1928,12 @@ export default function SellerDashboardPage() {
                           <span>Sale price {order.cardPrice > 0 ? formatCurrency(order.cardPrice) : order.total}</span>
                           <span>Seller fee {formatCurrency(order.sellerFee)}</span>
                           <span>Payment processing {formatCurrency(order.paymentProcessingFee)}</span>
-                          <span>Shipping label {formatCurrency(order.labelCost)}</span>
+                          <span>
+                            Shipping label{" "}
+                            {order.shippingLabelRequired
+                              ? formatCurrency(order.labelCost)
+                              : "Not required"}
+                          </span>
                           <span>Net payout {formatCurrency(order.sellerPayoutAmount)}</span>
                           {order.disputeReason ? (
                             <span>Dispute reason: {order.disputeReason}</span>

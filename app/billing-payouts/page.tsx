@@ -118,7 +118,9 @@ type MoneyCenterData = {
     providerConnection: string;
     easyPostStatus: string;
     labelsPurchased: number | null;
+    shippingCollected: number | null;
     totalShippingCost: number | null;
+    lastShippingMethod: string | null;
     lastLabelPurchased: string | null;
     note: string;
   };
@@ -881,8 +883,20 @@ export default function BillingPayoutsPage() {
                   }
                 />
                 <InfoCard
+                  label="Shipping Collected"
+                  value={isLoading ? "Loading..." : formatCurrency(data?.shipping.shippingCollected)}
+                />
+                <InfoCard
                   label="Total Shipping Cost"
                   value={isLoading ? "Loading..." : formatCurrency(data?.shipping.totalShippingCost)}
+                />
+                <InfoCard
+                  label="Last Shipping Method"
+                  value={
+                    isLoading
+                      ? "Loading..."
+                      : data?.shipping.lastShippingMethod || "No shipments yet"
+                  }
                 />
                 <InfoCard
                   label="Last Label Purchased"

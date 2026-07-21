@@ -11,10 +11,11 @@ import {
   getShippoWebhookUrl,
   mapShippoTrackingStatus,
   purchaseShippoLabel,
-  selectUspsGroundAdvantageRate,
+  selectShippoRateByService,
   type ShippoAddress,
   type ShippoParcel,
 } from "../../../lib/shippo";
+import { getShippingProfile } from "../../../lib/shippingProfiles";
 import { createSystemNotifications } from "../../../lib/serverNotifications";
 
 export const runtime = "nodejs";
@@ -45,6 +46,7 @@ type OrderRow = {
   label_url?: string | null;
   label_cost?: number | string | null;
   shippo_transaction_id?: string | null;
+  shipping_profile_id?: string | null;
 };
 
 function getRequiredEnv(name: string) {
@@ -188,7 +190,7 @@ export async function POST(request: Request) {
   const { data, error } = await serviceSupabase
     .from("orders")
     .select(
-      "id, listing_id, buyer_id, seller_id, status, fulfillment_status, transfer_status, refund_status, dispute_status, carrier, tracking_number, seller_payout_amount, card_price, platform_fee, processing_fee, label_url, label_cost, shippo_transaction_id",
+      "id, listing_id, buyer_id, seller_id, status, fulfillment_status, transfer_status, refund_status, dispute_status, carrier, tracking_number, seller_payout_amount, card_price, platform_fee, processing_fee, label_url, label_cost, shippo_transaction_id, shipping_profile_id",
     )
     .eq("id", orderId)
     .maybeSingle();
@@ -228,6 +230,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "A shipping label already exists for this order." }, { status: 400 });
   }
 
+  const shippingProfile = getShippingProfile(order.shipping_profile_id);
+
+  if (!shippingProfile.capabilities.labelGenerationSupported) {
+    return NextResponse.json(
+      { error: "This order uses Plain White Envelope. Mark it mailed instead." },
+      { status: 400 },
+    );
+  }
+
   const metadata = buildShippoMetadata(order.id);
 
   try {
@@ -247,7 +258,10 @@ export async function POST(request: Request) {
       parcel,
       metadata,
     });
-    const selectedRate = selectUspsGroundAdvantageRate(shipment.rates);
+    const selectedRate = selectShippoRateByService(
+      shipment.rates,
+      shippingProfile.shippoServiceToken || "usps_ground_advantage",
+    );
     const transaction = await purchaseShippoLabel({
       rateObjectId: selectedRate.object_id,
       metadata,
@@ -273,6 +287,7 @@ export async function POST(request: Request) {
       .update({
         carrier,
         shipping_service: service,
+        shipping_profile_label: shippingProfile.label,
         tracking_number: trackingNumber,
         label_url: transaction.label_url,
         label_cost: labelCost,
@@ -299,7 +314,7 @@ export async function POST(request: Request) {
       .eq("id", order.id)
       .eq("seller_id", user.id)
       .select(
-        "id, carrier, shipping_service, tracking_number, label_url, label_cost, shipping_status, fulfillment_status, shippo_tracking_url, shippo_eta, seller_payout_amount",
+        "id, carrier, shipping_service, shipping_profile_label, tracking_number, label_url, label_cost, shipping_status, fulfillment_status, shippo_tracking_url, shippo_eta, seller_payout_amount",
       )
       .maybeSingle();
 
@@ -334,6 +349,7 @@ export async function POST(request: Request) {
       shipping: {
         carrier,
         service,
+        shippingProfile: shippingProfile.label,
         trackingNumber,
         labelUrl: transaction.label_url,
         labelCost,

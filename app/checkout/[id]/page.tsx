@@ -6,6 +6,11 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
+import {
+  getShippingAmountForProfile,
+  getShippingProfile,
+  type ShippingProfileId,
+} from "../../lib/shippingProfiles";
 
 type SupabaseCheckoutListing = {
   id: string;
@@ -22,6 +27,7 @@ type SupabaseCheckoutListing = {
   condition: string | null;
   price: number | null;
   status: string | null;
+  shipping_profile_id?: string | null;
   listing_images?: Array<{
     image_url: string | null;
     image_type: string | null;
@@ -46,6 +52,12 @@ type CheckoutCard = {
   marketValue: number;
   imageUrl?: string | null;
   status: string | null;
+  shippingProfileId: ShippingProfileId;
+};
+
+type CheckoutShippingQuote = {
+  shippingAmount: number;
+  profile: ReturnType<typeof getShippingProfile>;
 };
 
 const checkoutLegalLinks = [
@@ -59,7 +71,7 @@ function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 
@@ -145,6 +157,10 @@ export default function CheckoutPage() {
   const [isStartingStripeCheckout, setIsStartingStripeCheckout] = useState(false);
   const [stripeError, setStripeError] = useState("");
   const [stripeNotice, setStripeNotice] = useState("");
+  const [shippingQuote, setShippingQuote] = useState<CheckoutShippingQuote | null>(null);
+  const [isShippingQuoteLoading, setIsShippingQuoteLoading] = useState(false);
+  const [shippingQuoteError, setShippingQuoteError] = useState("");
+  const [pweAcknowledged, setPweAcknowledged] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -207,6 +223,7 @@ export default function CheckoutPage() {
               condition,
               price,
               status,
+              shipping_profile_id,
               listing_images (
                 image_url,
                 image_type
@@ -229,6 +246,7 @@ export default function CheckoutPage() {
 
         const listing = data as SupabaseCheckoutListing;
         let profile: ProfileRow | null = null;
+        const shippingProfile = getShippingProfile(listing.shipping_profile_id);
 
         if (listing.seller_id) {
           const { data: profileData, error: profileError } = await supabase
@@ -257,7 +275,51 @@ export default function CheckoutPage() {
             marketValue: 0,
             imageUrl: getListingFrontImage(listing),
             status: listing.status,
+            shippingProfileId: shippingProfile.id,
           });
+        }
+
+        setIsShippingQuoteLoading(true);
+        setShippingQuoteError("");
+        setShippingQuote(null);
+        setPweAcknowledged(false);
+
+        try {
+          const quoteResponse = await fetch("/api/shipping/quote", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ listingId: listing.id }),
+          });
+          const quotePayload = (await quoteResponse.json()) as
+            | CheckoutShippingQuote
+            | { error?: string };
+
+          if (!quoteResponse.ok || "error" in quotePayload) {
+            throw new Error(
+              "error" in quotePayload && quotePayload.error
+                ? quotePayload.error
+                : "Shipping quote could not be loaded.",
+            );
+          }
+
+          if (isMounted) {
+            setShippingQuote(quotePayload as CheckoutShippingQuote);
+          }
+        } catch (quoteError) {
+          console.error("Checkout shipping quote error:", quoteError);
+          if (isMounted) {
+            setShippingQuoteError(
+              quoteError instanceof Error
+                ? quoteError.message
+                : "Shipping quote could not be loaded.",
+            );
+          }
+        } finally {
+          if (isMounted) {
+            setIsShippingQuoteLoading(false);
+          }
         }
       } catch (error) {
         console.error("Checkout listing fetch error:", error);
@@ -297,6 +359,18 @@ export default function CheckoutPage() {
       return;
     }
 
+    const activeShippingProfile = shippingQuote?.profile || getShippingProfile(card.shippingProfileId);
+
+    if (shippingQuoteError) {
+      setStripeError(shippingQuoteError);
+      return;
+    }
+
+    if (activeShippingProfile.capabilities.buyerAcknowledgementRequired && !pweAcknowledged) {
+      setStripeError("Acknowledge Plain White Envelope shipping before checkout.");
+      return;
+    }
+
     setIsStartingStripeCheckout(true);
 
     try {
@@ -311,7 +385,10 @@ export default function CheckoutPage() {
             ? { Authorization: `Bearer ${session.access_token}` }
             : {}),
         },
-        body: JSON.stringify({ listingId: card.id }),
+        body: JSON.stringify({
+          listingId: card.id,
+          pweAcknowledged,
+        }),
       });
       const payload = (await response.json()) as {
         url?: string;
@@ -359,9 +436,13 @@ export default function CheckoutPage() {
     );
   }
 
-  const shipping = 14;
-  const estimatedTax = Math.round(card.price * 0.07);
+  const activeShippingProfile = shippingQuote?.profile || getShippingProfile(card.shippingProfileId);
+  const shipping = shippingQuote?.shippingAmount ??
+    getShippingAmountForProfile(activeShippingProfile.id);
+  const estimatedTax = 0;
   const total = card.price + shipping + estimatedTax;
+  const requiresPweAcknowledgement =
+    activeShippingProfile.capabilities.buyerAcknowledgementRequired;
   const isOwnerCheckout = Boolean(currentUserId) && card.sellerId === currentUserId;
   const isCollectionCheckout = card.status === "collection";
   const showStripeCheckoutButton =
@@ -370,7 +451,9 @@ export default function CheckoutPage() {
     process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
   );
   const canAttemptStripeCheckout =
-    showStripeCheckoutButton && isStripePublicConfigured;
+    showStripeCheckoutButton &&
+    isStripePublicConfigured &&
+    !shippingQuoteError;
   const showUnavailableCheckoutNotice =
     !canAttemptStripeCheckout && showStripeCheckoutButton && !isStripeSuccess;
 
@@ -443,6 +526,15 @@ export default function CheckoutPage() {
             <section className="panel form-panel">
               <h2>Shipping Address</h2>
               <p>Shipping details are collected securely during Stripe checkout.</p>
+              <div className="shipping-method-note">
+                <strong>{activeShippingProfile.label}</strong>
+                <p>{activeShippingProfile.buyerDescription}</p>
+                <ul>
+                  {activeShippingProfile.checkoutBullets.map((bullet) => (
+                    <li key={bullet}>{bullet}</li>
+                  ))}
+                </ul>
+              </div>
             </section>
 
             <section className="panel form-panel">
@@ -458,7 +550,11 @@ export default function CheckoutPage() {
               <ul>
                 <li>Secure payments through Stripe</li>
                 <li>Protected by GRAIL Buyer Protection</li>
-                <li>Tracked shipping after purchase</li>
+                <li>
+                  {activeShippingProfile.capabilities.trackingSupported
+                    ? "Tracked shipping after purchase"
+                    : "Plain White Envelope does not include tracking"}
+                </li>
                 <li>Inspection window after delivery</li>
               </ul>
             </section>
@@ -467,7 +563,10 @@ export default function CheckoutPage() {
           <aside className="summary-panel panel">
             <h2>Order Summary</h2>
             <SummaryRow label="Item price" value={formatCurrency(card.price)} />
-            <SummaryRow label="Shipping" value={formatCurrency(shipping)} />
+            <SummaryRow
+              label={`Shipping (${activeShippingProfile.shortLabel})`}
+              value={isShippingQuoteLoading ? "Loading..." : formatCurrency(shipping)}
+            />
             <SummaryRow label="Estimated tax" value={formatCurrency(estimatedTax)} />
             <div className="summary-total">
               <span>Total</span>
@@ -514,7 +613,19 @@ export default function CheckoutPage() {
             {stripeNotice ? (
               <p className="stripe-note">{stripeNotice}</p>
             ) : null}
+            {shippingQuoteError ? <p className="stripe-error">{shippingQuoteError}</p> : null}
             {stripeError ? <p className="stripe-error">{stripeError}</p> : null}
+
+            {requiresPweAcknowledgement && !isStripeSuccess && !isCollectionCheckout ? (
+              <label className="pwe-acknowledgement">
+                <input
+                  type="checkbox"
+                  checked={pweAcknowledged}
+                  onChange={(event) => setPweAcknowledged(event.target.checked)}
+                />
+                <span>I understand this shipment will not include tracking.</span>
+              </label>
+            ) : null}
 
             <div className="checkout-legal">
               <p>
@@ -534,7 +645,11 @@ export default function CheckoutPage() {
               <button
                 type="button"
                 className="place-order"
-                disabled={isStartingStripeCheckout}
+                disabled={
+                  isStartingStripeCheckout ||
+                  isShippingQuoteLoading ||
+                  (requiresPweAcknowledgement && !pweAcknowledged)
+                }
                 onClick={startStripeCheckout}
               >
                 {isStartingStripeCheckout
@@ -691,6 +806,35 @@ const pageStyles = `
     padding: 16px;
   }
 
+  .shipping-method-note {
+    margin-top: 12px;
+    border: 1px solid rgba(201,205,211,0.16);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.045);
+    padding: 12px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .shipping-method-note strong {
+    color: #fff;
+    font-size: 14px;
+    font-weight: 900;
+  }
+
+  .shipping-method-note p {
+    margin: 0;
+  }
+
+  .shipping-method-note ul {
+    margin: 0;
+    padding-left: 18px;
+    color: #C9CDD3;
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 800;
+  }
+
   .protection-panel ul {
     margin: 14px 0 0;
     padding: 0;
@@ -801,6 +945,24 @@ const pageStyles = `
     min-height: 46px;
     background: #E7DED0;
     color: #111;
+  }
+
+  .pwe-acknowledgement {
+    border: 1px solid rgba(231,222,208,0.22);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    padding: 12px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    color: #E7DED0;
+    font-size: 12px;
+    line-height: 17px;
+    font-weight: 900;
+  }
+
+  .pwe-acknowledgement input {
+    margin-top: 2px;
   }
 
   .place-order:disabled {

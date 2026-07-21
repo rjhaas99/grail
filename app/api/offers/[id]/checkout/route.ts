@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createTransactionCheckoutSession } from "../../../../lib/transactionCheckout";
+import { getCheckoutShippingQuote } from "../../../../lib/shippingProfiles.server";
 import {
   createServiceSupabaseClient,
   getCurrentUser,
@@ -20,16 +21,21 @@ type OfferRow = {
   status: string | null;
 };
 
+type CheckoutRequestBody = {
+  pweAcknowledged?: boolean;
+};
+
 type ListingRow = {
   id: string;
   seller_id: string | null;
   title: string | null;
+  price?: number | null;
   status: string | null;
   sale_format?: string | null;
+  shipping_profile_id?: string | null;
   listing_images?: Array<{
     image_url: string | null;
     image_type: string | null;
-    display_order?: number | null;
   }> | null;
 };
 
@@ -50,10 +56,17 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Sign in to pay for this offer." }, { status: 401 });
   }
 
+  console.info("Checkout diagnostic:", {
+    event: "accepted_offer.route_entered",
+    offerId: offerId || null,
+    authenticatedUserId: user.id,
+  });
+
   if (!offerId) {
     return NextResponse.json({ error: "Offer is required." }, { status: 400 });
   }
 
+  const body = (await request.json().catch(() => ({}))) as CheckoutRequestBody;
   const supabase = createServiceSupabaseClient();
   const { data: offerData, error: offerError } = await supabase
     .from("offers")
@@ -100,12 +113,13 @@ export async function POST(request: Request, context: RouteContext) {
         id,
         seller_id,
         title,
+        price,
         status,
         sale_format,
+        shipping_profile_id,
         listing_images (
           image_url,
-          image_type,
-          display_order
+          image_type
         )
       `,
     )
@@ -143,19 +157,61 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   try {
+    const imageUrl = getListingFrontImage(listing);
+    const shippingQuote = await getCheckoutShippingQuote({
+      supabase,
+      profileId: listing.shipping_profile_id,
+      listingValue: amount,
+    });
+
+    if (!shippingQuote.ok) {
+      return NextResponse.json({ error: shippingQuote.error }, { status: 400 });
+    }
+
+    if (
+      shippingQuote.profile.capabilities.buyerAcknowledgementRequired &&
+      !body.pweAcknowledged
+    ) {
+      return NextResponse.json(
+        { error: "Acknowledge Plain White Envelope shipping before checkout." },
+        { status: 400 },
+      );
+    }
+
+    console.info("Checkout diagnostic:", {
+      event: "accepted_offer.checkout_payload",
+      offerId: offer.id,
+      listingId: listing.id,
+      sellerId: offer.seller_id,
+      authenticatedUserId: user.id,
+      amount,
+      shippingAmount: shippingQuote.shippingAmount,
+      shippingProfileId: shippingQuote.profile.id,
+      title: listing.title || "GRAIL Accepted Offer",
+      imageUrl: imageUrl || null,
+    });
+
     const checkout = await createTransactionCheckoutSession({
       transactionType: "accepted_offer",
       listingId: listing.id,
       sellerId: offer.seller_id,
       buyerId: user.id,
       amount,
+      shippingAmount: shippingQuote.shippingAmount,
+      shippingLabel: `Shipping — ${shippingQuote.profile.label}`,
       title: listing.title || "GRAIL Accepted Offer",
-      imageUrl: getListingFrontImage(listing),
+      imageUrl,
       successPath: `/orders?offer_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancelPath: "/offers?checkout=canceled",
       extraMetadata: {
         offerId: offer.id,
         transactionId: `offer:${offer.id}`,
+        shippingAmount: shippingQuote.shippingAmount,
+        shippingProfileId: shippingQuote.profile.id,
+        shippingProfileLabel: shippingQuote.profile.label,
+        shippingTrackingSupported: shippingQuote.profile.capabilities.trackingSupported,
+        shippingLabelRequired: shippingQuote.profile.capabilities.labelGenerationSupported,
+        shippingBuyerAcknowledged: Boolean(body.pweAcknowledged),
       },
     });
 
@@ -169,6 +225,13 @@ export async function POST(request: Request, context: RouteContext) {
       listingId: listing.id,
       buyerId: user.id,
       amount,
+      stackLocation:
+        error instanceof Error
+          ? error.stack
+              ?.split("\n")
+              .map((line) => line.trim())
+              .find((line) => line.startsWith("at ")) || null
+          : null,
     });
     return NextResponse.json(
       { error: "Offer checkout could not be started.", detail: message },

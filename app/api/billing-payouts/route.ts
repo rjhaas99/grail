@@ -43,6 +43,8 @@ type OrderRow = {
   processing_fee?: number | string | null;
   seller_payout_amount: number | string | null;
   shipping_amount?: number | string | null;
+  shipping_profile_id?: string | null;
+  shipping_profile_label?: string | null;
   label_cost?: number | string | null;
   label_url?: string | null;
   shippo_transaction_id?: string | null;
@@ -108,7 +110,9 @@ type ShippingSection = {
   providerConnection: string;
   easyPostStatus: string;
   labelsPurchased: number | null;
+  shippingCollected: number | null;
   totalShippingCost: number | null;
+  lastShippingMethod: string | null;
   lastLabelPurchased: string | null;
   note: string;
 };
@@ -536,10 +540,9 @@ async function loadShipping({
   const shippoConfigured = Boolean(process.env.SHIPPO_API_KEY);
   const { data, error } = await supabase
     .from("orders")
-    .select("id, label_cost, label_url, shippo_transaction_id, shippo_label_purchased_at, shipped_at")
+    .select("id, shipping_amount, shipping_profile_id, shipping_profile_label, label_cost, label_url, shippo_transaction_id, shippo_label_purchased_at, shipped_at, created_at")
     .eq("seller_id", userId)
-    .or("shippo_transaction_id.not.is.null,label_url.not.is.null")
-    .order("shippo_label_purchased_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
     .limit(100);
 
   if (error) {
@@ -547,13 +550,22 @@ async function loadShipping({
   }
 
   const labelOrders = (data || []) as Array<{
+    shipping_amount?: number | string | null;
+    shipping_profile_id?: string | null;
+    shipping_profile_label?: string | null;
     label_cost?: number | string | null;
     label_url?: string | null;
     shippo_transaction_id?: string | null;
     shippo_label_purchased_at?: string | null;
     shipped_at?: string | null;
+    created_at?: string | null;
   }>;
-  const labelsPurchased = labelOrders.length;
+  const labelsPurchased = labelOrders.filter((order) =>
+    order.shippo_transaction_id || order.label_url,
+  ).length;
+  const shippingCollected = roundCurrency(
+    labelOrders.reduce((total, order) => total + toNumber(order.shipping_amount), 0),
+  );
   const totalShippingCost = roundCurrency(
     labelOrders.reduce((total, order) => total + toNumber(order.label_cost), 0),
   );
@@ -574,7 +586,10 @@ async function loadShipping({
       ? "Shippo API key configured"
       : "Shippo not connected",
     labelsPurchased,
+    shippingCollected,
     totalShippingCost,
+    lastShippingMethod: labelOrders.find((order) => order.shipping_profile_label)
+      ?.shipping_profile_label || null,
     lastLabelPurchased: lastLabel?.shippo_label_purchased_at || lastLabel?.shipped_at || null,
     note: labelsPurchased > 0
       ? "Shipping label costs are deducted from seller payouts."
@@ -940,7 +955,9 @@ export async function GET(request: Request) {
       providerConnection: "No shipping provider connected",
       easyPostStatus: "Shippo not connected",
       labelsPurchased: null,
+      shippingCollected: null,
       totalShippingCost: null,
+      lastShippingMethod: null,
       lastLabelPurchased: null,
       note: "No labels purchased yet.",
     }),

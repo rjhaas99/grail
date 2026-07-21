@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createTransactionCheckoutSession } from "../../../../lib/transactionCheckout";
+import { getCheckoutShippingQuote } from "../../../../lib/shippingProfiles.server";
 import {
   createServiceSupabaseClient,
   getCurrentUser,
@@ -10,6 +11,10 @@ export const runtime = "nodejs";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
+};
+
+type CheckoutRequestBody = {
+  pweAcknowledged?: boolean;
 };
 
 function getListingFrontImage(listing: AuctionListingRow) {
@@ -29,6 +34,13 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Sign in to pay for this auction." }, { status: 401 });
   }
 
+  console.info("Checkout diagnostic:", {
+    event: "auction.route_entered",
+    listingId: listingId || null,
+    authenticatedUserId: user.id,
+  });
+
+  const body = (await request.json().catch(() => ({}))) as CheckoutRequestBody;
   let supabase;
 
   try {
@@ -54,10 +66,10 @@ export async function POST(request: Request, context: RouteContext) {
         auction_current_bid,
         auction_winner_id,
         auction_payment_due_at,
+        shipping_profile_id,
         listing_images (
           image_url,
-          image_type,
-          display_order
+          image_type
         )
       `,
     )
@@ -117,17 +129,58 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   try {
+    const imageUrl = getListingFrontImage(listing);
+    const shippingQuote = await getCheckoutShippingQuote({
+      supabase,
+      profileId: listing.shipping_profile_id,
+      listingValue: winningBid,
+    });
+
+    if (!shippingQuote.ok) {
+      return NextResponse.json({ error: shippingQuote.error }, { status: 400 });
+    }
+
+    if (
+      shippingQuote.profile.capabilities.buyerAcknowledgementRequired &&
+      !body.pweAcknowledged
+    ) {
+      return NextResponse.json(
+        { error: "Acknowledge Plain White Envelope shipping before checkout." },
+        { status: 400 },
+      );
+    }
+
+    console.info("Checkout diagnostic:", {
+      event: "auction.checkout_payload",
+      listingId,
+      sellerId: listing.seller_id,
+      authenticatedUserId: user.id,
+      amount: winningBid,
+      shippingAmount: shippingQuote.shippingAmount,
+      shippingProfileId: shippingQuote.profile.id,
+      title: listing.title || "GRAIL Auction",
+      imageUrl: imageUrl || null,
+    });
+
     const checkout = await createTransactionCheckoutSession({
       transactionType: "auction",
       listingId,
       sellerId: listing.seller_id,
       buyerId: user.id,
       amount: winningBid,
+      shippingAmount: shippingQuote.shippingAmount,
+      shippingLabel: `Shipping — ${shippingQuote.profile.label}`,
       title: listing.title || "GRAIL Auction",
-      imageUrl: getListingFrontImage(listing),
+      imageUrl,
       cancelPath: `/cards/${listingId}?auction_checkout=canceled`,
       extraMetadata: {
         auctionId: listingId,
+        shippingAmount: shippingQuote.shippingAmount,
+        shippingProfileId: shippingQuote.profile.id,
+        shippingProfileLabel: shippingQuote.profile.label,
+        shippingTrackingSupported: shippingQuote.profile.capabilities.trackingSupported,
+        shippingLabelRequired: shippingQuote.profile.capabilities.labelGenerationSupported,
+        shippingBuyerAcknowledged: Boolean(body.pweAcknowledged),
       },
     });
 
@@ -140,6 +193,13 @@ export async function POST(request: Request, context: RouteContext) {
       listingId,
       buyerId: user.id,
       winningBid,
+      stackLocation:
+        error instanceof Error
+          ? error.stack
+              ?.split("\n")
+              .map((line) => line.trim())
+              .find((line) => line.startsWith("at ")) || null
+          : null,
     });
     return NextResponse.json(
       { error: "Auction checkout could not be started.", detail: message },

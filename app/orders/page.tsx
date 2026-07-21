@@ -8,6 +8,7 @@ import CollectorMomentLayer from "../components/CollectorMomentLayer";
 import PageShell from "../components/PageShell";
 import type { CollectorMoment } from "../lib/collectorMoments";
 import { mockOrders } from "../lib/mockData";
+import { getShippingProfile } from "../lib/shippingProfiles";
 
 type SupabaseOrderRow = {
   id: string;
@@ -23,6 +24,9 @@ type SupabaseOrderRow = {
   carrier?: string | null;
   shipping_status?: string | null;
   shipping_service?: string | null;
+  shipping_profile_id?: string | null;
+  shipping_profile_label?: string | null;
+  shipping_tracking_supported?: boolean | null;
   shippo_eta?: string | null;
   shippo_tracking_url?: string | null;
   delivered_at?: string | null;
@@ -67,6 +71,9 @@ type OrderView = {
   carrier?: string;
   shippingStatus?: string;
   shippingService?: string;
+  shippingProfileId?: string;
+  shippingProfileLabel?: string;
+  shippingTrackingSupported?: boolean;
   estimatedDelivery?: string | null;
   shippoTrackingUrl?: string | null;
   deliveredAt?: string | null;
@@ -106,6 +113,9 @@ type PaymentNeededView = {
   paymentDueAt: string | null;
   href: string;
   canCompletePayment: boolean;
+  shippingProfileId?: string;
+  shippingProfileLabel?: string;
+  requiresPweAcknowledgement?: boolean;
   collectorMoment?: {
     id: string;
     occurredAt: string | null;
@@ -126,6 +136,9 @@ type BuyerTransactionResponse = {
     paymentDueAt: string | null;
     href: string;
     canCompletePayment: boolean;
+    shippingProfileId?: string;
+    shippingProfileLabel?: string;
+    requiresPweAcknowledgement?: boolean;
     collectorMoment?: {
       id: string;
       occurredAt: string | null;
@@ -355,6 +368,7 @@ export default function OrdersPage() {
   const [notice, setNotice] = useState("Demo orders");
   const [updatingOrderId, setUpdatingOrderId] = useState("");
   const [startingAuctionCheckoutId, setStartingAuctionCheckoutId] = useState("");
+  const [pweAcknowledgements, setPweAcknowledgements] = useState<Record<string, boolean>>({});
   const [disputeOrder, setDisputeOrder] = useState<OrderView | null>(null);
   const [disputeReason, setDisputeReason] = useState("");
   const [disputeNotes, setDisputeNotes] = useState("");
@@ -504,6 +518,13 @@ export default function OrdersPage() {
               carrier: order.carrier || "",
               shippingStatus: order.shipping_status || "pending",
               shippingService: order.shipping_service || "",
+              shippingProfileId: order.shipping_profile_id || undefined,
+              shippingProfileLabel:
+                order.shipping_profile_label ||
+                getShippingProfile(order.shipping_profile_id).label,
+              shippingTrackingSupported:
+                order.shipping_tracking_supported ??
+                getShippingProfile(order.shipping_profile_id).capabilities.trackingSupported,
               estimatedDelivery: order.shippo_eta,
               shippoTrackingUrl: order.shippo_tracking_url,
               deliveredAt: order.delivered_at,
@@ -588,6 +609,9 @@ export default function OrdersPage() {
             paymentDueAt: transaction.paymentDueAt,
             href: transaction.href,
             canCompletePayment: transaction.canCompletePayment,
+            shippingProfileId: transaction.shippingProfileId,
+            shippingProfileLabel: transaction.shippingProfileLabel,
+            requiresPweAcknowledgement: transaction.requiresPweAcknowledgement,
             collectorMoment: transaction.collectorMoment,
           }));
           const mappedBids = (payload.myBids || []).map((bid) => ({
@@ -724,6 +748,12 @@ export default function OrdersPage() {
       return;
     }
 
+    if (transaction.requiresPweAcknowledgement && !pweAcknowledgements[transaction.id]) {
+      setNotice("Acknowledge Plain White Envelope shipping before checkout.");
+      setStartingAuctionCheckoutId("");
+      return;
+    }
+
     try {
       const checkoutUrl = transaction.transactionType === "accepted_offer"
         ? `/api/offers/${transaction.id.replace(/^offer:/, "")}/checkout`
@@ -732,7 +762,11 @@ export default function OrdersPage() {
         method: "POST",
         headers: {
           authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          pweAcknowledged: Boolean(pweAcknowledgements[transaction.id]),
+        }),
       });
       const payload = (await response.json()) as { url?: string; error?: string };
 
@@ -760,6 +794,9 @@ export default function OrdersPage() {
       paymentDueAt: null,
       href: `/cards/${listingId}`,
       canCompletePayment: true,
+      shippingProfileId: "usps_ground_advantage",
+      shippingProfileLabel: "USPS Ground Advantage",
+      requiresPweAcknowledgement: false,
     });
   }
 
@@ -1043,6 +1080,26 @@ export default function OrdersPage() {
                     <span>{transaction.amountDisplay} due</span>
                   </div>
                   <p className="order-summary-note">{transaction.statusDetail}</p>
+                  {transaction.shippingProfileLabel ? (
+                    <p className="order-summary-note">
+                      Shipping: {transaction.shippingProfileLabel}
+                    </p>
+                  ) : null}
+                  {transaction.requiresPweAcknowledgement ? (
+                    <label className="pwe-acknowledgement">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(pweAcknowledgements[transaction.id])}
+                        onChange={(event) =>
+                          setPweAcknowledgements((items) => ({
+                            ...items,
+                            [transaction.id]: event.target.checked,
+                          }))
+                        }
+                      />
+                      <span>I understand this shipment will not include tracking.</span>
+                    </label>
+                  ) : null}
                   <strong>{transaction.amountDisplay}</strong>
                   <div className="order-actions">
                     <Link href={transaction.href}>
@@ -1132,6 +1189,7 @@ export default function OrdersPage() {
             const trackingUrl =
               order.shippoTrackingUrl || getTrackingUrl(order.carrier, order.trackingNumber);
             const simpleStatus = getSimpleOrderStatus(order);
+            const isPwe = order.shippingProfileId === "plain_white_envelope";
             const isExpanded = Boolean(expandedOrderIds[order.id]);
             const canOpenDispute =
               order.isBuyer &&
@@ -1172,6 +1230,7 @@ export default function OrdersPage() {
                       <h2>{order.cardTitle}</h2>
                       <p>{order.participantLabel}</p>
                       <p>{order.date}</p>
+                      {isPwe ? <p className="pwe-badge">PWE · No tracking</p> : null}
                     </div>
                   </div>
                 </div>
@@ -1219,6 +1278,9 @@ export default function OrdersPage() {
                 </div>
                 {isExpanded ? (
                   <div className="order-detail-panel">
+                    <span>
+                      Shipping Method: {order.shippingProfileLabel || order.shippingService || "Pending"}
+                    </span>
                     <span>{order.carrier ? `Carrier: ${order.carrier}` : "Carrier pending"}</span>
                     <span>
                       {order.shippingService
@@ -1228,7 +1290,9 @@ export default function OrdersPage() {
                     <span>
                       {order.trackingNumber
                         ? `Tracking: ${order.trackingNumber}`
-                        : "Tracking pending"}
+                        : order.shippingTrackingSupported === false
+                          ? "Tracking: Not included for this shipping method"
+                          : "Tracking pending"}
                     </span>
                     <span>Shipment: {formatShippingStatus(order.shippingStatus)}</span>
                     <span>
@@ -1629,6 +1693,34 @@ const pageStyles = `
   .order-actions button:disabled {
     cursor: wait;
     opacity: 0.6;
+  }
+
+  .pwe-acknowledgement {
+    border: 1px solid rgba(231,222,208,0.22);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    padding: 10px;
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    color: #E7DED0;
+    font-size: 12px;
+    line-height: 17px;
+    font-weight: 900;
+  }
+
+  .pwe-acknowledgement input {
+    margin-top: 2px;
+  }
+
+  .pwe-badge {
+    margin: 2px 0 0;
+    color: #E7DED0;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
 
   .status {

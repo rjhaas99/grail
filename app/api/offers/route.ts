@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createNotification } from "../../lib/notificationEngine";
+import { getShippingProfile } from "../../lib/shippingProfiles";
 import {
   createServiceSupabaseClient,
   getCurrentUser,
@@ -27,6 +28,7 @@ type ListingRow = {
   status: string | null;
   sale_format?: string | null;
   seller_id: string | null;
+  shipping_profile_id?: string | null;
 };
 
 type ProfileRow = {
@@ -206,6 +208,7 @@ function toOfferView({
   const role = offer.seller_id === currentUserId ? "seller" : "buyer";
   const amount = Number(offer.amount || 0);
   const cardTitle = listing?.title || "GRAIL Listing";
+  const shippingProfile = getShippingProfile(listing?.shipping_profile_id);
 
   return {
     id: offer.id,
@@ -244,6 +247,10 @@ function toOfferView({
     canAcceptCounter: role === "buyer" && status === "countered",
     canDeclineCounter: role === "buyer" && status === "countered",
     canCheckout: role === "buyer" && status === "accepted",
+    shippingProfileId: shippingProfile.id,
+    shippingProfileLabel: shippingProfile.label,
+    requiresPweAcknowledgement:
+      shippingProfile.capabilities.buyerAcknowledgementRequired,
   };
 }
 
@@ -288,7 +295,7 @@ export async function GET(request: Request) {
   if (listingIds.length > 0) {
     const { data: listingData, error: listingError } = await supabase
       .from("listings")
-      .select("id, title, price, status, sale_format, seller_id")
+      .select("id, title, price, status, sale_format, seller_id, shipping_profile_id")
       .in("id", listingIds);
 
     if (listingError) {
@@ -378,7 +385,7 @@ export async function POST(request: Request) {
   const supabase = createServiceSupabaseClient();
   const { data: listingData, error: listingError } = await supabase
     .from("listings")
-    .select("id, title, price, status, sale_format, seller_id")
+    .select("id, title, price, status, sale_format, seller_id, shipping_profile_id")
     .eq("id", listingId)
     .maybeSingle();
 
@@ -493,7 +500,7 @@ export async function PATCH(request: Request) {
   const currentStatus = normalizeStatus(offer.status);
   const { data: listingData, error: listingError } = await supabase
     .from("listings")
-    .select("id, title, price, status, sale_format, seller_id")
+    .select("id, title, price, status, sale_format, seller_id, shipping_profile_id")
     .eq("id", offer.listing_id || "")
     .maybeSingle();
 

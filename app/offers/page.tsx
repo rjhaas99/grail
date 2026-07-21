@@ -31,6 +31,9 @@ type OfferView = {
   canAcceptCounter: boolean;
   canDeclineCounter: boolean;
   canCheckout: boolean;
+  shippingProfileId?: string;
+  shippingProfileLabel?: string;
+  requiresPweAcknowledgement?: boolean;
 };
 
 const offerTabs: Array<{ id: OfferTab; label: string }> = [
@@ -136,6 +139,7 @@ export default function OffersPage() {
   const [counterOfferId, setCounterOfferId] = useState("");
   const [counterAmount, setCounterAmount] = useState("");
   const [busyOfferId, setBusyOfferId] = useState("");
+  const [pweAcknowledgements, setPweAcknowledgements] = useState<Record<string, boolean>>({});
 
   const loadOffers = useCallback(async () => {
     setIsLoading(true);
@@ -257,9 +261,15 @@ export default function OffersPage() {
     }
   }
 
-  async function startCheckout(offerId: string) {
-    setBusyOfferId(offerId);
+  async function startCheckout(offer: OfferView) {
+    setBusyOfferId(offer.id);
     setStatusMessage("");
+
+    if (offer.requiresPweAcknowledgement && !pweAcknowledgements[offer.id]) {
+      setStatusMessage("Acknowledge Plain White Envelope shipping before checkout.");
+      setBusyOfferId("");
+      return;
+    }
 
     const {
       data: { session },
@@ -272,11 +282,15 @@ export default function OffersPage() {
     }
 
     try {
-      const response = await fetch(`/api/offers/${offerId}/checkout`, {
+      const response = await fetch(`/api/offers/${offer.id}/checkout`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
         },
+        body: JSON.stringify({
+          pweAcknowledged: Boolean(pweAcknowledgements[offer.id]),
+        }),
       });
       const payload = (await response.json()) as {
         url?: string;
@@ -391,7 +405,7 @@ export default function OffersPage() {
                       <button
                         type="button"
                         disabled={busyOfferId === offer.id}
-                        onClick={() => startCheckout(offer.id)}
+                        onClick={() => startCheckout(offer)}
                       >
                         {busyOfferId === offer.id ? "Opening..." : "Complete Payment"}
                       </button>
@@ -454,6 +468,28 @@ export default function OffersPage() {
                       </button>
                     ) : null}
                   </div>
+
+                  {offer.shippingProfileLabel ? (
+                    <p className="offer-shipping-note">
+                      Shipping: {offer.shippingProfileLabel}
+                    </p>
+                  ) : null}
+
+                  {offer.canCheckout && offer.requiresPweAcknowledgement ? (
+                    <label className="pwe-acknowledgement">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(pweAcknowledgements[offer.id])}
+                        onChange={(event) =>
+                          setPweAcknowledgements((items) => ({
+                            ...items,
+                            [offer.id]: event.target.checked,
+                          }))
+                        }
+                      />
+                      <span>I understand this shipment will not include tracking.</span>
+                    </label>
+                  ) : null}
 
                   {counterOfferId === offer.id ? (
                     <div className="counter-box">
@@ -667,6 +703,35 @@ const pageStyles = `
   .counter-box button:disabled {
     opacity: 0.55;
     cursor: wait;
+  }
+
+  .offer-shipping-note,
+  .pwe-acknowledgement {
+    grid-column: 1 / -1;
+  }
+
+  .offer-shipping-note {
+    margin: -6px 0 0;
+    color: rgba(247, 243, 232, 0.62);
+    font-size: 0.82rem;
+    font-weight: 800;
+  }
+
+  .pwe-acknowledgement {
+    border: 1px solid rgba(214, 191, 123, 0.22);
+    border-radius: 14px;
+    background: rgba(214, 191, 123, 0.06);
+    padding: 12px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    color: #f8e8b0;
+    font-size: 0.82rem;
+    font-weight: 900;
+  }
+
+  .pwe-acknowledgement input {
+    margin-top: 2px;
   }
 
   .counter-box {

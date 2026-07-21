@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { getShippingProfile } from "../../../lib/shippingProfiles";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,7 @@ type AuctionListingRow = {
   auction_bid_count: number | null;
   auction_reserve_met_at: string | null;
   reserve_fee_status: string | null;
+  shipping_profile_id?: string | null;
 };
 
 type OfferRow = {
@@ -48,6 +50,9 @@ type PaymentNeededTransaction = {
   paymentDueAt: string | null;
   href: string;
   canCompletePayment: boolean;
+  shippingProfileId: string;
+  shippingProfileLabel: string;
+  requiresPweAcknowledgement: boolean;
   collectorMoment?: {
     id: string;
     occurredAt: string | null;
@@ -276,7 +281,7 @@ export async function GET(request: Request) {
   const { data: wonListingData, error: wonListingError } = await supabase
     .from("listings")
     .select(
-      "id, title, status, sale_format, auction_status, auction_current_bid, auction_winner_id, auction_payment_due_at, auction_ends_at, auction_bid_count, auction_reserve_met_at, reserve_fee_status",
+      "id, title, status, sale_format, auction_status, auction_current_bid, auction_winner_id, auction_payment_due_at, auction_ends_at, auction_bid_count, auction_reserve_met_at, reserve_fee_status, shipping_profile_id",
     )
     .eq("sale_format", "auction")
     .eq("auction_winner_id", user.id)
@@ -311,7 +316,7 @@ export async function GET(request: Request) {
     const { data: listingData, error: listingError } = await supabase
       .from("listings")
       .select(
-        "id, title, status, sale_format, auction_status, auction_current_bid, auction_winner_id, auction_payment_due_at, auction_ends_at, auction_bid_count, auction_reserve_met_at, reserve_fee_status",
+        "id, title, status, sale_format, auction_status, auction_current_bid, auction_winner_id, auction_payment_due_at, auction_ends_at, auction_bid_count, auction_reserve_met_at, reserve_fee_status, shipping_profile_id",
       )
       .in("id", listingIds);
 
@@ -339,6 +344,7 @@ export async function GET(request: Request) {
   const auctionPaymentNeeded: PaymentNeededTransaction[] = wonListings.map((listing) => {
     const isExpired = listing.auction_status === "payment_expired";
     const amountDue = Number(listing.auction_current_bid || 0);
+    const shippingProfile = getShippingProfile(listing.shipping_profile_id);
 
     return {
       id: `auction:${listing.id}`,
@@ -354,6 +360,10 @@ export async function GET(request: Request) {
       paymentDueAt: listing.auction_payment_due_at,
       href: `/cards/${listing.id}`,
       canCompletePayment: !isExpired,
+      shippingProfileId: shippingProfile.id,
+      shippingProfileLabel: shippingProfile.label,
+      requiresPweAcknowledgement:
+        shippingProfile.capabilities.buyerAcknowledgementRequired,
       collectorMoment: isExpired
         ? undefined
         : {
@@ -382,6 +392,7 @@ export async function GET(request: Request) {
       }
 
       const isAvailable = listing.status === "active";
+      const shippingProfile = getShippingProfile(listing.shipping_profile_id);
 
       return {
         id: `offer:${offer.id}`,
@@ -397,6 +408,10 @@ export async function GET(request: Request) {
         paymentDueAt: null,
         href: `/cards/${offer.listing_id}`,
         canCompletePayment: isAvailable,
+        shippingProfileId: shippingProfile.id,
+        shippingProfileLabel: shippingProfile.label,
+        requiresPweAcknowledgement:
+          shippingProfile.capabilities.buyerAcknowledgementRequired,
       } satisfies PaymentNeededTransaction;
     })
     .filter((transaction): transaction is PaymentNeededTransaction => Boolean(transaction));

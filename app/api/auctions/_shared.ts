@@ -25,6 +25,7 @@ export type AuctionListingRow = {
   stripe_reserve_fee_checkout_session_id?: string | null;
   stripe_reserve_fee_payment_intent_id?: string | null;
   stripe_reserve_fee_refund_id?: string | null;
+  shipping_profile_id?: string | null;
   listing_images?: Array<{
     image_url: string | null;
     image_type: string | null;

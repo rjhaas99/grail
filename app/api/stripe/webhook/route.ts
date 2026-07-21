@@ -11,6 +11,7 @@ import {
 } from "../../../lib/grailPassSubscription";
 import { getSellerFeeQuote } from "../../../lib/sellerFees";
 import { createSystemNotifications } from "../../../lib/serverNotifications";
+import { getShippingProfile } from "../../../lib/shippingProfiles";
 import { getTransactionTypeFromStripeCheckoutType } from "../../../lib/transactionCheckout";
 
 export const runtime = "nodejs";
@@ -28,6 +29,14 @@ type OrderInsert = {
   platform_fee: number;
   processing_fee: number;
   seller_payout_amount: number;
+  shipping_amount?: number;
+  shipping_profile_id?: string;
+  shipping_profile_label?: string;
+  shipping_tracking_supported?: boolean;
+  shipping_label_required?: boolean;
+  shipping_buyer_acknowledged_at?: string | null;
+  shipping_service?: string;
+  shipping_status?: string;
   transfer_status: "not_ready";
   refund_status: "none";
   status: "paid";
@@ -52,6 +61,7 @@ type ListingRow = {
   stripe_reserve_fee_payment_intent_id?: string | null;
   stripe_reserve_fee_charge_id?: string | null;
   stripe_reserve_fee_refund_id?: string | null;
+  shipping_profile_id?: string | null;
 };
 
 type ExistingOrderRow = {
@@ -741,7 +751,7 @@ async function handleCheckoutSessionCompleted(
   const { data: listingData, error: listingError } = await supabase
     .from("listings")
     .select(
-      "id, seller_id, price, status, sale_format, auction_status, auction_current_bid, auction_winner_id, auction_duration_days, auction_reserve_met_at, reserve_fee_amount, reserve_fee_status, stripe_reserve_fee_payment_intent_id, stripe_reserve_fee_charge_id, stripe_reserve_fee_refund_id",
+      "id, seller_id, price, status, sale_format, auction_status, auction_current_bid, auction_winner_id, auction_duration_days, auction_reserve_met_at, reserve_fee_amount, reserve_fee_status, stripe_reserve_fee_payment_intent_id, stripe_reserve_fee_charge_id, stripe_reserve_fee_refund_id, shipping_profile_id",
     )
     .eq("id", listingId)
     .eq("seller_id", sellerId)
@@ -880,17 +890,24 @@ async function handleCheckoutSessionCompleted(
     return;
   }
 
+  const metadataCardAmount = Number(metadata.cardAmount || 0);
+  const shippingAmount = roundCurrency(Number(metadata.shippingAmount || 0));
   const listingPrice = Number(listing.price || 0);
   const auctionPrice = Number(listing.auction_current_bid || 0);
-  const offerPrice = isOfferSale ? subtotalAmount || totalAmount : 0;
+  const offerPrice = isOfferSale ? metadataCardAmount : 0;
   const cardPrice = isAuctionSale && auctionPrice > 0
     ? auctionPrice
     : isOfferSale && offerPrice > 0
       ? offerPrice
+    : metadataCardAmount > 0
+      ? metadataCardAmount
     : listingPrice > 0
       ? listingPrice
-      : subtotalAmount || totalAmount;
-  const buyerFee = Math.max(totalAmount - cardPrice, 0);
+      : Math.max(subtotalAmount - shippingAmount, 0) || totalAmount;
+  const buyerFee = roundCurrency(Math.max(totalAmount - cardPrice - shippingAmount, 0));
+  const shippingProfile = getShippingProfile(
+    metadata.shippingProfileId || listing.shipping_profile_id,
+  );
   const sellerFeeQuote = await getSellerFeeQuote({
     supabase,
     sellerId,
@@ -914,6 +931,21 @@ async function handleCheckoutSessionCompleted(
     platform_fee: platformFee,
     processing_fee: processingFee,
     seller_payout_amount: sellerPayoutAmount,
+    shipping_amount: shippingAmount,
+    shipping_profile_id: shippingProfile.id,
+    shipping_profile_label: metadata.shippingProfileLabel || shippingProfile.label,
+    shipping_tracking_supported:
+      metadata.shippingTrackingSupported === "true"
+        ? true
+        : shippingProfile.capabilities.trackingSupported,
+    shipping_label_required:
+      metadata.shippingLabelRequired === "true"
+        ? true
+        : shippingProfile.capabilities.labelGenerationSupported,
+    shipping_buyer_acknowledged_at:
+      metadata.shippingBuyerAcknowledged === "true" ? new Date().toISOString() : null,
+    shipping_service: metadata.shippingProfileLabel || shippingProfile.label,
+    shipping_status: "pending",
     transfer_status: "not_ready",
     refund_status: "none",
     status: "paid",
@@ -998,10 +1030,10 @@ async function handleCheckoutSessionCompleted(
           ? "Offer payment received"
           : "Your item sold",
       body: isAuctionSale
-        ? "The winning bidder paid. Add tracking from your Seller Dashboard."
+        ? "The winning bidder paid. Prepare shipment from your Seller Dashboard."
         : isOfferSale
-          ? "The buyer paid for the accepted offer. Add tracking from your Seller Dashboard."
-        : "Your card sold. Add tracking from your Seller Dashboard.",
+          ? "The buyer paid for the accepted offer. Prepare shipment from your Seller Dashboard."
+        : "Your card sold. Prepare shipment from your Seller Dashboard.",
       linkUrl: "/seller-dashboard",
       type: isAuctionSale ? "payment_received" : "card_sold",
     },

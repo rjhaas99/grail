@@ -13,6 +13,16 @@ import {
 } from "../lib/auctionDurations";
 import { cardImageStorageBucket, sanitizeImageFileName } from "../lib/imageUpload";
 import type { XpSource } from "../lib/progression";
+import {
+  defaultShippingProfileId,
+  defaultShippingRateSettings,
+  getShippingProfile,
+  isShippingProfileEligibleForValue,
+  shippingProfiles,
+  validateShippingProfileForListing,
+  type ShippingProfileId,
+  type ShippingRateSettings,
+} from "../lib/shippingProfiles";
 import { supabase } from "../../lib/supabase";
 
 type CardType = "Raw" | "Graded";
@@ -65,6 +75,7 @@ type ExistingListingRow = {
   auction_reserve_price?: number | null;
   auction_duration_days?: number | null;
   reserve_fee_status?: string | null;
+  shipping_profile_id?: string | null;
   psa_verified?: boolean | null;
   psa_cert_number?: string | null;
   psa_grade?: string | null;
@@ -120,6 +131,7 @@ type ListingDraft = {
   askingPrice: string;
   minimumOffer: string;
   marketValue: string;
+  shippingProfileId?: ShippingProfileId;
   imagePreview: string;
   createdAt: string;
   updatedAt: string;
@@ -583,6 +595,10 @@ export default function ListCardPage() {
   const [askingPrice, setAskingPrice] = useState("1240");
   const [minimumOffer, setMinimumOffer] = useState("1120");
   const [marketValue, setMarketValue] = useState("1320");
+  const [shippingProfileId, setShippingProfileId] =
+    useState<ShippingProfileId>(defaultShippingProfileId);
+  const [shippingSettings, setShippingSettings] =
+    useState<ShippingRateSettings>(defaultShippingRateSettings);
   const [sportsCardsProCandidates, setSportsCardsProCandidates] = useState<
     SportsCardsProCandidate[]
   >([]);
@@ -706,6 +722,31 @@ export default function ListCardPage() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
+    async function loadShippingSettings() {
+      try {
+        const response = await fetch("/api/shipping/profiles");
+        const payload = (await response.json()) as {
+          settings?: ShippingRateSettings;
+        };
+
+        if (response.ok && payload.settings && isMounted) {
+          setShippingSettings(payload.settings);
+        }
+      } catch (error) {
+        console.warn("Shipping settings load skipped:", error);
+      }
+    }
+
+    void loadShippingSettings();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     const draftId = searchParams.get("draft");
     const isCollectionModeParam = searchParams.get("mode") === "collection";
@@ -765,6 +806,7 @@ export default function ListCardPage() {
       setAskingPrice(draft.askingPrice);
       setMinimumOffer(draft.minimumOffer);
       setMarketValue(draft.marketValue);
+      setShippingProfileId(getShippingProfile(draft.shippingProfileId).id);
       setSportsCardsProValue(
         draft.sportsCardsProId && draft.sportsCardsProEstimatedValue
           ? {
@@ -857,6 +899,7 @@ export default function ListCardPage() {
               auction_reserve_price,
               auction_duration_days,
               reserve_fee_status,
+              shipping_profile_id,
               psa_verified,
               psa_cert_number,
               psa_grade,
@@ -918,6 +961,7 @@ export default function ListCardPage() {
           listing.auction_duration_days ? String(listing.auction_duration_days) : "7",
         );
         setReserveFeeAcknowledged(listing.reserve_fee_status === "paid");
+        setShippingProfileId(getShippingProfile(listing.shipping_profile_id).id);
         setTitle(listing.title || "");
         setIsAutoTitle(false);
         setListingDescription(listing.collection_note || "");
@@ -1011,6 +1055,9 @@ export default function ListCardPage() {
   const isEditMode = Boolean(editListingId);
   const isCollectionMode = listingMode === "collection";
   const isAuctionMode = !isCollectionMode && saleFormat === "auction";
+  const shippingListingValue = isAuctionMode
+    ? Number(auctionStartingBid || 0)
+    : Number(askingPrice || 0);
 
   const assistantPhotoKey = useMemo(
     () =>
@@ -1370,6 +1417,29 @@ export default function ListCardPage() {
     session,
   ]);
 
+  useEffect(() => {
+    if (isCollectionMode || shippingProfileId !== "plain_white_envelope") {
+      return;
+    }
+
+    if (
+      Number.isFinite(shippingListingValue) &&
+      shippingListingValue > shippingSettings.pweMaxListingValue
+    ) {
+      const correctionTimer = window.setTimeout(() => {
+        setShippingProfileId(defaultShippingProfileId);
+        setStatus({
+          type: "info",
+          text: `Plain White Envelope is only available for cards priced at $${shippingSettings.pweMaxListingValue.toFixed(0)} or less. USPS Ground Advantage selected.`,
+        });
+      }, 0);
+
+      return () => window.clearTimeout(correctionTimer);
+    }
+
+    return undefined;
+  }, [isCollectionMode, shippingListingValue, shippingProfileId, shippingSettings.pweMaxListingValue]);
+
   const auctionReserveNumber = Number(auctionReservePrice);
   const reserveFeeAmount =
     isAuctionMode && auctionReserveEnabled && Number.isFinite(auctionReserveNumber) && auctionReserveNumber > 0
@@ -1627,6 +1697,7 @@ export default function ListCardPage() {
       askingPrice,
       minimumOffer,
       marketValue,
+      shippingProfileId,
       imagePreview,
       createdAt: existingDraft?.createdAt || now,
       updatedAt: now,
@@ -1727,6 +1798,18 @@ export default function ListCardPage() {
 
     if (cardType === "Graded" && (!grader.trim() || !grade.trim())) {
       return "Grader and grade are required for graded cards.";
+    }
+
+    if (!isCollectionMode) {
+      const shippingValidation = validateShippingProfileForListing({
+        profileId: shippingProfileId,
+        listingValue: shippingListingValue,
+        settings: shippingSettings,
+      });
+
+      if (!shippingValidation.valid) {
+        return shippingValidation.error;
+      }
     }
 
     return "";
@@ -2107,6 +2190,7 @@ export default function ListCardPage() {
       sportscardspro_price_field: sportsCardsProValue?.priceFieldUsed || null,
       sportscardspro_source_url: sportsCardsProValue?.sourceUrl || null,
       sportscardspro_fetched_at: sportsCardsProValue?.fetchedAt || null,
+      shipping_profile_id: isCollectionMode ? defaultShippingProfileId : shippingProfileId,
     };
   }
 
@@ -2495,6 +2579,7 @@ export default function ListCardPage() {
     setAskingPrice("");
     setMinimumOffer("");
     setMarketValue("");
+    setShippingProfileId(defaultShippingProfileId);
     setSportsCardsProCandidates([]);
     setSportsCardsProValue(null);
     setSportsCardsProStatus(null);
@@ -3191,19 +3276,53 @@ export default function ListCardPage() {
 
             <section className="panel form-section">
               <h2>Shipping</h2>
-              <div className="field-grid two">
-                <label>
-                  <span>Shipping speed</span>
-                  <select defaultValue="1-2 business days">
-                    <option>1-2 business days</option>
-                    <option>2-3 business days</option>
-                    <option>3-5 business days</option>
-                  </select>
-                </label>
-                <div className="shipping-estimate-note">
-                  <span>Estimated Shipping</span>
-                  <strong>Calculated automatically when shipping label is purchased.</strong>
-                </div>
+              <div className="shipping-profile-list">
+                {shippingProfiles.map((profile) => {
+                  const isEligible =
+                    isCollectionMode ||
+                    isShippingProfileEligibleForValue({
+                      profileId: profile.id,
+                      listingValue: shippingListingValue,
+                      settings: shippingSettings,
+                    });
+                  const isSelected = shippingProfileId === profile.id;
+
+                  return (
+                    <label
+                      key={profile.id}
+                      className={`shipping-profile-option ${isSelected ? "active" : ""} ${!isEligible ? "disabled" : ""}`}
+                    >
+                      <input
+                        type="radio"
+                        name="shipping-profile"
+                        checked={isSelected}
+                        disabled={!isEligible}
+                        onChange={() => setShippingProfileId(profile.id)}
+                      />
+                      <span>
+                        <strong>{profile.label}</strong>
+                        <small>{profile.description}</small>
+                        {profile.capabilities.trackingSupported ? (
+                          <em>Tracking supported</em>
+                        ) : (
+                          <em>No tracking for this initial implementation</em>
+                        )}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              {shippingListingValue > shippingSettings.pweMaxListingValue ? (
+                <p className="shipping-warning">
+                  Plain White Envelope is only available for cards priced at $
+                  {shippingSettings.pweMaxListingValue.toFixed(0)} or less.
+                </p>
+              ) : null}
+              <div className="shipping-estimate-note">
+                <span>Estimated Shipping</span>
+                <strong>
+                  Buyer pays shipping. GRAIL calculates the shipping charge from the selected method.
+                </strong>
               </div>
             </section>
           </div>
@@ -3504,7 +3623,17 @@ const pageStyles = `
   .assistant-status.error { color: #fca5a5; border-color: rgba(248,113,113,0.24); background: rgba(248,113,113,0.07); }
   .field-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .field-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .shipping-estimate-note { border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); min-height: 42px; padding: 10px 12px; display: grid; gap: 4px; box-sizing: border-box; }
+  .shipping-profile-list { display: grid; gap: 10px; }
+  .shipping-profile-option { border: 1px solid rgba(201,205,211,0.16); border-radius: 12px; background: rgba(201,205,211,0.045); padding: 12px; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+  .shipping-profile-option.active { border-color: rgba(231,222,208,0.36); background: rgba(231,222,208,0.07); }
+  .shipping-profile-option.disabled { opacity: 0.52; cursor: not-allowed; }
+  .shipping-profile-option input { margin-top: 3px; accent-color: #E7DED0; }
+  .shipping-profile-option span { display: grid; gap: 4px; }
+  .shipping-profile-option strong { color: #fff; font-size: 13px; line-height: 17px; font-weight: 900; }
+  .shipping-profile-option small { color: #a1a1aa; font-size: 12px; line-height: 17px; font-weight: 800; }
+  .shipping-profile-option em { color: #C9CDD3; font-size: 11px; line-height: 15px; font-style: normal; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; }
+  .shipping-warning { margin: 10px 0 0; color: #fbbf24; font-size: 12px; line-height: 17px; font-weight: 900; }
+  .shipping-estimate-note { margin-top: 10px; border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); min-height: 42px; padding: 10px 12px; display: grid; gap: 4px; box-sizing: border-box; }
   .shipping-estimate-note span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
   .shipping-estimate-note strong { color: #fff; font-size: 12px; line-height: 17px; font-weight: 900; }
   .full-width { grid-column: 1 / -1; }

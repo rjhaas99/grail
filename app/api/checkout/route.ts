@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { supabase } from "../../../lib/supabase";
 import { createTransactionCheckoutSession } from "../../lib/transactionCheckout";
+import { getCheckoutShippingQuote } from "../../lib/shippingProfiles.server";
 
 type CheckoutRequestBody = {
   listingId?: string;
+  pweAcknowledged?: boolean;
 };
 
 type CheckoutListing = {
@@ -18,10 +21,10 @@ type CheckoutListing = {
   price: number | null;
   status: string | null;
   sale_format?: string | null;
+  shipping_profile_id?: string | null;
   listing_images?: Array<{
     image_url: string | null;
     image_type: string | null;
-    display_order?: number | null;
   }> | null;
 };
 
@@ -43,10 +46,32 @@ function getListingFrontImage(listing: CheckoutListing) {
   );
 }
 
+function getRequiredEnv(name: string) {
+  const value = process.env[name];
+
+  if (!value) {
+    throw new Error(`${name} is required.`);
+  }
+
+  return value;
+}
+
+function createServiceSupabaseClient() {
+  return createClient(
+    getRequiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
+    getRequiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
+    { auth: { persistSession: false } },
+  );
+}
+
 export async function POST(request: Request) {
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
   if (!stripeSecretKey) {
+    console.error("Checkout diagnostic:", {
+      event: "buy_now.configuration_error",
+      stripeSecretKeyPresent: false,
+    });
     return NextResponse.json(
       {
         error: "Checkout is temporarily unavailable.",
@@ -69,6 +94,12 @@ export async function POST(request: Request) {
 
   const listingId = body.listingId?.trim();
 
+  console.info("Checkout diagnostic:", {
+    event: "buy_now.route_entered",
+    listingId: listingId || null,
+    stripeSecretKeyPresent: true,
+  });
+
   if (!listingId) {
     return NextResponse.json(
       { error: "Listing ID is required." },
@@ -77,7 +108,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { data, error } = await supabase
+    const serviceSupabase = createServiceSupabaseClient();
+    const { data, error } = await serviceSupabase
       .from("listings")
       .select(
         `
@@ -92,10 +124,10 @@ export async function POST(request: Request) {
           price,
           status,
           sale_format,
+          shipping_profile_id,
           listing_images (
             image_url,
-            image_type,
-            display_order
+            image_type
           )
         `,
       )
@@ -103,7 +135,18 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (error) {
-      throw error;
+      console.error("Checkout diagnostic:", {
+        event: "buy_now.listing_fetch_error",
+        listingId,
+        code: error.code || null,
+        message: error.message,
+        details: error.details || null,
+        hint: error.hint || null,
+      });
+      return NextResponse.json(
+        { error: "Stripe checkout could not be started." },
+        { status: 500 },
+      );
     }
 
     if (!data) {
@@ -172,14 +215,60 @@ export async function POST(request: Request) {
     }
 
     const title = buildListingTitle(listing);
+    const imageUrl = getListingFrontImage(listing);
+    const shippingQuote = await getCheckoutShippingQuote({
+      supabase: serviceSupabase,
+      profileId: listing.shipping_profile_id,
+      listingValue: price,
+    });
+
+    if (!shippingQuote.ok) {
+      return NextResponse.json(
+        { error: shippingQuote.error },
+        { status: 400 },
+      );
+    }
+
+    if (
+      shippingQuote.profile.capabilities.buyerAcknowledgementRequired &&
+      !body.pweAcknowledged
+    ) {
+      return NextResponse.json(
+        { error: "Acknowledge Plain White Envelope shipping before checkout." },
+        { status: 400 },
+      );
+    }
+
+    console.info("Checkout diagnostic:", {
+      event: "buy_now.checkout_payload",
+      listingId: listing.id,
+      sellerId: listing.seller_id,
+      authenticatedUserId: buyerId || null,
+      amount: price,
+      shippingAmount: shippingQuote.shippingAmount,
+      shippingProfileId: shippingQuote.profile.id,
+      title,
+      imageUrl: imageUrl || null,
+    });
+
     const checkout = await createTransactionCheckoutSession({
       transactionType: "buy_now",
       listingId: listing.id,
       sellerId: listing.seller_id,
       buyerId,
       amount: price,
+      shippingAmount: shippingQuote.shippingAmount,
+      shippingLabel: `Shipping — ${shippingQuote.profile.label}`,
       title,
-      imageUrl: getListingFrontImage(listing),
+      imageUrl,
+      extraMetadata: {
+        shippingAmount: shippingQuote.shippingAmount,
+        shippingProfileId: shippingQuote.profile.id,
+        shippingProfileLabel: shippingQuote.profile.label,
+        shippingTrackingSupported: shippingQuote.profile.capabilities.trackingSupported,
+        shippingLabelRequired: shippingQuote.profile.capabilities.labelGenerationSupported,
+        shippingBuyerAcknowledged: Boolean(body.pweAcknowledged),
+      },
     });
 
     if (!checkout.url) {
@@ -191,7 +280,17 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ url: checkout.url });
   } catch (error) {
-    console.error("Stripe checkout session error:", error);
+    console.error("Stripe checkout session error:", {
+      error,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      stackLocation:
+        error instanceof Error
+          ? error.stack
+              ?.split("\n")
+              .map((line) => line.trim())
+              .find((line) => line.startsWith("at ")) || null
+          : null,
+    });
     return NextResponse.json(
       { error: "Stripe checkout could not be started." },
       { status: 500 },

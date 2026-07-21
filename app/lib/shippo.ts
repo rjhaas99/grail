@@ -3,6 +3,7 @@ import { getConfiguredSiteUrl, trimTrailingSlash } from "./siteConfig";
 const SHIPPO_API_BASE_URL = "https://api.goshippo.com";
 const SHIPPO_API_VERSION = "2018-02-08";
 const USPS_GROUND_ADVANTAGE_TOKEN = "usps_ground_advantage";
+const USPS_PRIORITY_MAIL_TOKEN = "usps_priority";
 
 export type ShippoAddress = {
   name: string;
@@ -259,26 +260,36 @@ export async function createShippoShipment({
 }
 
 export function selectUspsGroundAdvantageRate(rates?: ShippoRate[]) {
+  return selectShippoRateByService(rates, USPS_GROUND_ADVANTAGE_TOKEN);
+}
+
+export function selectShippoRateByService(rates: ShippoRate[] | undefined, serviceToken: string) {
   const availableRates = rates || [];
   const exactMatch = availableRates.find((rate) =>
     rate.provider?.toLowerCase() === "usps" &&
-    rate.servicelevel?.token === USPS_GROUND_ADVANTAGE_TOKEN,
+    rate.servicelevel?.token === serviceToken,
   );
 
   if (exactMatch) {
     return exactMatch;
   }
 
+  const normalizedToken = serviceToken.replace(/[_-]+/g, " ").toLowerCase();
   const nameMatch = availableRates.find((rate) =>
     rate.provider?.toLowerCase() === "usps" &&
-    (rate.servicelevel?.name || "").toLowerCase().includes("ground advantage"),
+    (rate.servicelevel?.name || "").toLowerCase().includes(normalizedToken.replace("usps ", "")),
   );
 
   if (nameMatch) {
     return nameMatch;
   }
 
-  throw new Error("USPS Ground Advantage is not available for this shipment.");
+  const label =
+    serviceToken === USPS_PRIORITY_MAIL_TOKEN
+      ? "USPS Priority Mail"
+      : "USPS Ground Advantage";
+
+  throw new Error(`${label} is not available for this shipment.`);
 }
 
 export async function purchaseShippoLabel({
