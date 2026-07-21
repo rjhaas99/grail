@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import {
   extractProducts,
+  getSportsCardsProRuntime,
   getSportsCardsProToken,
+  logSportsCardsProDiagnostic,
   normalizeProductCandidate,
   publicSportsCardsProUnavailableMessage,
+  redactSportsCardsProUrl,
   requireAuthenticatedUser,
   sportsCardsProBaseUrl,
+  sportsCardsProRequestHeaders,
+  summarizeSportsCardsProResponse,
   waitForSportsCardsProSlot,
 } from "../shared";
 
@@ -13,7 +18,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type SearchPayload = {
+  title?: string;
   category?: string;
+  sport?: string;
   year?: string;
   brand?: string;
   set?: string;
@@ -64,6 +71,27 @@ export async function POST(request: Request) {
   }
 
   const query = buildSearchQuery(payload);
+  const searchParameters = {
+    title: clean(payload.title),
+    player: clean(payload.player) || clean(payload.character),
+    year: clean(payload.year),
+    brand: clean(payload.brand),
+    set: clean(payload.set),
+    cardNumber: clean(payload.cardNumber).replace(/^#/, ""),
+    grade: clean(payload.grade),
+    grader: clean(payload.grader),
+    sport: clean(payload.sport) || clean(payload.category),
+    category: clean(payload.category),
+    cardType: clean(payload.cardType),
+  };
+
+  logSportsCardsProDiagnostic("search.route_entered", {
+    runtime: getSportsCardsProRuntime(),
+    authenticated: true,
+    environmentConfigured: Boolean(getSportsCardsProToken()),
+    searchParameters,
+    finalOutboundQuery: query,
+  });
 
   if (query.length < 3) {
     return NextResponse.json(
@@ -75,8 +103,10 @@ export async function POST(request: Request) {
   const token = getSportsCardsProToken();
 
   if (!token) {
-    console.error("SportsCardsPro search configuration error:", {
-      configured: false,
+    logSportsCardsProDiagnostic("search.unavailable", {
+      reason: "missing_sportscardspro_token",
+      environmentConfigured: false,
+      finalOutboundQuery: query,
     });
     return NextResponse.json(
       { error: publicSportsCardsProUnavailableMessage, candidates: [] },
@@ -91,10 +121,14 @@ export async function POST(request: Request) {
     url.searchParams.set("t", token);
     url.searchParams.set("q", query);
 
+    logSportsCardsProDiagnostic("search.outbound_request", {
+      finalOutboundQuery: query,
+      finalSportsCardsProUrl: redactSportsCardsProUrl(url),
+      requestHeaders: sportsCardsProRequestHeaders,
+    });
+
     const response = await fetch(url, {
-      headers: {
-        accept: "application/json",
-      },
+      headers: sportsCardsProRequestHeaders,
       cache: "no-store",
     });
     const text = await response.text();
@@ -106,11 +140,26 @@ export async function POST(request: Request) {
       upstreamPayload = text;
     }
 
+    const products = extractProducts(upstreamPayload);
+    const responseSummary = summarizeSportsCardsProResponse(upstreamPayload);
+
+    logSportsCardsProDiagnostic("search.upstream_response", {
+      finalOutboundQuery: query,
+      status: response.status,
+      statusText: response.statusText,
+      contentType: response.headers.get("content-type") || "",
+      matchCount: products.length,
+      rawResponseSummary: responseSummary,
+    });
+
     if (response.status === 429) {
-      console.error("SportsCardsPro search rate limit response:", {
+      logSportsCardsProDiagnostic("search.unavailable", {
+        reason: "sportsCardsPro_rate_limited",
         status: response.status,
         statusText: response.statusText,
-        query,
+        finalOutboundQuery: query,
+        matchCount: products.length,
+        rawResponseSummary: responseSummary,
       });
       return NextResponse.json(
         { error: "SportsCardsPro rate limit reached. Please try again in a moment." },
@@ -119,14 +168,13 @@ export async function POST(request: Request) {
     }
 
     if (!response.ok) {
-      console.error("SportsCardsPro search API error:", {
+      logSportsCardsProDiagnostic("search.unavailable", {
+        reason: "sportsCardsPro_upstream_non_ok",
         status: response.status,
         statusText: response.statusText,
-        query,
-        body:
-          typeof upstreamPayload === "string"
-            ? upstreamPayload.slice(0, 400)
-            : upstreamPayload,
+        finalOutboundQuery: query,
+        matchCount: products.length,
+        rawResponseSummary: responseSummary,
       });
       return NextResponse.json(
         { error: publicSportsCardsProUnavailableMessage, candidates: [] },
@@ -134,20 +182,29 @@ export async function POST(request: Request) {
       );
     }
 
-    const candidates = extractProducts(upstreamPayload)
+    const candidates = products
       .map(normalizeProductCandidate)
       .filter((candidate): candidate is NonNullable<typeof candidate> =>
         Boolean(candidate),
       )
       .slice(0, 20);
 
+    logSportsCardsProDiagnostic("search.completed", {
+      reason: candidates.length > 0 ? "matches_returned" : "zero_normalized_matches",
+      finalOutboundQuery: query,
+      matchCount: products.length,
+      candidateCount: candidates.length,
+      rawResponseSummary: responseSummary,
+    });
+
     return NextResponse.json({
       query,
       candidates,
     });
   } catch (error) {
-    console.error("SportsCardsPro search request error:", {
-      query,
+    logSportsCardsProDiagnostic("search.unavailable", {
+      reason: "sportsCardsPro_fetch_exception",
+      finalOutboundQuery: query,
       error,
       message: error instanceof Error ? error.message : String(error),
     });

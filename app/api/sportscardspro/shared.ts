@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 
 export const sportsCardsProBaseUrl = "https://www.sportscardspro.com";
 export const publicSportsCardsProUnavailableMessage = "Market value unavailable.";
+export const sportsCardsProRequestHeaders = {
+  accept: "application/json",
+  "user-agent": "GRAIL/1.0 (+https://www.grailcollects.com)",
+} satisfies Record<string, string>;
 
 type ApiRecord = Record<string, unknown>;
 
@@ -37,11 +41,88 @@ export function getRequiredEnv(name: string) {
 
 export function getSportsCardsProToken() {
   return (
+    process.env.SPORTSCARDPRO_API_TOKEN?.trim() ||
+    process.env.SPORTSCARDPRO_API_KEY?.trim() ||
     process.env.SPORTSCARDSPRO_API_TOKEN?.trim() ||
     process.env.SPORTSCARDSPRO_API_KEY?.trim() ||
     process.env.PRICECHARTING_API_TOKEN?.trim() ||
     ""
   );
+}
+
+export function getSportsCardsProRuntime() {
+  const edgeRuntime = (globalThis as { EdgeRuntime?: unknown }).EdgeRuntime;
+
+  if (typeof edgeRuntime === "string" && edgeRuntime.trim()) {
+    return `edge:${edgeRuntime}`;
+  }
+
+  return `node:${process.version}`;
+}
+
+export function redactSportsCardsProUrl(input: URL | string) {
+  try {
+    const url = new URL(input.toString());
+
+    if (url.searchParams.has("t")) {
+      url.searchParams.set("t", "[redacted]");
+    }
+
+    return url.toString();
+  } catch {
+    return input.toString().replace(/([?&]t=)[^&]+/i, "$1[redacted]");
+  }
+}
+
+export function summarizeSportsCardsProResponse(payload: unknown) {
+  if (payload === null || payload === undefined || payload === "") {
+    return { kind: "empty" };
+  }
+
+  if (typeof payload === "string") {
+    return {
+      kind: "text",
+      preview: payload.slice(0, 600),
+      length: payload.length,
+    };
+  }
+
+  if (Array.isArray(payload)) {
+    return {
+      kind: "array",
+      itemCount: payload.length,
+      firstItem: payload.find(isRecord) || null,
+    };
+  }
+
+  if (isRecord(payload)) {
+    const products = extractProducts(payload);
+
+    return {
+      kind: "object",
+      keys: Object.keys(payload).slice(0, 20),
+      productCount: products.length,
+      firstProduct: products[0] || null,
+      error:
+        getString(payload, ["error", "message", "status", "detail", "details"]) ||
+        null,
+    };
+  }
+
+  return {
+    kind: typeof payload,
+    preview: String(payload).slice(0, 600),
+  };
+}
+
+export function logSportsCardsProDiagnostic(
+  event: string,
+  details: Record<string, unknown>,
+) {
+  console.info("SportsCardsPro diagnostic:", {
+    event,
+    ...details,
+  });
 }
 
 function createAnonSupabaseClient() {

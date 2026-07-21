@@ -2,13 +2,18 @@ import { NextResponse } from "next/server";
 import {
   getNumber,
   getProductName,
+  getSportsCardsProRuntime,
   getSportsCardsProToken,
   getSetName,
   isRecord,
+  logSportsCardsProDiagnostic,
   normalizeProductPageUrl,
   publicSportsCardsProUnavailableMessage,
+  redactSportsCardsProUrl,
   requireAuthenticatedUser,
   sportsCardsProBaseUrl,
+  sportsCardsProRequestHeaders,
+  summarizeSportsCardsProResponse,
   waitForSportsCardsProSlot,
 } from "../shared";
 
@@ -106,6 +111,19 @@ export async function POST(request: Request) {
   }
 
   const sportsCardsProId = clean(payload.sportsCardsProId);
+  const valueParameters = {
+    sportsCardsProId,
+    cardType: clean(payload.cardType),
+    grader: clean(payload.grader),
+    grade: clean(payload.grade),
+  };
+
+  logSportsCardsProDiagnostic("value.route_entered", {
+    runtime: getSportsCardsProRuntime(),
+    authenticated: true,
+    environmentConfigured: Boolean(getSportsCardsProToken()),
+    valueParameters,
+  });
 
   if (!sportsCardsProId) {
     return NextResponse.json(
@@ -130,8 +148,11 @@ export async function POST(request: Request) {
   const token = getSportsCardsProToken();
 
   if (!token) {
-    console.error("SportsCardsPro value configuration error:", {
-      configured: false,
+    logSportsCardsProDiagnostic("value.unavailable", {
+      reason: "missing_sportscardspro_token",
+      environmentConfigured: false,
+      sportsCardsProId,
+      priceFieldUsed: priceSelection.field,
     });
     return NextResponse.json(
       {
@@ -153,10 +174,15 @@ export async function POST(request: Request) {
     url.searchParams.set("t", token);
     url.searchParams.set("id", sportsCardsProId);
 
+    logSportsCardsProDiagnostic("value.outbound_request", {
+      sportsCardsProId,
+      priceFieldUsed: priceSelection.field,
+      finalSportsCardsProUrl: redactSportsCardsProUrl(url),
+      requestHeaders: sportsCardsProRequestHeaders,
+    });
+
     const response = await fetch(url, {
-      headers: {
-        accept: "application/json",
-      },
+      headers: sportsCardsProRequestHeaders,
       cache: "no-store",
     });
     const text = await response.text();
@@ -168,11 +194,25 @@ export async function POST(request: Request) {
       upstreamPayload = text;
     }
 
+    const responseSummary = summarizeSportsCardsProResponse(upstreamPayload);
+
+    logSportsCardsProDiagnostic("value.upstream_response", {
+      sportsCardsProId,
+      priceFieldUsed: priceSelection.field,
+      status: response.status,
+      statusText: response.statusText,
+      contentType: response.headers.get("content-type") || "",
+      rawResponseSummary: responseSummary,
+    });
+
     if (response.status === 429) {
-      console.error("SportsCardsPro value rate limit response:", {
+      logSportsCardsProDiagnostic("value.unavailable", {
+        reason: "sportsCardsPro_rate_limited",
         status: response.status,
         statusText: response.statusText,
         sportsCardsProId,
+        priceFieldUsed: priceSelection.field,
+        rawResponseSummary: responseSummary,
       });
       return NextResponse.json(
         { error: "SportsCardsPro rate limit reached. Please try again in a moment." },
@@ -181,14 +221,15 @@ export async function POST(request: Request) {
     }
 
     if (!response.ok || !isRecord(upstreamPayload)) {
-      console.error("SportsCardsPro product API error:", {
+      logSportsCardsProDiagnostic("value.unavailable", {
+        reason: response.ok
+          ? "sportsCardsPro_malformed_response"
+          : "sportsCardsPro_upstream_non_ok",
         status: response.status,
         statusText: response.statusText,
         sportsCardsProId,
-        body:
-          typeof upstreamPayload === "string"
-            ? upstreamPayload.slice(0, 400)
-            : upstreamPayload,
+        priceFieldUsed: priceSelection.field,
+        rawResponseSummary: responseSummary,
       });
       return NextResponse.json(
         {
@@ -211,6 +252,16 @@ export async function POST(request: Request) {
     const fetchedAt = new Date().toISOString();
 
     if (estimatedValue === null) {
+      logSportsCardsProDiagnostic("value.unavailable", {
+        reason: "sportsCardsPro_missing_price_field_value",
+        sportsCardsProId,
+        priceFieldUsed: priceSelection.field,
+        priceLabel: priceSelection.label,
+        productName,
+        setName,
+        rawResponseSummary: responseSummary,
+      });
+
       return NextResponse.json({
         sportsCardsProId,
         productName,
@@ -223,6 +274,15 @@ export async function POST(request: Request) {
       });
     }
 
+    logSportsCardsProDiagnostic("value.completed", {
+      reason: "estimated_value_returned",
+      sportsCardsProId,
+      priceFieldUsed: priceSelection.field,
+      productName,
+      setName,
+      estimatedValue,
+    });
+
     return NextResponse.json({
       sportsCardsProId,
       productName,
@@ -233,8 +293,10 @@ export async function POST(request: Request) {
       fetchedAt,
     });
   } catch (error) {
-    console.error("SportsCardsPro value request error:", {
+    logSportsCardsProDiagnostic("value.unavailable", {
+      reason: "sportsCardsPro_fetch_exception",
       sportsCardsProId,
+      priceFieldUsed: priceSelection.field,
       error,
       message: error instanceof Error ? error.message : String(error),
     });
