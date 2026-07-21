@@ -12,6 +12,7 @@ import {
   isValidAuctionDuration,
 } from "../lib/auctionDurations";
 import { cardImageStorageBucket, sanitizeImageFileName } from "../lib/imageUpload";
+import type { ListingPublishClientDiagnostic } from "../lib/listingPublishDiagnostics";
 import type { XpSource } from "../lib/progression";
 import {
   defaultShippingProfileId,
@@ -99,6 +100,12 @@ type PublishStatus = {
 
 type CreatedListing = {
   id: string;
+};
+
+type ListingPublishResponse = {
+  id?: string;
+  error?: string;
+  diagnostic?: ListingPublishClientDiagnostic;
 };
 
 type ListingDraft = {
@@ -1725,7 +1732,7 @@ export default function ListCardPage() {
     if (validationError) {
       setStatus({
         type: "error",
-        text: "Add the required listing details before previewing.",
+        text: validationError,
       });
       return;
     }
@@ -1800,7 +1807,19 @@ export default function ListCardPage() {
       return "Grader and grade are required for graded cards.";
     }
 
+    if (!frontPreview) {
+      return "Front image is required.";
+    }
+
+    if (!selectedPhotos.back?.file && !existingImageUrls.back) {
+      return "Back image is required.";
+    }
+
     if (!isCollectionMode) {
+      if (!shippingProfileId) {
+        return "Shipping method is required.";
+      }
+
       const shippingValidation = validateShippingProfileForListing({
         profileId: shippingProfileId,
         listingValue: shippingListingValue,
@@ -1907,7 +1926,7 @@ export default function ListCardPage() {
       return psaVerification;
     }
 
-    return verifyPsaCertification({ silent: true });
+    return null;
   }
 
   function buildSportsCardsProPayload() {
@@ -2423,32 +2442,61 @@ export default function ListCardPage() {
 
     try {
       const verifiedPsa = await getPsaVerificationForSave();
-      const { data, error } = await supabase
-        .from("listings")
-        .insert({
-          seller_id: currentSession.user.id,
-          ...buildListingFields(verifiedPsa),
-          status: isCollectionMode
-            ? "collection"
-            : isAuctionMode && auctionReserveEnabled
-              ? "pending_reserve_fee"
-              : "active",
-          is_collection_card: isCollectionMode,
-          is_public_collection: isCollectionMode,
-        })
-        .select("id")
-        .single();
+      const listingFields = buildListingFields(verifiedPsa);
+      const publishStatus = isCollectionMode
+        ? "collection"
+        : isAuctionMode && auctionReserveEnabled
+          ? "pending_reserve_fee"
+          : "active";
+      const listingPayloadSummary = {
+        mode: listingMode,
+        saleFormat,
+        titlePresent: Boolean(listingFields.title),
+        category: listingFields.sport,
+        subjectPresent: Boolean(listingFields.player),
+        cardType: listingFields.card_type,
+        price: listingFields.price,
+        auctionStartingBid: listingFields.auction_starting_bid,
+        shippingProfileId: listingFields.shipping_profile_id,
+        psaState: verifiedPsa?.verified ? "verified" : "not_verified",
+        frontImagePresent: Boolean(frontPreview),
+        backImagePresent: Boolean(selectedPhotos.back?.file || existingImageUrls.back),
+      };
+      const publishResponse = await fetch("/api/listings/publish", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${currentSession.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          fields: listingFields,
+          status: publishStatus,
+          isCollectionCard: isCollectionMode,
+          isPublicCollection: isCollectionMode,
+          frontImagePresent: Boolean(frontPreview),
+          backImagePresent: Boolean(selectedPhotos.back?.file || existingImageUrls.back),
+        }),
+      });
+      const publishPayload = (await publishResponse.json()) as ListingPublishResponse;
 
-      if (error) {
-        console.error("Listing insert error:", error);
+      if (!publishResponse.ok || !publishPayload.id) {
+        console.error("Listing publish validation failure:", {
+          api: "POST /api/listings/publish",
+          operation: "publishListing",
+          status: publishResponse.status,
+          diagnostic: publishPayload.diagnostic || null,
+          error: publishPayload.error || publishResponse.statusText,
+          sellerId: currentSession.user.id,
+          payloadSummary: listingPayloadSummary,
+        });
         setStatus({
           type: "error",
-          text: "Listing could not be published. Check the form and try again.",
+          text: publishPayload.error || "Listing could not be published.",
         });
         return;
       }
 
-      const createdListing = data as CreatedListing;
+      const createdListing: CreatedListing = { id: publishPayload.id };
       const imageResult = await uploadListingImages(createdListing.id);
 
       setPublishedListingId(createdListing.id);
@@ -2535,10 +2583,18 @@ export default function ListCardPage() {
             : "Listing published.",
       });
     } catch (error) {
-      console.error("Publish listing error:", error);
+      const message = getErrorMessage(error);
+
+      console.error("Publish listing unexpected error:", {
+        api: "GRAIL listing publish flow",
+        operation: "publishListing",
+        blockingStep: "app/list/page.tsx publishListing",
+        message,
+        error,
+      });
       setStatus({
         type: "error",
-        text: "Listing could not be published. Please try again.",
+        text: message || "Listing could not be published.",
       });
     } finally {
       setIsPublishing(false);
