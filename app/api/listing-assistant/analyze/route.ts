@@ -6,6 +6,7 @@ import {
   type ListingVisionImage,
   type ListingVisionResult,
 } from "../../../lib/visionProvider";
+import { getConfiguredSiteUrl } from "../../../lib/siteConfig";
 
 export const runtime = "nodejs";
 
@@ -305,6 +306,14 @@ function buildSportsCardsProPayload(analysis: ListingVisionResult) {
   };
 }
 
+function getInternalApiOrigin(request: Request) {
+  if (process.env.NODE_ENV === "production") {
+    return getConfiguredSiteUrl();
+  }
+
+  return new URL(request.url).origin;
+}
+
 async function fileToVisionImage(
   formData: FormData,
   key: "front" | "back",
@@ -350,7 +359,7 @@ async function searchSportsCardsPro(
     };
   }
 
-  const origin = new URL(request.url).origin;
+  const origin = getInternalApiOrigin(request);
 
   try {
     const searchResponse = await fetch(`${origin}/api/sportscardspro/search`, {
