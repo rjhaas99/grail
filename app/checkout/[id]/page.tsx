@@ -7,7 +7,6 @@ import { useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
 import {
-  getShippingAmountForProfile,
   getShippingProfile,
   type ShippingProfileId,
 } from "../../lib/shippingProfiles";
@@ -359,7 +358,16 @@ export default function CheckoutPage() {
       return;
     }
 
-    const activeShippingProfile = shippingQuote?.profile || getShippingProfile(card.shippingProfileId);
+    const activeShippingProfile = shippingQuote?.profile;
+
+    if (!activeShippingProfile || !shippingQuote) {
+      setStripeError(
+        isShippingQuoteLoading
+          ? "Shipping quote is still loading."
+          : "Shipping quote could not be loaded.",
+      );
+      return;
+    }
 
     if (shippingQuoteError) {
       setStripeError(shippingQuoteError);
@@ -437,10 +445,14 @@ export default function CheckoutPage() {
   }
 
   const activeShippingProfile = shippingQuote?.profile || getShippingProfile(card.shippingProfileId);
-  const shipping = shippingQuote?.shippingAmount ??
-    getShippingAmountForProfile(activeShippingProfile.id);
+  const quotedShippingAmount = shippingQuote?.shippingAmount;
+  const shipping =
+    typeof quotedShippingAmount === "number" && Number.isFinite(quotedShippingAmount)
+      ? quotedShippingAmount
+      : null;
   const estimatedTax = 0;
-  const total = card.price + shipping + estimatedTax;
+  const hasShippingQuote = shipping !== null;
+  const total = shipping !== null ? card.price + shipping + estimatedTax : null;
   const requiresPweAcknowledgement =
     activeShippingProfile.capabilities.buyerAcknowledgementRequired;
   const isOwnerCheckout = Boolean(currentUserId) && card.sellerId === currentUserId;
@@ -453,6 +465,8 @@ export default function CheckoutPage() {
   const canAttemptStripeCheckout =
     showStripeCheckoutButton &&
     isStripePublicConfigured &&
+    hasShippingQuote &&
+    !isShippingQuoteLoading &&
     !shippingQuoteError;
   const showUnavailableCheckoutNotice =
     !canAttemptStripeCheckout && showStripeCheckoutButton && !isStripeSuccess;
@@ -565,12 +579,18 @@ export default function CheckoutPage() {
             <SummaryRow label="Item price" value={formatCurrency(card.price)} />
             <SummaryRow
               label={`Shipping (${activeShippingProfile.shortLabel})`}
-              value={isShippingQuoteLoading ? "Loading..." : formatCurrency(shipping)}
+              value={
+                isShippingQuoteLoading
+                  ? "Loading..."
+                  : shipping === null
+                    ? "Unavailable"
+                    : formatCurrency(shipping)
+              }
             />
             <SummaryRow label="Estimated tax" value={formatCurrency(estimatedTax)} />
             <div className="summary-total">
               <span>Total</span>
-              <strong>{formatCurrency(total)}</strong>
+              <strong>{total === null ? "Unavailable" : formatCurrency(total)}</strong>
             </div>
 
             <div className="checkout-trust-strip">

@@ -7,6 +7,7 @@ import {
 } from "../../../lib/shippingProfiles";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function getRequiredEnv(name: string) {
   const value = process.env[name];

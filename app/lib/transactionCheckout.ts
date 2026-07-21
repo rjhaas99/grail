@@ -18,7 +18,7 @@ type CreateTransactionCheckoutSessionParams = {
   sellerId: string;
   buyerId?: string | null;
   amount: number;
-  shippingAmount?: number;
+  shippingAmount: number;
   shippingLabel?: string;
   title: string;
   imageUrl?: string | null;
@@ -215,7 +215,7 @@ export async function createTransactionCheckoutSession({
   sellerId,
   buyerId,
   amount,
-  shippingAmount = 0,
+  shippingAmount,
   shippingLabel = "Shipping",
   title,
   imageUrl,
@@ -237,6 +237,10 @@ export async function createTransactionCheckoutSession({
 
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error("A valid transaction amount is required for checkout.");
+  }
+
+  if (!Number.isFinite(shippingAmount) || shippingAmount < 0) {
+    throw new Error("A valid shipping quote is required for checkout.");
   }
 
   const stripe = new Stripe(getRequiredEnv("STRIPE_SECRET_KEY"));

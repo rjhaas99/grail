@@ -123,6 +123,7 @@ function describeShippoMessages(
 async function shippoRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${SHIPPO_API_BASE_URL}${path}`, {
     ...init,
+    cache: "no-store",
     headers: {
       ...shippoHeaders(),
       ...(init?.headers || {}),

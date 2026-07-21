@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getCheckoutShippingQuote } from "../../../lib/shippingProfiles.server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type ShippingQuotePayload = {
   listingId?: string;

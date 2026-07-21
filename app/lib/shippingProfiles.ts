@@ -22,31 +22,24 @@ export type ShippingProfile = {
   checkoutBullets: readonly string[];
   carrier: string;
   shippoServiceToken?: ShippoServiceToken;
-  rateSettingKey: keyof ShippingRateSettings;
   maxListingValue?: number;
   defaultProfile?: boolean;
   capabilities: ShippingProfileCapabilities;
 };
 
 export type ShippingRateSettings = {
-  pweFlatRate: number;
+  pweFlatRate: number | null;
   pweMaxListingValue: number;
-  uspsGroundAdvantageEstimate: number;
-  uspsPriorityMailEstimate: number;
 };
 
 export const shippingRateSettingKeys = {
   pweFlatRate: "shipping_pwe_flat_rate",
   pweMaxListingValue: "shipping_pwe_max_listing_value",
-  uspsGroundAdvantageEstimate: "shipping_usps_ground_advantage_estimate",
-  uspsPriorityMailEstimate: "shipping_usps_priority_mail_estimate",
 } as const satisfies Record<keyof ShippingRateSettings, string>;
 
 export const defaultShippingRateSettings = {
-  pweFlatRate: 1.5,
+  pweFlatRate: null,
   pweMaxListingValue: 20,
-  uspsGroundAdvantageEstimate: 5,
-  uspsPriorityMailEstimate: 9,
 } as const satisfies ShippingRateSettings;
 
 export const defaultShippingProfileId: ShippingProfileId = "usps_ground_advantage";
@@ -64,7 +57,6 @@ export const shippingProfiles = [
       "Best for inexpensive cards",
     ],
     carrier: "USPS",
-    rateSettingKey: "pweFlatRate",
     maxListingValue: defaultShippingRateSettings.pweMaxListingValue,
     capabilities: {
       trackingSupported: false,
@@ -87,7 +79,6 @@ export const shippingProfiles = [
     ],
     carrier: "USPS",
     shippoServiceToken: "usps_ground_advantage",
-    rateSettingKey: "uspsGroundAdvantageEstimate",
     defaultProfile: true,
     capabilities: {
       trackingSupported: true,
@@ -110,7 +101,6 @@ export const shippingProfiles = [
     ],
     carrier: "USPS",
     shippoServiceToken: "usps_priority",
-    rateSettingKey: "uspsPriorityMailEstimate",
     capabilities: {
       trackingSupported: true,
       labelGenerationSupported: true,
@@ -221,15 +211,6 @@ export function getEligibleShippingProfiles(
       settings,
     }),
   );
-}
-
-export function getShippingAmountForProfile(
-  profileId?: string | null,
-  settings: ShippingRateSettings = defaultShippingRateSettings,
-) {
-  const profile = getShippingProfile(profileId);
-
-  return roundCurrency(settings[profile.rateSettingKey]);
 }
 
 export function getShippingProfilePublicPayload(

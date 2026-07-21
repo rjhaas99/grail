@@ -239,6 +239,13 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!shippingProfile.shippoServiceToken) {
+    return NextResponse.json(
+      { error: "This shipping method is not configured for label purchase." },
+      { status: 400 },
+    );
+  }
+
   const metadata = buildShippoMetadata(order.id);
 
   try {
@@ -260,7 +267,7 @@ export async function POST(request: Request) {
     });
     const selectedRate = selectShippoRateByService(
       shipment.rates,
-      shippingProfile.shippoServiceToken || "usps_ground_advantage",
+      shippingProfile.shippoServiceToken,
     );
     const transaction = await purchaseShippoLabel({
       rateObjectId: selectedRate.object_id,
