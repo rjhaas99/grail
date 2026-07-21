@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import CollectorMomentLayer from "../components/CollectorMomentLayer";
-import Header from "../components/Header";
+import PageShell from "../components/PageShell";
 import type { CollectorMoment } from "../lib/collectorMoments";
 import { mockOrders } from "../lib/mockData";
 
@@ -942,11 +942,12 @@ export default function OrdersPage() {
   }
 
   return (
-    <main className="orders-page">
-      <style>{pageStyles}</style>
-      <div className="orders-shell">
-        <Header />
-
+    <PageShell
+      className="orders-page"
+      shellClassName="orders-shell"
+      shellStyle={{ padding: "8px 0 46px" }}
+      styles={pageStyles}
+    >
         <section className="page-heading">
           <div>
             <span>Orders</span>
@@ -1212,7 +1213,6 @@ export default function OrdersPage() {
             );
           }) : null}
         </section>
-      </div>
       {disputeOrder ? (
         <div className="modal-backdrop" role="presentation">
           <section className="panel dispute-modal" role="dialog" aria-modal="true">
@@ -1281,7 +1281,7 @@ export default function OrdersPage() {
         moments={collectorMoments}
         isReady
       />
-    </main>
+    </PageShell>
   );
 }
 
@@ -1311,7 +1311,7 @@ const pageStyles = `
   }
 
   .page-heading {
-    margin-top: 18px;
+    margin-top: 10px;
     display: flex;
     align-items: flex-end;
     justify-content: space-between;

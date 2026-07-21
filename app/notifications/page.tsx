@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
-import Header from "../components/Header";
+import PageShell from "../components/PageShell";
 
 type NotificationCategory =
   | "Auctions"
@@ -253,11 +253,12 @@ export default function NotificationsPage() {
   }
 
   return (
-    <main className="account-page">
-      <style>{pageStyles}</style>
-      <div className="account-shell">
-        <Header />
-
+    <PageShell
+      className="account-page"
+      shellClassName="account-shell"
+      shellStyle={{ padding: "8px 0 38px" }}
+      styles={pageStyles}
+    >
         <section className="page-heading">
           <div>
             <span>Activity</span>
@@ -355,8 +356,7 @@ export default function NotificationsPage() {
             </article>
           ) : null}
         </section>
-      </div>
-    </main>
+    </PageShell>
   );
 }
 
@@ -386,7 +386,7 @@ const pageStyles = `
   }
 
   .page-heading {
-    margin-top: 18px;
+    margin-top: 10px;
     display: flex;
     align-items: flex-end;
     justify-content: space-between;

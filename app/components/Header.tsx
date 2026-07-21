@@ -455,14 +455,20 @@ export default function Header() {
           style={{
             width: "12px",
             height: "12px",
+            minWidth: "12px",
+            minHeight: "12px",
+            maxWidth: "12px",
+            maxHeight: "12px",
             border: "2px solid #7b7b85",
             borderRadius: "999px",
             display: "inline-block",
             boxSizing: "border-box",
             background: "transparent",
             padding: 0,
+            boxShadow: "none",
+            appearance: "none",
             cursor: "pointer",
-            flex: "0 0 auto",
+            flex: "0 0 12px",
           }}
         />
         <input
@@ -479,6 +485,9 @@ export default function Header() {
             outline: 0,
             background: "transparent",
             color: "#f4f4f5",
+            padding: 0,
+            boxShadow: "none",
+            boxSizing: "border-box",
             font: "inherit",
             fontSize: "13px",
             fontWeight: 800,

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AdminLayout from "./AdminLayout";
-import Header from "../components/Header";
+import PageShell from "../components/PageShell";
 import { supabase } from "../../lib/supabase";
 import {
   getAdminDashboardItems,
@@ -215,11 +215,13 @@ export default function AdminDashboardPage() {
   }, []);
 
   return (
-    <main className="admin-dashboard-page">
-      <style>{pageStyles}</style>
+    <PageShell
+      className="admin-dashboard-page"
+      shellClassName="admin-dashboard-shell"
+      shellStyle={{ padding: "8px 0 42px" }}
+      styles={pageStyles}
+    >
       <AdminLayout />
-      <div className="admin-dashboard-shell">
-        <Header />
 
         <section className="page-heading">
           <div>
@@ -384,8 +386,7 @@ export default function AdminDashboardPage() {
         )}
 
         {status ? <p className="status-message">{status}</p> : null}
-      </div>
-    </main>
+    </PageShell>
   );
 }
 
@@ -410,7 +411,7 @@ const pageStyles = `
     box-shadow: 0 18px 44px rgba(0,0,0,0.28);
   }
   .page-heading {
-    margin-top: 18px;
+    margin-top: 10px;
     display: flex;
     align-items: flex-end;
     justify-content: space-between;

@@ -7,7 +7,7 @@ import { ChangeEvent, useEffect, useRef, useState } from "react";
 import CollectorIdentityCard, {
   type CollectorIdentityBadge,
 } from "../components/CollectorIdentityCard";
-import Header from "../components/Header";
+import PageShell from "../components/PageShell";
 import PublicTrustSection from "../components/PublicTrustSection";
 import { supabase } from "../../lib/supabase";
 import {
@@ -260,11 +260,12 @@ export default function ProfilePage() {
   }
 
   return (
-    <main className="account-page">
-      <style>{pageStyles}</style>
-      <div className="account-shell">
-        <Header />
-
+    <PageShell
+      className="account-page"
+      shellClassName="account-shell"
+      shellStyle={{ padding: "8px 0 38px" }}
+      styles={pageStyles}
+    >
         <section className="page-heading">
           <span>Account</span>
           <h1>Profile</h1>
@@ -500,8 +501,7 @@ export default function ProfilePage() {
             {status ? <p className="status-message">{status}</p> : null}
           </aside>
         </section>
-      </div>
-    </main>
+    </PageShell>
   );
 }
 
@@ -519,7 +519,7 @@ const pageStyles = `
     background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)), rgba(5,5,6,0.92);
     box-shadow: 0 18px 44px rgba(0,0,0,0.28);
   }
-  .page-heading { margin-top: 18px; }
+  .page-heading { margin-top: 10px; }
   .page-heading span {
     color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase;
   }

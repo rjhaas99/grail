@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import Header from "../components/Header";
+import PageShell from "../components/PageShell";
 import RequireAuth from "../components/RequireAuth";
 import {
   getGrailPassPerksForMembershipType,
@@ -318,11 +318,12 @@ export default function RewardsPage() {
 
   return (
     <RequireAuth>
-      <main className="rewards-page">
-        <style>{pageStyles}</style>
-        <div className="rewards-shell">
-          <Header />
-
+      <PageShell
+        className="rewards-page"
+        shellClassName="rewards-shell"
+        shellStyle={{ padding: "8px 0 52px" }}
+        styles={pageStyles}
+      >
           <section className="rewards-hero" aria-labelledby="rewards-title">
             <div className="hero-copy">
               <p className="eyebrow">Collector Progression</p>
@@ -664,8 +665,7 @@ export default function RewardsPage() {
           {walletRewardsMessage ? (
             <p className="status-message subtle">{walletRewardsMessage}</p>
           ) : null}
-        </div>
-      </main>
+      </PageShell>
     </RequireAuth>
   );
 }
@@ -698,7 +698,7 @@ const pageStyles = `
   }
 
   .rewards-hero {
-    margin-top: 22px;
+    margin-top: 10px;
     min-height: 338px;
     padding: 32px;
     display: grid;

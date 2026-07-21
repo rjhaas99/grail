@@ -165,48 +165,48 @@ const trustCards = [
 const carouselSlots = {
   center: {
     x: 0,
-    y: 4,
-    scale: 1.04,
+    y: -58,
+    scale: 1,
     opacity: 1,
     zIndex: 5,
     blur: 0,
     shade: 0,
   },
   frontRight: {
-    x: 190,
-    y: 24,
-    scale: 0.82,
-    opacity: 0.86,
+    x: 224,
+    y: -56,
+    scale: 0.5,
+    opacity: 0.24,
     zIndex: 4,
-    blur: 0,
-    shade: 0.08,
+    blur: 0.3,
+    shade: 0,
   },
   backRight: {
-    x: 306,
-    y: -3,
-    scale: 0.58,
-    opacity: 0.48,
+    x: 304,
+    y: -62,
+    scale: 0.34,
+    opacity: 0.12,
     zIndex: 2,
-    blur: 0.6,
-    shade: 0.28,
+    blur: 1,
+    shade: 0,
   },
   backLeft: {
-    x: -306,
-    y: -3,
-    scale: 0.58,
-    opacity: 0.48,
+    x: -304,
+    y: -62,
+    scale: 0.34,
+    opacity: 0.12,
     zIndex: 2,
-    blur: 0.6,
-    shade: 0.28,
+    blur: 1,
+    shade: 0,
   },
   frontLeft: {
-    x: -190,
-    y: 24,
-    scale: 0.82,
-    opacity: 0.86,
+    x: -224,
+    y: -56,
+    scale: 0.5,
+    opacity: 0.24,
     zIndex: 4,
-    blur: 0,
-    shade: 0.08,
+    blur: 0.3,
+    shade: 0,
   },
 };
 
@@ -223,203 +223,62 @@ function getCarouselSlot(index: number, activeIndex: number, totalCards: number)
   return carouselSlots.frontLeft;
 }
 
-function CardFace({
+function CuratorArtwork({
   card,
   variant,
 }: {
   card: HeroCardData;
   variant: CarouselVariant;
 }) {
-  const isRaw = card.type === "raw";
   const isCenter = variant === "center";
   const isBack = variant === "back";
+  const artWidth = isCenter ? "238px" : isBack ? "138px" : "162px";
+  const artHeight = isCenter ? "178px" : isBack ? "104px" : "122px";
+
+  if (card.imageUrl) {
+    return (
+      <div
+        style={{
+          width: artWidth,
+          height: artHeight,
+          position: "relative",
+        }}
+      >
+        <Image
+          src={card.imageUrl}
+          alt={card.title}
+          fill
+          unoptimized
+          sizes={isCenter ? "238px" : "162px"}
+          style={{ objectFit: "contain" }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div
       style={{
-        width: isRaw
-          ? isCenter
-            ? "112px"
-            : isBack
-              ? "92px"
-              : "102px"
-          : isCenter
-            ? "120px"
-            : isBack
-              ? "98px"
-              : "108px",
-        height: isRaw
-          ? isCenter
-            ? "150px"
-            : isBack
-              ? "122px"
-              : "136px"
-          : isCenter
-            ? "160px"
-            : isBack
-              ? "132px"
-              : "146px",
-        borderRadius: isRaw ? "10px" : "12px",
-        border: isRaw
-          ? "1px solid rgba(231,222,208,0.32)"
-          : "1px solid rgba(244,244,245,0.5)",
-        background: card.imageUrl
-          ? "linear-gradient(180deg,#eeeeef 0%,#fafafa 15%,#d7d7da 16%,#f8fafc 17%,#1f1f23 100%)"
-          : isRaw
-            ? `linear-gradient(145deg, ${card.accent}, #111827 58%, #030304)`
-            : "linear-gradient(180deg,#eeeeef 0%,#fafafa 15%,#d7d7da 16%,#f8fafc 17%,#1f1f23 100%)",
-        boxShadow: isCenter
-          ? "0 0 34px rgba(231,222,208,0.18), 0 18px 34px rgba(0,0,0,0.68)"
-          : "0 12px 26px rgba(0,0,0,0.58)",
-        padding: isRaw ? "8px" : "7px",
-        position: "relative",
-        overflow: "hidden",
-        boxSizing: "border-box",
+        width: artWidth,
+        height: artHeight,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "rgba(231,222,208,0.62)",
+        fontSize: isCenter ? "11px" : "9px",
+        lineHeight: isCenter ? "15px" : "12px",
+        fontWeight: 900,
+        letterSpacing: "0.14em",
+        textAlign: "center",
+        textTransform: "uppercase",
       }}
     >
-      {!isRaw && (
-        <div
-          style={{
-            height: isCenter ? "27px" : isBack ? "20px" : "23px",
-            borderRadius: "6px",
-            background: "#f8fafc",
-            color: "#111827",
-            fontSize: isCenter ? "7px" : "6px",
-            lineHeight: isCenter ? "9px" : "8px",
-            fontWeight: 900,
-            padding: isCenter ? "4px 5px" : "3px 4px",
-            overflow: "hidden",
-            textTransform: "uppercase",
-          }}
-        >
-          {card.condition}
-          <br />
-          {card.title}
-        </div>
-      )}
-
-      <div
-        style={{
-          marginTop: isRaw ? "0" : "7px",
-          height: isRaw ? "100%" : isCenter ? "102px" : isBack ? "86px" : "92px",
-          borderRadius: isRaw ? "8px" : "7px",
-          border: "1px solid rgba(255,255,255,0.26)",
-          background: card.imageUrl
-            ? "#050506"
-            : isRaw
-              ? `radial-gradient(circle at 48% 24%, rgba(231,222,208,0.2), transparent 15%), linear-gradient(145deg, ${card.accent}, #2b2b31 54%, #030304 100%)`
-              : `radial-gradient(circle at 48% 24%, rgba(231,222,208,0.22), transparent 15%), linear-gradient(145deg, ${card.accent} 0%, ${card.secondary} 44%, #18181b 100%)`,
-          position: "relative",
-          overflow: "hidden",
-        }}
-      >
-        {card.imageUrl ? (
-          <span
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              inset: 0,
-              backgroundImage: `url(${card.imageUrl})`,
-              backgroundSize: "cover",
-              backgroundPosition: "center",
-              filter: "saturate(0.92) contrast(1.04)",
-            }}
-          />
-        ) : (
-          <>
-            <div
-              style={{
-                position: "absolute",
-                left: isCenter ? "24px" : "20px",
-                right: isCenter ? "24px" : "20px",
-                bottom: isCenter ? "16px" : "13px",
-                height: isCenter ? "18px" : "15px",
-                borderRadius: "50%",
-                border: "1px solid rgba(255,255,255,0.18)",
-                opacity: 0.64,
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                right: isCenter ? "22px" : "18px",
-                top: isCenter ? "20px" : "16px",
-                width: isCenter ? "25px" : "20px",
-                height: isCenter ? "25px" : "20px",
-                borderRadius: "999px",
-                background: "rgba(255,255,255,0.78)",
-                boxShadow: "0 0 18px rgba(231,222,208,0.3)",
-                opacity: isRaw ? 0.44 : 0.78,
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                left: isCenter ? "21px" : "18px",
-                top: isCenter ? "22px" : "18px",
-                width: isCenter ? "72px" : isBack ? "52px" : "62px",
-                height: isCenter ? "72px" : isBack ? "52px" : "62px",
-                border: "1px solid rgba(255,255,255,0.16)",
-                borderRadius: "50%",
-                transform: "rotate(-18deg)",
-                opacity: 0.46,
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                left: isCenter ? "30px" : isBack ? "25px" : "28px",
-                right: isCenter ? "30px" : isBack ? "25px" : "28px",
-                top: isCenter ? "42px" : isBack ? "35px" : "38px",
-                color: "rgba(255,255,255,0.72)",
-                fontSize: isCenter ? "9px" : "7px",
-                lineHeight: isCenter ? "12px" : "10px",
-                fontWeight: 900,
-                textAlign: "center",
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-              }}
-            >
-              No photo
-            </div>
-            <div
-              style={{
-                position: "absolute",
-                left: "18px",
-                right: "18px",
-                bottom: isCenter ? "16px" : "13px",
-                height: "1px",
-                background:
-                  "linear-gradient(90deg, transparent, rgba(231,222,208,0.44), transparent)",
-              }}
-            />
-          </>
-        )}
-      </div>
-
-      {isRaw && !isBack && !card.imageUrl && (
-        <p
-          style={{
-            position: "absolute",
-            top: "11px",
-            left: "11px",
-            right: "11px",
-            margin: 0,
-            color: "#f4f4f5",
-            fontSize: "7px",
-            lineHeight: "10px",
-            fontWeight: 900,
-            textTransform: "uppercase",
-          }}
-        >
-          {card.title}
-        </p>
-      )}
+      Photo pending
     </div>
   );
 }
 
-function CarouselCard({
+function CuratorCollectible({
   card,
   variant,
 }: {
@@ -432,158 +291,196 @@ function CarouselCard({
   return (
     <div
       style={{
-        width: isCenter ? "226px" : isBack ? "190px" : "212px",
-        height: isCenter ? "348px" : isBack ? "204px" : "266px",
-        borderRadius: isCenter ? "17px" : "16px",
-        border: isCenter
-          ? "1px solid rgba(231,222,208,0.28)"
-          : "1px solid rgba(201,205,211,0.14)",
-        background: isCenter
-          ? "linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.014)), rgba(5,5,6,0.82)"
-          : "linear-gradient(180deg, rgba(255,255,255,0.042), rgba(255,255,255,0.008)), rgba(5,5,6,0.74)",
-        boxShadow: isCenter
-          ? "0 24px 54px rgba(0,0,0,0.56), inset 0 1px 0 rgba(231,222,208,0.08)"
-          : "0 16px 34px rgba(0,0,0,0.42), inset 0 1px 0 rgba(231,222,208,0.04)",
-        padding: isCenter ? "14px" : isBack ? "10px" : "12px",
-        boxSizing: "border-box",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        color: "#fff",
+        width: isCenter ? "254px" : isBack ? "148px" : "174px",
+        height: isCenter ? "194px" : isBack ? "116px" : "136px",
+        position: "relative",
+        display: "grid",
+        placeItems: "center",
       }}
     >
       <span
+        aria-hidden="true"
         style={{
-          alignSelf: "flex-start",
-          display: "inline-flex",
-          alignItems: "center",
-          height: isBack ? "18px" : "23px",
-          border: `1px solid ${card.accent}`,
-          borderRadius: "999px",
+          position: "absolute",
+          left: "50%",
+          bottom: isCenter ? "7px" : "4px",
+          width: isCenter ? "218px" : isBack ? "82px" : "108px",
+          height: isCenter ? "22px" : "12px",
+          borderRadius: "50%",
+          transform: "translateX(-50%)",
+          background:
+            "radial-gradient(ellipse, rgba(231,222,208,0.13), rgba(201,205,211,0.035) 46%, transparent 74%)",
+          filter: isCenter ? "blur(5px)" : "blur(4px)",
+          opacity: isCenter ? 0.76 : 0.22,
+        }}
+      />
+      <div style={{ position: "relative", zIndex: 2 }}>
+        <CuratorArtwork card={card} variant={variant} />
+      </div>
+    </div>
+  );
+}
+
+function CuratorAmbient() {
+  return (
+    <>
+      <span
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: "74px",
+          width: "430px",
+          height: "190px",
+          borderRadius: "50%",
+          transform: "translateX(-50%)",
+          background:
+            "radial-gradient(ellipse, rgba(255,255,255,0.08), rgba(231,222,208,0.028) 42%, transparent 74%)",
+          filter: "blur(10px)",
+          opacity: 0.68,
+        }}
+      />
+      <span
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: "189px",
+          width: "520px",
+          height: "36px",
+          borderRadius: "50%",
+          transform: "translateX(-50%)",
+          background:
+            "radial-gradient(ellipse, rgba(201,205,211,0.08), rgba(231,222,208,0.025) 46%, transparent 74%)",
+          filter: "blur(6px)",
+          opacity: 0.7,
+        }}
+      />
+      <span
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          left: "108px",
+          right: "108px",
+          top: "205px",
+          height: "1px",
+          background:
+            "linear-gradient(90deg, transparent, rgba(231,222,208,0.18), transparent)",
+          opacity: 0.4,
+        }}
+      />
+    </>
+  );
+}
+
+function CuratorFeaturedLabel() {
+  return (
+    <p
+      style={{
+        position: "absolute",
+        left: "50%",
+        top: "0",
+        zIndex: 6,
+        transform: "translateX(-50%)",
+        margin: 0,
+        color: "rgba(231,222,208,0.62)",
+        fontSize: "10px",
+        lineHeight: "13px",
+        fontWeight: 900,
+        letterSpacing: "0.28em",
+        textTransform: "uppercase",
+        whiteSpace: "nowrap",
+      }}
+    >
+      Featured Today
+    </p>
+  );
+}
+
+function CuratorDetails({ card }: { card: HeroCardData }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: "50%",
+        bottom: "0",
+        zIndex: 6,
+        width: "520px",
+        transform: "translateX(-50%)",
+        textAlign: "center",
+        display: "grid",
+        justifyItems: "center",
+        pointerEvents: "none",
+      }}
+    >
+      <h2
+        style={{
+          maxWidth: "456px",
+          margin: 0,
           color: "#fff",
-          background: `linear-gradient(135deg, ${card.accent}, rgba(9,9,11,0.86) 64%)`,
-          padding: isBack ? "0 7px" : "0 10px",
-          fontSize: isBack ? "8px" : "10px",
-          lineHeight: "12px",
+          fontSize: "25px",
+          lineHeight: "30px",
           fontWeight: 900,
-          boxShadow: `0 0 ${isCenter ? "22px" : "15px"} ${card.accent}88, inset 0 1px 0 rgba(255,255,255,0.18)`,
-          whiteSpace: "nowrap",
+          letterSpacing: "0",
+          display: "-webkit-box",
+          overflow: "hidden",
+          WebkitBoxOrient: "vertical",
+          WebkitLineClamp: 2,
         }}
       >
-        {card.featuredLabel}
-      </span>
-
-      <div style={{ marginTop: isBack ? "9px" : isCenter ? "12px" : "9px" }}>
-        <CardFace card={card} variant={variant} />
-      </div>
-
-      {!isBack && (
-        <div style={{ width: "100%", marginTop: isCenter ? "12px" : "9px" }}>
-          <h2
-            style={{
-              margin: 0,
-              color: "#fff",
-              fontSize: isCenter ? "17px" : "13px",
-              lineHeight: isCenter ? "20px" : "16px",
-              fontWeight: 900,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {card.title}
-          </h2>
-          {isCenter && (
-            <p
-              style={{
-                margin: "5px 0 0",
-                color: "#b9bcc4",
-                fontSize: "11px",
-                lineHeight: "14px",
-                fontWeight: 700,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {card.subtitle}
-            </p>
-          )}
-        </div>
-      )}
-
-      {!isBack && (
-        <div
-          style={{
-            width: "100%",
-            marginTop: "auto",
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "space-between",
-            gap: "8px",
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            {isCenter && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  maxWidth: "100%",
-                  height: "20px",
-                  border: "1px solid rgba(201,205,211,0.18)",
-                  borderRadius: "5px",
-                  color: "#C9CDD3",
-                  background: "rgba(9,9,11,0.62)",
-                  padding: "0 7px",
-                  fontSize: "9px",
-                  fontWeight: 900,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {card.condition}
-              </span>
-            )}
-            <p
-              style={{
-                margin: isCenter ? "7px 0 0" : "0",
-                color: "#fff",
-                fontSize: isCenter ? "22px" : "18px",
-                lineHeight: isCenter ? "24px" : "20px",
-                fontWeight: 900,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {card.price}
-            </p>
-          </div>
-
-          {isCenter && (
-            <span
-              style={{
-                height: "31px",
-                minWidth: "82px",
-                borderRadius: "8px",
-                border: "1px solid rgba(231,222,208,0.28)",
-                background:
-                  "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(231,222,208,0.055))",
-                color: "#fff",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "11px",
-                fontWeight: 900,
-                boxShadow: "0 0 16px rgba(231,222,208,0.12)",
-                flexShrink: 0,
-              }}
-            >
-              View Card
-            </span>
-          )}
-        </div>
-      )}
-
-      {isBack && <div style={{ flex: 1 }} />}
+        {card.title}
+      </h2>
+      <p
+        style={{
+          maxWidth: "360px",
+          margin: "4px 0 0",
+          color: "rgba(201,205,211,0.66)",
+          fontSize: "11px",
+          lineHeight: "14px",
+          fontWeight: 800,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {card.subtitle}
+      </p>
+      <p
+        style={{
+          margin: "7px 0 0",
+          color: "#E7DED0",
+          fontSize: "22px",
+          lineHeight: "24px",
+          fontWeight: 900,
+        }}
+      >
+        {card.price}
+      </p>
+      <Link
+        href={card.href}
+        style={{
+          height: "35px",
+          minWidth: "120px",
+          marginTop: "10px",
+          borderRadius: "999px",
+          border: "1px solid rgba(231,222,208,0.28)",
+          background: "rgba(231,222,208,0.96)",
+          color: "#111",
+          textDecoration: "none",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "0 15px",
+          fontSize: "12px",
+          lineHeight: "15px",
+          fontWeight: 900,
+          boxShadow:
+            "0 14px 30px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.38)",
+          pointerEvents: "auto",
+        }}
+      >
+        View Listing
+      </Link>
     </div>
   );
 }
@@ -1412,6 +1309,7 @@ export default function Home() {
   const activeCarouselIndex = featuredCards.length
     ? activeIndex % featuredCards.length
     : 0;
+  const activeHeroCard = featuredCards[activeCarouselIndex] || null;
 
   const showPreviousCard = () => {
     if (featuredCards.length <= 1) {
@@ -1475,25 +1373,6 @@ export default function Home() {
             overflow: "hidden",
           }}
         >
-          {[0, 1, 2].map((line) => (
-            <span
-              key={line}
-              style={{
-                position: "absolute",
-                right: line === 0 ? "54px" : line === 1 ? "146px" : "318px",
-                top: line === 0 ? "118px" : line === 1 ? "158px" : "203px",
-                width: line === 2 ? "390px" : "330px",
-                height: "1px",
-                borderRadius: "999px",
-                background:
-                  "linear-gradient(90deg, transparent, rgba(231,222,208,0.34), transparent)",
-                boxShadow: "0 0 13px rgba(231,222,208,0.11)",
-                transform: line === 1 ? "rotate(-13deg)" : "rotate(-18deg)",
-                opacity: line === 2 ? 0.13 : 0.22,
-              }}
-            />
-          ))}
-
           <button
             type="button"
             aria-label="Previous featured card"
@@ -1645,61 +1524,28 @@ export default function Home() {
                 height: "330px",
                 position: "relative",
                 overflow: "visible",
+                isolation: "isolate",
               }}
             >
-              <div
-                style={{
-                  position: "absolute",
-                  left: "50%",
-                  top: "50%",
-                  transform: "translate(-50%, -50%)",
-                  width: "328px",
-                  height: "286px",
-                  borderRadius: "50%",
-                  background:
-                    "radial-gradient(ellipse, rgba(255,255,255,0.27), rgba(231,222,208,0.09) 44%, transparent 72%)",
-                  filter: "blur(4px)",
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  left: "50%",
-                  bottom: "8px",
-                  transform: "translateX(-50%)",
-                  width: "520px",
-                  height: "38px",
-                  borderRadius: "50%",
-                  background:
-                    "radial-gradient(ellipse, rgba(201,205,211,0.18), transparent 68%)",
-                  filter: "blur(3px)",
-                }}
-              />
+              <CuratorAmbient />
+              {activeHeroCard ? <CuratorFeaturedLabel /> : null}
 
               {isLoadingHomeData && featuredCards.length === 0 ? (
                 <article
                   style={{
                     position: "absolute",
                     left: "50%",
-                    top: "50%",
+                    top: "44%",
                     transform: "translate(-50%, -50%)",
-                    width: "226px",
-                    height: "348px",
-                    borderRadius: "17px",
-                    border: "1px solid rgba(231,222,208,0.22)",
-                    background:
-                      "linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.014)), rgba(5,5,6,0.82)",
-                    boxShadow:
-                      "0 24px 54px rgba(0,0,0,0.56), inset 0 1px 0 rgba(231,222,208,0.08)",
+                    width: "280px",
                     color: "#C9CDD3",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "12px",
-                    lineHeight: "16px",
+                    fontSize: "11px",
+                    lineHeight: "15px",
                     fontWeight: 900,
                     textAlign: "center",
-                    padding: "22px",
+                    letterSpacing: "0.16em",
+                    textTransform: "uppercase",
+                    padding: "0",
                     boxSizing: "border-box",
                   }}
                 >
@@ -1712,18 +1558,12 @@ export default function Home() {
                   style={{
                     position: "absolute",
                     left: "50%",
-                    top: "50%",
+                    top: "47%",
                     transform: "translate(-50%, -50%)",
-                    width: "262px",
-                    minHeight: "190px",
-                    borderRadius: "17px",
-                    border: "1px solid rgba(231,222,208,0.22)",
-                    background:
-                      "linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.014)), rgba(5,5,6,0.82)",
-                    boxShadow:
-                      "0 24px 54px rgba(0,0,0,0.56), inset 0 1px 0 rgba(231,222,208,0.08)",
+                    width: "330px",
                     color: "#fff",
-                    padding: "20px",
+                    textAlign: "center",
+                    padding: "0",
                     boxSizing: "border-box",
                   }}
                 >
@@ -1744,10 +1584,10 @@ export default function Home() {
                   </span>
                   <h2
                     style={{
-                      margin: "15px 0 0",
+                      margin: "13px 0 0",
                       color: "#fff",
-                      fontSize: "20px",
-                      lineHeight: "24px",
+                      fontSize: "22px",
+                      lineHeight: "27px",
                       fontWeight: 900,
                     }}
                   >
@@ -1755,10 +1595,10 @@ export default function Home() {
                   </h2>
                   <p
                     style={{
-                      margin: "9px 0 0",
+                      margin: "8px 0 0",
                       color: "#a1a1aa",
                       fontSize: "12px",
-                      lineHeight: "17px",
+                      lineHeight: "18px",
                       fontWeight: 800,
                     }}
                   >
@@ -1791,27 +1631,19 @@ export default function Home() {
                       zIndex: slot.zIndex,
                       filter: slot.blur ? `blur(${slot.blur}px)` : "none",
                       transition:
-                        "left 420ms ease, top 420ms ease, transform 420ms ease, opacity 420ms ease, filter 420ms ease",
+                        "left 680ms cubic-bezier(0.2, 0.8, 0.2, 1), top 680ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 680ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 560ms ease, filter 680ms ease",
                       color: "inherit",
                       textDecoration: "none",
-                  }}
-                >
-                    <CarouselCard card={card} variant={cardVariant} />
-                    {slot.shade > 0 && (
-                      <span
-                        aria-hidden="true"
-                        style={{
-                          position: "absolute",
-                          inset: 0,
-                          borderRadius: "16px",
-                          background: `rgba(0,0,0,${slot.shade})`,
-                          pointerEvents: "none",
-                        }}
-                      />
-                    )}
+                    }}
+                  >
+                    <CuratorCollectible card={card} variant={cardVariant} />
                   </Link>
                 );
               })}
+
+              {activeHeroCard ? (
+                <CuratorDetails card={activeHeroCard} />
+              ) : null}
             </div>
           </div>
         </section>

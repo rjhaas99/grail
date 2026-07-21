@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import GrailPassPresenceCard from "../components/GrailPassPresenceCard";
-import Header from "../components/Header";
+import PageShell from "../components/PageShell";
 import { mockSellerDashboardData } from "../lib/mockData";
 import {
   calculateProgression,
@@ -1333,11 +1333,12 @@ export default function SellerDashboardPage() {
   const activeInventoryCount = activeListings.length + auctionListings.length;
 
   return (
-    <main className="dashboard-page">
-      <style>{pageStyles}</style>
-      <div className="dashboard-shell">
-        <Header />
-
+    <PageShell
+      className="dashboard-page"
+      shellClassName="dashboard-shell"
+      shellStyle={{ padding: "8px 0 38px" }}
+      styles={pageStyles}
+    >
         <section className="page-heading">
           <div>
             <span>Seller Tools</span>
@@ -1825,7 +1826,6 @@ export default function SellerDashboardPage() {
             </section>
           </aside>
         </section>
-      </div>
       {trackingOrderId ? (
         <div className="modal-backdrop" role="presentation">
           <section className="panel tracking-modal" role="dialog" aria-modal="true">
@@ -1872,7 +1872,7 @@ export default function SellerDashboardPage() {
           </section>
         </div>
       ) : null}
-    </main>
+    </PageShell>
   );
 }
 
@@ -1902,7 +1902,7 @@ const pageStyles = `
   }
 
   .page-heading {
-    margin-top: 18px;
+    margin-top: 10px;
     display: flex;
     align-items: flex-end;
     justify-content: space-between;

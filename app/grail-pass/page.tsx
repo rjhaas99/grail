@@ -1,5 +1,5 @@
-import Header from "../components/Header";
 import GrailPassBadge from "../components/GrailPassBadge";
+import PageShell from "../components/PageShell";
 import {
   getGrailPassPerksForMembershipType,
   grailPassMembershipCatalog,
@@ -97,10 +97,12 @@ const roadmapSections = [
 
 export default function GrailPassPage() {
   return (
-    <main className="grail-pass-page">
-      <style>{pageStyles}</style>
-      <Header />
-
+    <PageShell
+      className="grail-pass-page"
+      shellClassName="grail-pass-app-shell"
+      shellStyle={{ padding: "8px 0 58px" }}
+      styles={pageStyles}
+    >
       <section className="pass-hero" aria-labelledby="grail-pass-title">
         <div className="pass-hero-copy">
           <p className="pass-kicker">Premium Membership</p>
@@ -257,7 +259,7 @@ export default function GrailPassPage() {
           ))}
         </div>
       </section>
-    </main>
+    </PageShell>
   );
 }
 
@@ -273,7 +275,7 @@ const pageStyles = `
 
   .pass-hero,
   .pass-shell {
-    width: min(1180px, calc(100% - 32px));
+    width: 100%;
     margin: 0 auto;
   }
 
@@ -282,7 +284,7 @@ const pageStyles = `
     grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.65fr);
     gap: 28px;
     align-items: stretch;
-    padding: 86px 0 34px;
+    padding: 10px 0 34px;
   }
 
   .pass-hero-copy,
@@ -705,11 +707,11 @@ const pageStyles = `
   @media (max-width: 640px) {
     .pass-hero,
     .pass-shell {
-      width: min(100% - 22px, 1180px);
+      width: 100%;
     }
 
     .pass-hero {
-      padding-top: 48px;
+      padding-top: 10px;
     }
 
     .pass-hero-copy {

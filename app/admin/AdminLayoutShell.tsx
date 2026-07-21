@@ -32,8 +32,8 @@ const layoutStyles = `
     background: transparent;
   }
   .admin-layout-bar {
-    width: min(1240px, calc(100vw - 32px));
-    margin: 0 auto;
+    width: 100%;
+    margin: 0;
     padding: 14px 0 0;
     display: flex;
     align-items: center;

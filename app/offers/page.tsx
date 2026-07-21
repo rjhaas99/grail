@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
-import Header from "../components/Header";
+import PageShell from "../components/PageShell";
 
 type OfferRole = "buyer" | "seller";
 type OfferStatus = "pending" | "accepted" | "declined" | "countered" | "withdrawn" | "expired" | "completed";
@@ -309,11 +309,12 @@ export default function OffersPage() {
   const emptyCopy = getEmptyCopy(activeTab);
 
   return (
-    <main className="offers-page">
-      <style>{pageStyles}</style>
-      <div className="offers-shell">
-        <Header />
-
+    <PageShell
+      className="offers-page"
+      shellClassName="offers-shell"
+      shellStyle={{ padding: "8px 0 80px" }}
+      styles={pageStyles}
+    >
         <section className="offers-hero">
           <div>
             <span>Marketplace Offers</span>
@@ -478,8 +479,7 @@ export default function OffersPage() {
               ))
             : null}
         </section>
-      </div>
-    </main>
+    </PageShell>
   );
 }
 
@@ -493,9 +493,9 @@ const pageStyles = `
   }
 
   .offers-shell {
-    width: min(1180px, calc(100% - 32px));
+    width: 1240px;
     margin: 0 auto;
-    padding: 24px 0 80px;
+    padding: 8px 0 80px;
   }
 
   .offers-hero {
@@ -503,7 +503,7 @@ const pageStyles = `
     justify-content: space-between;
     gap: 24px;
     align-items: end;
-    padding: 64px 0 28px;
+    padding: 10px 0 28px;
   }
 
   .offers-hero span,
@@ -711,7 +711,7 @@ const pageStyles = `
     .offers-hero {
       align-items: flex-start;
       flex-direction: column;
-      padding-top: 42px;
+      padding-top: 10px;
     }
 
     .offers-tabs {

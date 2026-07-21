@@ -369,25 +369,6 @@ const sellerPolicyLinks = [
   { label: "Prohibited Items", href: "/prohibited-items" },
 ];
 
-const listingAssistantFieldLabels: Record<ListingAssistantFieldKey, string> = {
-  category: "Category",
-  sport: "Sport",
-  player: "Player",
-  year: "Year",
-  brand: "Brand",
-  set: "Set",
-  cardNumber: "Card Number",
-  manufacturer: "Manufacturer",
-  team: "Team",
-  parallel: "Parallel",
-  grader: "Grader",
-  grade: "Grade",
-  certificationNumber: "Certification Number",
-  rookieStatus: "Rookie Status",
-  suggestedTitle: "Suggested Title",
-  suggestedDescription: "Description",
-};
-
 function formatCurrency(value: string | number) {
   const number = Number(value);
   if (!number) return "$0";
@@ -506,16 +487,8 @@ function writeListingAssistantCache(
   }
 }
 
-function formatConfidence(confidence: number) {
-  return `${Math.round(Math.max(0, Math.min(1, confidence)) * 100)}%`;
-}
-
 function isHighConfidence(field: ListingAssistantField | undefined) {
   return Boolean(field?.value && field.confidence >= 0.78);
-}
-
-function isMediumConfidence(field: ListingAssistantField | undefined) {
-  return Boolean(field?.value && field.confidence >= 0.55);
 }
 
 function normalizeAssistantCategory(value: string) {
@@ -545,27 +518,6 @@ function normalizeAssistantGrader(value: string) {
   }
 
   return value.trim() ? "Other" : "PSA";
-}
-
-function getPriceDifferenceLabel(askingPriceValue: string, marketValueValue: number) {
-  const askingPriceNumber = Number(askingPriceValue);
-
-  if (!Number.isFinite(askingPriceNumber) || askingPriceNumber <= 0 || marketValueValue <= 0) {
-    return "Set an asking price to compare.";
-  }
-
-  const difference = askingPriceNumber - marketValueValue;
-  const percentage = marketValueValue > 0
-    ? Math.round((Math.abs(difference) / marketValueValue) * 100)
-    : 0;
-
-  if (Math.abs(difference) < 0.01) {
-    return "Matches market value.";
-  }
-
-  return difference > 0
-    ? `${formatCurrencyWithCents(difference)} above market · ${percentage}%`
-    : `${formatCurrencyWithCents(Math.abs(difference))} below market · ${percentage}%`;
 }
 
 function fileToDataUrl(file: File) {
@@ -644,7 +596,13 @@ export default function ListCardPage() {
   const [listingAssistantResult, setListingAssistantResult] =
     useState<ListingAssistantResponse | null>(null);
   const [isAnalyzingListing, setIsAnalyzingListing] = useState(false);
-  const [isAskingPriceUserControlled, setIsAskingPriceUserControlled] =
+  const [assistantFilledFields, setAssistantFilledFields] = useState<
+    Set<ListingUserControlledField>
+  >(new Set());
+  const [areSportsCardsProMatchesExpanded, setAreSportsCardsProMatchesExpanded] =
+    useState(false);
+  const [areMarketDetailsExpanded, setAreMarketDetailsExpanded] = useState(false);
+  const [areAdvancedCardFieldsExpanded, setAreAdvancedCardFieldsExpanded] =
     useState(false);
   const listingAssistantPhotoKeyRef = useRef("");
   const listingAssistantInFlightKeyRef = useRef("");
@@ -655,9 +613,15 @@ export default function ListCardPage() {
 
   const markUserControlledField = useCallback((field: ListingUserControlledField) => {
     userControlledFieldsRef.current.add(field);
-    if (field === "askingPrice") {
-      setIsAskingPriceUserControlled(true);
-    }
+    setAssistantFilledFields((current) => {
+      if (!current.has(field)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.delete(field);
+      return next;
+    });
   }, []);
 
   const markLoadedFieldsAsUserControlled = useCallback(() => {
@@ -678,18 +642,33 @@ export default function ListCardPage() {
       "minimumOffer",
       "condition",
     ]);
-    setIsAskingPriceUserControlled(true);
+    setAssistantFilledFields(new Set());
+    setAreSportsCardsProMatchesExpanded(false);
+    setAreMarketDetailsExpanded(false);
+    setAreAdvancedCardFieldsExpanded(false);
   }, []);
 
   const clearUserControlledFields = useCallback(() => {
     userControlledFieldsRef.current = new Set();
-    setIsAskingPriceUserControlled(false);
+    setAssistantFilledFields(new Set());
+    setAreSportsCardsProMatchesExpanded(false);
+    setAreMarketDetailsExpanded(false);
+    setAreAdvancedCardFieldsExpanded(false);
   }, []);
 
   const applyAssistantValue = useCallback(
     (field: ListingUserControlledField, applyValue: () => void) => {
       if (!userControlledFieldsRef.current.has(field)) {
         applyValue();
+        setAssistantFilledFields((current) => {
+          if (current.has(field)) {
+            return current;
+          }
+
+          const next = new Set(current);
+          next.add(field);
+          return next;
+        });
       }
     },
     [],
@@ -1203,6 +1182,7 @@ export default function ListCardPage() {
       if (sportsCardsProValue) {
         setSportsCardsProValue(sportsCardsProValue);
         setSportsCardsProCandidates([]);
+        setAreSportsCardsProMatchesExpanded(false);
         if (sportsCardsProValue.estimatedValue !== null) {
           applyAssistantValue("marketValue", () =>
             setMarketValue(String(sportsCardsProValue.estimatedValue)),
@@ -1232,6 +1212,7 @@ export default function ListCardPage() {
         });
       } else if (result.sportsCardsPro.candidates.length > 1) {
         setSportsCardsProCandidates(result.sportsCardsPro.candidates);
+        setAreSportsCardsProMatchesExpanded(false);
         setSportsCardsProStatus({
           type: "success",
           text: "Listing Assistant found possible SportsCardsPro matches.",
@@ -1423,35 +1404,6 @@ export default function ListCardPage() {
   const listingCompletionIssue = validateForm();
   const isListingReady = !listingCompletionIssue;
   const hasAssistantPhotos = Boolean(selectedPhotos.front?.file && selectedPhotos.back?.file);
-  const assistantMarketValue =
-    sportsCardsProValue?.estimatedValue ??
-    listingAssistantResult?.autofill?.estimatedMarketValue ??
-    null;
-  const assistantSuggestedAskingPrice =
-    listingAssistantResult?.autofill?.suggestedAskingPrice ??
-    sportsCardsProValue?.estimatedValue ??
-    null;
-  const askingPriceIsUserControlled = isAskingPriceUserControlled;
-  const listingAssistantSuggestions = useMemo(() => {
-    const fields = listingAssistantResult?.analysis.fields;
-
-    if (!fields) {
-      return [];
-    }
-
-    return (Object.entries(fields) as [ListingAssistantFieldKey, ListingAssistantField][])
-      .filter(([, field]) => isMediumConfidence(field))
-      .map(([key, field]) => ({
-        key,
-        label: listingAssistantFieldLabels[key],
-        value: field.value,
-        confidence: field.confidence,
-        confidenceLabel:
-          field.confidence >= 0.78
-            ? "Filled automatically"
-            : `Review · ${formatConfidence(field.confidence)} confidence`,
-      }));
-  }, [listingAssistantResult]);
   const assistantAnalysisStatus = listingAssistantResult?.analysis.status;
   const assistantAnalysisConfidenceLabel =
     listingAssistantResult?.analysis.confidenceLabel;
@@ -1558,6 +1510,28 @@ export default function ListCardPage() {
     },
   ];
 
+  function getAssistantFieldNote(field: ListingUserControlledField) {
+    if (!assistantFilledFields.has(field)) {
+      return "";
+    }
+
+    if (
+      (field === "grader" || field === "grade" || field === "certNumber") &&
+      listingAssistantResult?.psa.status === "verified" &&
+      psaVerification?.verified
+    ) {
+      return "Verified by AI";
+    }
+
+    return "✓ Filled automatically";
+  }
+
+  function renderAssistantFieldNote(field: ListingUserControlledField) {
+    const note = getAssistantFieldNote(field);
+
+    return note ? <small className="field-source-note">{note}</small> : null;
+  }
+
   function buildTitle() {
     if (!isAutoTitle && title.trim()) {
       return title.trim();
@@ -1594,6 +1568,8 @@ export default function ListCardPage() {
       setDraftImagePreview("");
     }
     setListingAssistantResult(null);
+    setAssistantFilledFields(new Set());
+    setAreSportsCardsProMatchesExpanded(false);
     listingAssistantPhotoKeyRef.current = "";
     listingAssistantInFlightKeyRef.current = "";
     setListingAssistantStatus({
@@ -1881,6 +1857,8 @@ export default function ListCardPage() {
     setSportsCardsProStatus(null);
     setSportsCardsProCandidates([]);
     setSportsCardsProValue(null);
+    setAreSportsCardsProMatchesExpanded(false);
+    setAreMarketDetailsExpanded(false);
 
     if (!year.trim() && !setName.trim() && !subject.trim() && !cardNumber.trim()) {
       setSportsCardsProStatus({
@@ -1920,6 +1898,7 @@ export default function ListCardPage() {
 
       const candidates = payload.candidates || [];
       setSportsCardsProCandidates(candidates);
+      setAreSportsCardsProMatchesExpanded(false);
 
       if (payload.error) {
         setSportsCardsProStatus({ type: "error", text: payload.error });
@@ -2005,6 +1984,8 @@ export default function ListCardPage() {
       } satisfies SportsCardsProValue;
 
       setSportsCardsProValue(value);
+      setAreSportsCardsProMatchesExpanded(false);
+      setAreMarketDetailsExpanded(false);
       applyAssistantValue("marketValue", () => setMarketValue(String(value.estimatedValue)));
       if (!isCollectionMode && !isAuctionMode) {
         applyAssistantValue("askingPrice", () => setAskingPrice(String(value.estimatedValue)));
@@ -2676,69 +2657,6 @@ export default function ListCardPage() {
                     {listingAssistantStatus.text}
                   </p>
                 ) : null}
-
-                {listingAssistantSuggestions.length > 0 ? (
-                  <div className="assistant-suggestion-grid">
-                    {listingAssistantSuggestions.map((suggestion) => (
-                      <div key={suggestion.key}>
-                        <span>{suggestion.label}</span>
-                        <strong>{suggestion.value}</strong>
-                        <small>{suggestion.confidenceLabel}</small>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                {assistantMarketValue ? (
-                  <div className="assistant-price-panel">
-                    <div>
-                      <span>Market Value</span>
-                      <strong>{formatCurrencyWithCents(assistantMarketValue)}</strong>
-                    </div>
-                    <div>
-                      <span>Suggested Asking Price</span>
-                      <strong>
-                        {assistantSuggestedAskingPrice
-                          ? formatCurrencyWithCents(assistantSuggestedAskingPrice)
-                          : "Review"}
-                      </strong>
-                    </div>
-                    <div>
-                      <span>Difference from Market</span>
-                      <strong>{getPriceDifferenceLabel(askingPrice, assistantMarketValue)}</strong>
-                    </div>
-                    {askingPriceIsUserControlled ? (
-                      <p>Manual asking price kept.</p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {isListingReady ? (
-                  <p className="assistant-ready-note">Your listing is ready to publish.</p>
-                ) : null}
-
-                {listingAssistantResult?.sportsCardsPro.candidates.length &&
-                !listingAssistantResult.sportsCardsPro.selectedValue ? (
-                  <div className="assistant-match-panel">
-                    <div>
-                      <span>Possible Matches</span>
-                      <strong>Choose the exact SportsCardsPro card.</strong>
-                    </div>
-                    <div className="assistant-match-grid">
-                      {listingAssistantResult.sportsCardsPro.candidates.map((candidate) => (
-                        <button
-                          key={candidate.sportsCardsProId}
-                          type="button"
-                          disabled={isFetchingSportsCardsProValue}
-                          onClick={() => void selectSportsCardsProCandidate(candidate)}
-                        >
-                          <strong>{candidate.productName}</strong>
-                          <span>{candidate.setName || "SportsCardsPro product"}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
               </div>
             </section>
 
@@ -2758,6 +2676,7 @@ export default function ListCardPage() {
                       <option key={item}>{item}</option>
                     ))}
                   </select>
+                  {renderAssistantFieldNote("category")}
                 </label>
                 <label>
                   <span>Card title</span>
@@ -2769,6 +2688,7 @@ export default function ListCardPage() {
                       setTitle(event.target.value);
                     }}
                   />
+                  {renderAssistantFieldNote("title")}
                   <small>
                     Auto title: {generatedTitle || "Add card details to generate a title."}
                   </small>
@@ -2782,6 +2702,7 @@ export default function ListCardPage() {
                       setYear(event.target.value);
                     }}
                   />
+                  {renderAssistantFieldNote("year")}
                 </label>
                 <label>
                   <span>Set</span>
@@ -2792,6 +2713,7 @@ export default function ListCardPage() {
                       setSetName(event.target.value);
                     }}
                   />
+                  {renderAssistantFieldNote("setName")}
                 </label>
                 <label>
                   <span>Card number</span>
@@ -2802,6 +2724,7 @@ export default function ListCardPage() {
                       setCardNumber(event.target.value);
                     }}
                   />
+                  {renderAssistantFieldNote("cardNumber")}
                 </label>
                 <label>
                   <span>Player / Character</span>
@@ -2812,6 +2735,7 @@ export default function ListCardPage() {
                       setSubject(event.target.value);
                     }}
                   />
+                  {renderAssistantFieldNote("subject")}
                 </label>
                 <label className="full-width">
                   <span>Listing description</span>
@@ -2824,42 +2748,10 @@ export default function ListCardPage() {
                       setListingDescription(event.target.value);
                     }}
                   />
+                  {renderAssistantFieldNote("listingDescription")}
                   <small>
                     The assistant can draft this, and you can edit it before publishing.
                   </small>
-                </label>
-                <label>
-                  <span>Serial Number</span>
-                  <select
-                    value={serialNumber}
-                    onChange={(event) => setSerialNumber(event.target.value)}
-                  >
-                    {serialNumberOptions.map((item) => (
-                      <option key={item}>{item}</option>
-                    ))}
-                  </select>
-                </label>
-                {serialNumber === "Custom" ? (
-                  <label>
-                    <span>Custom serial</span>
-                    <input
-                      value={customSerialNumber}
-                      onChange={(event) => setCustomSerialNumber(event.target.value)}
-                      placeholder="/35 or 12/99"
-                    />
-                  </label>
-                ) : null}
-                <label className="toggle-field">
-                  <span>Title mode</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      userControlledFieldsRef.current.delete("title");
-                      setIsAutoTitle(true);
-                    }}
-                  >
-                    Use Auto Title
-                  </button>
                 </label>
                 <label>
                   <span>Card type</span>
@@ -2874,6 +2766,7 @@ export default function ListCardPage() {
                     <option>Raw</option>
                     <option>Graded</option>
                   </select>
+                  {renderAssistantFieldNote("cardType")}
                 </label>
                 {cardType === "Raw" ? (
                   <label>
@@ -2889,6 +2782,7 @@ export default function ListCardPage() {
                         <option key={item}>{item}</option>
                       ))}
                     </select>
+                    {renderAssistantFieldNote("condition")}
                   </label>
                 ) : (
                   <>
@@ -2906,6 +2800,7 @@ export default function ListCardPage() {
                           <option key={item}>{item}</option>
                         ))}
                       </select>
+                      {renderAssistantFieldNote("grader")}
                     </label>
                     <label>
                       <span>Grade</span>
@@ -2920,6 +2815,7 @@ export default function ListCardPage() {
                           <option key={item}>{item}</option>
                         ))}
                       </select>
+                      {renderAssistantFieldNote("grade")}
                     </label>
                     <label>
                       <span>Certification Number</span>
@@ -2933,6 +2829,7 @@ export default function ListCardPage() {
                           clearPsaVerification();
                         }}
                       />
+                      {renderAssistantFieldNote("certNumber")}
                     </label>
                     {grader === "PSA" ? (
                       <div className="psa-verification-box">
@@ -2965,6 +2862,56 @@ export default function ListCardPage() {
                     ) : null}
                   </>
                 )}
+                <div className="advanced-field-group full-width">
+                  <button
+                    type="button"
+                    className="section-disclosure"
+                    aria-expanded={areAdvancedCardFieldsExpanded}
+                    onClick={() =>
+                      setAreAdvancedCardFieldsExpanded((current) => !current)
+                    }
+                  >
+                    <span>Advanced card fields</span>
+                    <strong>{areAdvancedCardFieldsExpanded ? "Hide" : "Show"}</strong>
+                  </button>
+                  {areAdvancedCardFieldsExpanded ? (
+                    <div className="field-grid three nested-field-grid">
+                      <label>
+                        <span>Serial Number</span>
+                        <select
+                          value={serialNumber}
+                          onChange={(event) => setSerialNumber(event.target.value)}
+                        >
+                          {serialNumberOptions.map((item) => (
+                            <option key={item}>{item}</option>
+                          ))}
+                        </select>
+                      </label>
+                      {serialNumber === "Custom" ? (
+                        <label>
+                          <span>Custom serial</span>
+                          <input
+                            value={customSerialNumber}
+                            onChange={(event) => setCustomSerialNumber(event.target.value)}
+                            placeholder="/35 or 12/99"
+                          />
+                        </label>
+                      ) : null}
+                      <label className="toggle-field">
+                        <span>Title mode</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            userControlledFieldsRef.current.delete("title");
+                            setIsAutoTitle(true);
+                          }}
+                        >
+                          Use Auto Title
+                        </button>
+                      </label>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </section>
 
@@ -3012,6 +2959,7 @@ export default function ListCardPage() {
                       setAskingPrice(event.target.value);
                     }}
                   />
+                  {renderAssistantFieldNote("askingPrice")}
                 </label>
                 <label>
                   <span>Minimum offer</span>
@@ -3024,9 +2972,10 @@ export default function ListCardPage() {
                       setMinimumOffer(event.target.value);
                     }}
                   />
+                  {renderAssistantFieldNote("minimumOffer")}
                 </label>
                 <label>
-                  <span>Market value placeholder</span>
+                  <span>Market value</span>
                   <input
                     value={marketValue}
                     inputMode="decimal"
@@ -3035,6 +2984,7 @@ export default function ListCardPage() {
                       setMarketValue(event.target.value);
                     }}
                   />
+                  {renderAssistantFieldNote("marketValue")}
                 </label>
               </div>
               {isAuctionMode ? (
@@ -3149,46 +3099,84 @@ export default function ListCardPage() {
                 ) : null}
 
                 {sportsCardsProCandidates.length > 0 ? (
-                  <div className="market-results">
-                    {sportsCardsProCandidates.map((candidate) => (
-                      <button
-                        key={candidate.sportsCardsProId}
-                        type="button"
-                        disabled={isFetchingSportsCardsProValue}
-                        onClick={() => void selectSportsCardsProCandidate(candidate)}
-                      >
-                        <strong>{candidate.productName}</strong>
-                        <span>{candidate.setName || "SportsCardsPro product"}</span>
-                      </button>
-                    ))}
+                  <div className="market-disclosure">
+                    <button
+                      type="button"
+                      className="section-disclosure"
+                      aria-expanded={areSportsCardsProMatchesExpanded}
+                      onClick={() =>
+                        setAreSportsCardsProMatchesExpanded((current) => !current)
+                      }
+                    >
+                      <span>
+                        Possible SportsCardsPro Matches ({sportsCardsProCandidates.length})
+                      </span>
+                      <strong>
+                        {areSportsCardsProMatchesExpanded
+                          ? "Hide Possible Matches"
+                          : "View Possible Matches"}
+                      </strong>
+                    </button>
+
+                    {areSportsCardsProMatchesExpanded ? (
+                      <div className="market-results">
+                        {sportsCardsProCandidates.map((candidate) => (
+                          <button
+                            key={candidate.sportsCardsProId}
+                            type="button"
+                            disabled={isFetchingSportsCardsProValue}
+                            onClick={() => void selectSportsCardsProCandidate(candidate)}
+                          >
+                            <strong>{candidate.productName}</strong>
+                            <span>{candidate.setName || "SportsCardsPro product"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
                 {sportsCardsProValue?.estimatedValue ? (
-                  <div className="market-value-detail">
-                    <p>
-                      Estimated Market Value{" "}
-                      <strong>{formatCurrency(sportsCardsProValue.estimatedValue)}</strong>
-                    </p>
-                    <p>
-                      Source:{" "}
-                      <Link
-                        href={sportsCardsProValue.sourceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        SportsCardsPro
-                      </Link>{" "}
-                      · Last updated:{" "}
-                      {new Date(sportsCardsProValue.fetchedAt).toLocaleDateString()}
-                    </p>
-                    <p>
-                      Estimate only. Verify the exact card, parallel, condition,
-                      and grade before pricing.
-                    </p>
-                    <button type="button" onClick={useSportsCardsProAskingPrice}>
-                      Use as Asking Price
+                  <div className="market-disclosure">
+                    <button
+                      type="button"
+                      className="section-disclosure"
+                      aria-expanded={areMarketDetailsExpanded}
+                      onClick={() =>
+                        setAreMarketDetailsExpanded((current) => !current)
+                      }
+                    >
+                      <span>Market Details</span>
+                      <strong>{areMarketDetailsExpanded ? "Hide" : "Show"}</strong>
                     </button>
+
+                    {areMarketDetailsExpanded ? (
+                      <div className="market-value-detail">
+                        <p>
+                          Estimated Market Value{" "}
+                          <strong>{formatCurrency(sportsCardsProValue.estimatedValue)}</strong>
+                        </p>
+                        <p>
+                          Source:{" "}
+                          <Link
+                            href={sportsCardsProValue.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            SportsCardsPro
+                          </Link>{" "}
+                          · Last updated:{" "}
+                          {new Date(sportsCardsProValue.fetchedAt).toLocaleDateString()}
+                        </p>
+                        <p>
+                          Estimate only. Verify the exact card, parallel, condition,
+                          and grade before pricing.
+                        </p>
+                        <button type="button" onClick={useSportsCardsProAskingPrice}>
+                          Use as Asking Price
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -3514,7 +3502,7 @@ const pageStyles = `
   .upload-preview { width: 100%; max-height: 58px; border-radius: 7px; object-fit: cover; }
   .listing-assistant-panel { margin-top: 14px; border: 1px solid rgba(231,222,208,0.18); border-radius: 12px; background: radial-gradient(circle at 20% 0%, rgba(231,222,208,0.08), transparent 34%), rgba(8,8,10,0.82); padding: 14px; display: grid; gap: 12px; }
   .listing-assistant-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-  .listing-assistant-header span, .assistant-match-panel span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+  .listing-assistant-header span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
   .listing-assistant-header h3 { margin: 6px 0 0; color: #fff; font-size: 18px; line-height: 22px; font-weight: 900; }
   .listing-assistant-header p { margin: 6px 0 0; color: #a1a1aa; font-size: 12px; line-height: 17px; font-weight: 800; max-width: 560px; }
   .assistant-timeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
@@ -3532,23 +3520,6 @@ const pageStyles = `
   .assistant-status { margin: 0; border-radius: 9px; padding: 10px; color: #C9CDD3; background: rgba(201,205,211,0.055); border: 1px solid rgba(201,205,211,0.14); font-size: 12px; line-height: 17px; font-weight: 900; }
   .assistant-status.success { color: #E7DED0; border-color: rgba(231,222,208,0.22); background: rgba(231,222,208,0.06); }
   .assistant-status.error { color: #fca5a5; border-color: rgba(248,113,113,0.24); background: rgba(248,113,113,0.07); }
-  .assistant-suggestion-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  .assistant-suggestion-grid div { border: 1px solid rgba(201,205,211,0.13); border-radius: 10px; background: rgba(3,3,4,0.72); padding: 10px; min-width: 0; }
-  .assistant-suggestion-grid span { color: #85858f; font-size: 10px; line-height: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; }
-  .assistant-suggestion-grid strong { display: block; margin-top: 5px; color: #fff; font-size: 13px; line-height: 17px; font-weight: 900; overflow-wrap: anywhere; }
-  .assistant-suggestion-grid small { display: block; margin-top: 5px; color: #C9CDD3; font-size: 10px; line-height: 14px; font-weight: 800; }
-  .assistant-match-panel { border-top: 1px solid rgba(201,205,211,0.12); padding-top: 12px; display: grid; gap: 10px; }
-  .assistant-match-panel strong { display: block; margin-top: 4px; color: #fff; font-size: 14px; line-height: 18px; font-weight: 900; }
-  .assistant-match-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .assistant-match-grid button { min-height: auto; padding: 10px; display: grid; justify-items: start; text-align: left; }
-  .assistant-match-grid button strong { margin: 0; font-size: 13px; line-height: 17px; }
-  .assistant-match-grid button span { margin-top: 4px; color: #a1a1aa; letter-spacing: 0; text-transform: none; }
-  .assistant-price-panel { border: 1px solid rgba(231,222,208,0.18); border-radius: 11px; background: rgba(231,222,208,0.045); padding: 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-  .assistant-price-panel div { min-width: 0; }
-  .assistant-price-panel span { color: #85858f; font-size: 10px; line-height: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; }
-  .assistant-price-panel strong { display: block; margin-top: 5px; color: #fff; font-size: 13px; line-height: 17px; font-weight: 900; }
-  .assistant-price-panel p { grid-column: 1 / -1; margin: 0; color: #C9CDD3; font-size: 11px; line-height: 15px; font-weight: 800; }
-  .assistant-ready-note { margin: 0; border: 1px solid rgba(52,211,153,0.22); border-radius: 10px; background: rgba(52,211,153,0.055); color: #d1fae5; padding: 10px; font-size: 12px; line-height: 17px; font-weight: 900; }
   .field-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .field-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .full-width { grid-column: 1 / -1; }
@@ -3557,6 +3528,12 @@ const pageStyles = `
   textarea { min-height: 92px; padding: 11px 12px; resize: vertical; line-height: 18px; }
   input:disabled { color: #85858f; cursor: not-allowed; }
   label small { color: #85858f; font-size: 11px; line-height: 15px; font-weight: 800; }
+  .field-source-note { color: #C7D7C4; font-size: 11px; line-height: 15px; font-weight: 900; }
+  .advanced-field-group, .market-disclosure { display: grid; gap: 10px; }
+  .nested-field-grid { margin-top: 0; }
+  .section-disclosure { width: 100%; min-height: 38px; justify-content: space-between; gap: 12px; text-align: left; }
+  .section-disclosure span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; }
+  .section-disclosure strong { color: #fff; font-size: 12px; line-height: 16px; font-weight: 900; }
   .sale-format-toggle { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .sale-format-toggle button.active, .toggle-field button.active { background: rgba(231,222,208,0.14); border-color: rgba(231,222,208,0.58); color: #E7DED0; }
   .auction-box { margin-top: 14px; border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); padding: 12px; display: grid; gap: 12px; }
@@ -3579,6 +3556,7 @@ const pageStyles = `
   .market-status { margin: 0; color: #C9CDD3; font-size: 12px; line-height: 17px; font-weight: 800; }
   .market-status.success { color: #E7DED0; }
   .market-status.error { color: #fca5a5; }
+  .market-disclosure { border-top: 1px solid rgba(201,205,211,0.12); padding-top: 12px; }
   .market-results { display: grid; gap: 8px; }
   .market-results button { min-height: auto; padding: 10px; display: grid; justify-content: stretch; justify-items: start; text-align: left; }
   .market-results strong { color: #fff; font-size: 13px; line-height: 17px; font-weight: 900; }
@@ -3622,5 +3600,5 @@ const pageStyles = `
   .seller-trust-grid span { border: 1px solid rgba(201,205,211,0.14); border-radius: 10px; background: rgba(201,205,211,0.04); color: #C9CDD3; padding: 10px; font-size: 11px; line-height: 16px; font-weight: 800; }
   .seller-trust-links { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
   .seller-trust-links a { min-height: 30px; border: 1px solid rgba(231,222,208,0.22); border-radius: 8px; background: rgba(231,222,208,0.055); color: #E7DED0; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 11px; font-weight: 900; }
-  @media (max-width: 1100px) { .page-shell { width: min(1240px, calc(100vw - 32px)); } .list-layout, .field-grid, .field-grid.three, .upload-grid, .assistant-timeline, .assistant-suggestion-grid, .assistant-match-grid, .assistant-price-panel, .preview-modal-body, .preview-detail-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success, .psa-verification-box, .market-value-header, .listing-assistant-header { align-items: flex-start; flex-direction: column; } }
+  @media (max-width: 1100px) { .page-shell { width: min(1240px, calc(100vw - 32px)); } .list-layout, .field-grid, .field-grid.three, .upload-grid, .assistant-timeline, .preview-modal-body, .preview-detail-grid { grid-template-columns: 1fr; } .auth-notice, .publish-success, .psa-verification-box, .market-value-header, .listing-assistant-header { align-items: flex-start; flex-direction: column; } }
 `;

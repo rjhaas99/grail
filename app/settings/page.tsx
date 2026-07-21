@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import Header from "../components/Header";
+import PageShell from "../components/PageShell";
 
 type ToggleKey =
   | "offerAlerts"
@@ -106,11 +106,12 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="settings-page">
-      <style>{pageStyles}</style>
-      <div className="settings-shell">
-        <Header />
-
+    <PageShell
+      className="settings-page"
+      shellClassName="settings-shell"
+      shellStyle={{ padding: "8px 0 38px" }}
+      styles={pageStyles}
+    >
         <section className="page-heading">
           <span>Preferences</span>
           <h1>Settings</h1>
@@ -251,8 +252,7 @@ export default function SettingsPage() {
             Save Settings
           </button>
         </div>
-      </div>
-    </main>
+    </PageShell>
   );
 }
 
@@ -269,7 +269,7 @@ const pageStyles = `
     background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)), rgba(5,5,6,0.92);
     box-shadow: 0 18px 44px rgba(0,0,0,0.28);
   }
-  .page-heading { margin-top: 18px; }
+  .page-heading { margin-top: 10px; }
   .page-heading span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
   .page-heading h1 { margin: 8px 0 0; color: #fff; font-size: 42px; line-height: 46px; font-weight: 900; }
   .page-heading p, .status-message { color: #a1a1aa; font-size: 13px; line-height: 18px; font-weight: 800; }

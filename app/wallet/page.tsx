@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import CollectorMomentLayer from "../components/CollectorMomentLayer";
 import GrailPassPresenceCard from "../components/GrailPassPresenceCard";
-import Header from "../components/Header";
+import PageShell from "../components/PageShell";
 import { buildRewardCollectorMoment } from "../lib/collectorMomentAdapters";
 import { calculateProgression, type ProgressionSummary } from "../lib/progression";
 import { getWalletReasonLabel } from "../lib/walletLabels";
@@ -416,11 +416,12 @@ export default function WalletPage() {
   }, []);
 
   return (
-    <main className="wallet-page">
-      <style>{pageStyles}</style>
-      <div className="wallet-shell">
-        <Header />
-
+    <PageShell
+      className="wallet-page"
+      shellClassName="wallet-shell"
+      shellStyle={{ padding: "8px 0 44px" }}
+      styles={pageStyles}
+    >
         <section className="page-heading">
           <span>GRAIL Credit</span>
           <h1>Wallet</h1>
@@ -705,14 +706,13 @@ export default function WalletPage() {
         )}
 
         {status ? <p className="status-message">{status}</p> : null}
-      </div>
 
       <CollectorMomentLayer
         moments={collectorMoments}
         isReady={!isLoading && isSignedIn}
         isEnabled={isSignedIn}
       />
-    </main>
+    </PageShell>
   );
 }
 
@@ -741,7 +741,7 @@ const pageStyles = `
     box-shadow: 0 18px 44px rgba(0,0,0,0.28);
   }
   .page-heading {
-    margin-top: 18px;
+    margin-top: 10px;
     animation: walletFadeUp 520ms ease both;
   }
   .page-heading span,
