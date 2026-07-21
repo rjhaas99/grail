@@ -6,6 +6,7 @@ import CollectorMomentLayer from "../components/CollectorMomentLayer";
 import GrailPassPresenceCard from "../components/GrailPassPresenceCard";
 import PageShell from "../components/PageShell";
 import { buildRewardCollectorMoment } from "../lib/collectorMomentAdapters";
+import type { GrailPassMembership } from "../lib/grailPass";
 import { calculateProgression, type ProgressionSummary } from "../lib/progression";
 import { getWalletReasonLabel } from "../lib/walletLabels";
 import { supabase } from "../../lib/supabase";
@@ -100,6 +101,11 @@ type RewardsResponse = {
   walletRewardsMessage?: string;
 };
 
+type GrailPassResponse = {
+  membership?: GrailPassMembership;
+  monthlyCreditAmount?: number;
+};
+
 const emptyWallet: WalletSummary = {
   userId: "",
   availableCredit: 0,
@@ -166,6 +172,10 @@ function getEntrySource(entry: WalletLedgerEntry) {
 
   if (entry.referenceType === "admin_wallet") {
     return "Admin adjustment";
+  }
+
+  if (entry.referenceType === "grail_pass_subscription") {
+    return "GRAIL Pass";
   }
 
   if (entry.type === "promotion") {
@@ -303,6 +313,8 @@ export default function WalletPage() {
   const [nextRewardTier, setNextRewardTier] = useState<RewardTier | null>(null);
   const [marketplaceRewards, setMarketplaceRewards] = useState<RewardsMarketplace | null>(null);
   const [walletRewardsMessage, setWalletRewardsMessage] = useState("");
+  const [grailPass, setGrailPass] = useState<GrailPassMembership | null>(null);
+  const [monthlyPassCredit, setMonthlyPassCredit] = useState(0);
 
   const rewardHistory = useMemo(() => ledger.filter((entry) => entry.amount > 0), [ledger]);
   const recentActivity = useMemo(() => ledger.slice(0, 5), [ledger]);
@@ -340,6 +352,8 @@ export default function WalletPage() {
           setNextRewardTier(null);
           setMarketplaceRewards(null);
           setWalletRewardsMessage("");
+          setGrailPass(null);
+          setMonthlyPassCredit(0);
           setStatus("Sign in to view your GRAIL Wallet.");
           setIsLoading(false);
         }
@@ -349,7 +363,12 @@ export default function WalletPage() {
       setIsSignedIn(true);
 
       try {
-        const [walletResponse, progressionResponse, rewardsResponse] = await Promise.all([
+        const [
+          walletResponse,
+          progressionResponse,
+          rewardsResponse,
+          grailPassResponse,
+        ] = await Promise.all([
           fetch("/api/wallet", {
             headers: {
               authorization: `Bearer ${session.access_token}`,
@@ -365,11 +384,17 @@ export default function WalletPage() {
               authorization: `Bearer ${session.access_token}`,
             },
           }),
+          fetch("/api/grail-pass/subscription", {
+            headers: {
+              authorization: `Bearer ${session.access_token}`,
+            },
+          }),
         ]);
 
         const walletPayload = (await walletResponse.json()) as WalletResponse;
         const progressionPayload = (await progressionResponse.json()) as ProgressionResponse;
         const rewardsPayload = (await rewardsResponse.json()) as RewardsResponse;
+        const grailPassPayload = (await grailPassResponse.json()) as GrailPassResponse;
 
         if (!walletResponse.ok) {
           throw new Error(walletPayload.error || "GRAIL Wallet could not be loaded.");
@@ -387,6 +412,8 @@ export default function WalletPage() {
         setNextRewardTier(rewardsPayload.nextTier || null);
         setMarketplaceRewards(rewardsPayload.marketplace || null);
         setWalletRewardsMessage(rewardsPayload.walletRewardsMessage || "");
+        setGrailPass(grailPassPayload.membership || null);
+        setMonthlyPassCredit(grailPassPayload.monthlyCreditAmount || 0);
         setStatus("");
       } catch (error) {
         console.error("Wallet page load error:", error);
@@ -399,6 +426,8 @@ export default function WalletPage() {
           setNextRewardTier(null);
           setMarketplaceRewards(null);
           setWalletRewardsMessage("");
+          setGrailPass(null);
+          setMonthlyPassCredit(0);
           setStatus(error instanceof Error ? error.message : "GRAIL Wallet could not be loaded.");
         }
       } finally {
@@ -505,9 +534,17 @@ export default function WalletPage() {
                 </div>
                 <GrailPassPresenceCard
                   variant="compact"
-                  eyebrow="Wallet Preview"
-                  title="GRAIL Pass wallet benefits."
-                  description="Future Pass benefits can appear here as wallet multipliers or monthly GRAIL Credit once the membership system is active."
+                  eyebrow={grailPass?.status && grailPass.status !== "none" ? "GRAIL Pass Active" : "Wallet Preview"}
+                  title={
+                    grailPass?.status && grailPass.status !== "none"
+                      ? `${grailPass.displayName} wallet benefits.`
+                      : "GRAIL Pass wallet benefits."
+                  }
+                  description={
+                    monthlyPassCredit > 0
+                      ? `Monthly GRAIL Credit deposits are configured at ${formatCurrency(monthlyPassCredit)} and appear in wallet activity.`
+                      : "Future Pass wallet benefits remain disabled until monthly GRAIL Credit is configured."
+                  }
                   perkKeys={["wallet_multiplier", "monthly_credit"]}
                 />
               </aside>

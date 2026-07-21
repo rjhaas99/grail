@@ -23,9 +23,12 @@ export type MarketplaceNotificationType =
   | "payment_needed"
   | "payment_received"
   | "payment_expired"
+  | "shipping_label_purchased"
   | "order_tracking_added"
   | "order_shipped"
+  | "order_out_for_delivery"
   | "order_delivered"
+  | "delivery_exception"
   | "inspection_complete"
   | "seller_payout_released"
   | "offer_received"
@@ -97,9 +100,12 @@ const notificationConfig: Record<
   payment_needed: { category: "Orders", action: "Complete Payment" },
   payment_received: { category: "Orders", action: "View Order" },
   payment_expired: { category: "Orders", action: "View Orders" },
+  shipping_label_purchased: { category: "Seller", action: "Print Label" },
   order_tracking_added: { category: "Orders", action: "Track Order" },
   order_shipped: { category: "Orders", action: "Track Order" },
+  order_out_for_delivery: { category: "Orders", action: "Track Order" },
   order_delivered: { category: "Orders", action: "Inspect Order" },
+  delivery_exception: { category: "Orders", action: "Track Order" },
   inspection_complete: { category: "Orders", action: "View Order" },
   seller_payout_released: { category: "Seller", action: "View Dashboard" },
   offer_received: { category: "Offers", action: "View Offer" },

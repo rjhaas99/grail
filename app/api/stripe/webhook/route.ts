@@ -2,6 +2,13 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { getAuctionEndsAt } from "../../../lib/auctionDurations";
+import {
+  createServiceSupabaseClient as createGrailPassServiceSupabaseClient,
+  grantGrailPassMonthlyCreditForInvoice,
+  isStripeGrailPassSubscription,
+  markStripeWebhookEventProcessed,
+  syncGrailPassSubscriptionFromStripe,
+} from "../../../lib/grailPassSubscription";
 import { getSellerFeeQuote } from "../../../lib/sellerFees";
 import { createSystemNotifications } from "../../../lib/serverNotifications";
 import { getTransactionTypeFromStripeCheckoutType } from "../../../lib/transactionCheckout";
@@ -55,6 +62,10 @@ type ExistingOrderRow = {
 };
 
 type CheckoutMetadata = Record<string, string>;
+
+type StripeInvoiceWithSubscription = Stripe.Invoice & {
+  subscription?: string | Stripe.Subscription | null;
+};
 
 function getRequiredEnv(name: string) {
   const value = process.env[name];
@@ -465,6 +476,215 @@ async function handleAuctionReserveFeeCompleted(
   ]);
 }
 
+function isGrailPassCheckoutSession(
+  session: Stripe.Checkout.Session,
+  metadata: CheckoutMetadata,
+) {
+  return (
+    session.mode === "subscription" &&
+    (metadata.type === "grail_pass_subscription" ||
+      metadata.grailProduct === "grail_pass")
+  );
+}
+
+async function handleGrailPassCheckoutSessionCompleted(
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
+  metadata: CheckoutMetadata,
+) {
+  const userId = metadata.grailUserId || session.client_reference_id || "";
+
+  if (!userId) {
+    throw new Error("GRAIL Pass checkout is missing user metadata.");
+  }
+
+  const resolvedSession = await stripe.checkout.sessions.retrieve(session.id, {
+    expand: ["subscription", "subscription.latest_invoice"],
+  });
+
+  if (
+    !resolvedSession.subscription ||
+    typeof resolvedSession.subscription === "string"
+  ) {
+    throw new Error("GRAIL Pass checkout is missing a subscription.");
+  }
+
+  const supabase = createGrailPassServiceSupabaseClient();
+  const subscription = resolvedSession.subscription;
+  await syncGrailPassSubscriptionFromStripe({
+    stripe,
+    supabase,
+    subscription,
+    userId,
+  });
+
+  const latestInvoice =
+    subscription.latest_invoice && typeof subscription.latest_invoice !== "string"
+      ? subscription.latest_invoice
+      : null;
+
+  const creditResult = await grantGrailPassMonthlyCreditForInvoice({
+    supabase,
+    subscription,
+    invoice: latestInvoice,
+  });
+
+  console.info("GRAIL Pass checkout synchronized:", {
+    stripeSessionId: session.id,
+    stripeSubscriptionId: subscription.id,
+    userId,
+    creditResult,
+  });
+}
+
+async function handleGrailPassSubscriptionWebhook(
+  stripe: Stripe,
+  event: Stripe.Event,
+) {
+  const supabase = createGrailPassServiceSupabaseClient();
+
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+    const metadata = await resolveCheckoutMetadata(stripe, session);
+    const firstProcessingAttempt = await markStripeWebhookEventProcessed(
+      supabase,
+      event,
+    );
+
+    if (!firstProcessingAttempt) {
+      console.info("GRAIL Pass duplicate Stripe webhook ignored:", {
+        eventId: event.id,
+        eventType: event.type,
+      });
+      return;
+    }
+
+    await handleGrailPassCheckoutSessionCompleted(stripe, session, metadata);
+    return;
+  }
+
+  if (
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
+    const subscription = event.data.object as Stripe.Subscription;
+    if (!isStripeGrailPassSubscription(subscription)) {
+      return;
+    }
+
+    const firstProcessingAttempt = await markStripeWebhookEventProcessed(
+      supabase,
+      event,
+    );
+
+    if (!firstProcessingAttempt) {
+      console.info("GRAIL Pass duplicate Stripe webhook ignored:", {
+        eventId: event.id,
+        eventType: event.type,
+      });
+      return;
+    }
+
+    await syncGrailPassSubscriptionFromStripe({
+      stripe,
+      supabase,
+      subscription,
+    });
+    return;
+  }
+
+  if (event.type === "invoice.paid") {
+    const invoice = event.data.object as StripeInvoiceWithSubscription;
+    const subscriptionId =
+      typeof invoice.subscription === "string"
+        ? invoice.subscription
+        : invoice.subscription?.id || "";
+
+    if (!subscriptionId) {
+      return;
+    }
+
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
+      expand: ["latest_invoice"],
+    });
+
+    if (!isStripeGrailPassSubscription(subscription)) {
+      return;
+    }
+
+    const firstProcessingAttempt = await markStripeWebhookEventProcessed(
+      supabase,
+      event,
+    );
+
+    if (!firstProcessingAttempt) {
+      console.info("GRAIL Pass duplicate Stripe webhook ignored:", {
+        eventId: event.id,
+        eventType: event.type,
+      });
+      return;
+    }
+
+    await syncGrailPassSubscriptionFromStripe({
+      stripe,
+      supabase,
+      subscription,
+    });
+    const creditResult = await grantGrailPassMonthlyCreditForInvoice({
+      supabase,
+      subscription,
+      invoice,
+    });
+
+    console.info("GRAIL Pass invoice paid synchronized:", {
+      invoiceId: invoice.id,
+      stripeSubscriptionId: subscription.id,
+      creditResult,
+    });
+    return;
+  }
+
+  if (event.type === "invoice.payment_failed") {
+    const invoice = event.data.object as StripeInvoiceWithSubscription;
+    const subscriptionId =
+      typeof invoice.subscription === "string"
+        ? invoice.subscription
+        : invoice.subscription?.id || "";
+
+    if (!subscriptionId) {
+      return;
+    }
+
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
+      expand: ["latest_invoice"],
+    });
+
+    if (!isStripeGrailPassSubscription(subscription)) {
+      return;
+    }
+
+    const firstProcessingAttempt = await markStripeWebhookEventProcessed(
+      supabase,
+      event,
+    );
+
+    if (!firstProcessingAttempt) {
+      console.info("GRAIL Pass duplicate Stripe webhook ignored:", {
+        eventId: event.id,
+        eventType: event.type,
+      });
+      return;
+    }
+
+    await syncGrailPassSubscriptionFromStripe({
+      stripe,
+      supabase,
+      subscription,
+    });
+  }
+}
+
 async function handleCheckoutSessionCompleted(
   stripe: Stripe,
   session: Stripe.Checkout.Session,
@@ -844,11 +1064,31 @@ export async function POST(request: Request) {
     );
   }
 
-  if (event.type !== "checkout.session.completed") {
+  const grailPassWebhookTypes = [
+    "checkout.session.completed",
+    "customer.subscription.created",
+    "customer.subscription.updated",
+    "customer.subscription.deleted",
+    "invoice.paid",
+    "invoice.payment_failed",
+  ];
+
+  if (!grailPassWebhookTypes.includes(event.type) && event.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true });
   }
 
   try {
+    if (
+      event.type === "customer.subscription.created" ||
+      event.type === "customer.subscription.updated" ||
+      event.type === "customer.subscription.deleted" ||
+      event.type === "invoice.paid" ||
+      event.type === "invoice.payment_failed"
+    ) {
+      await handleGrailPassSubscriptionWebhook(stripe, event);
+      return NextResponse.json({ received: true });
+    }
+
     const session = event.data.object as Stripe.Checkout.Session;
     const metadata = await resolveCheckoutMetadata(stripe, session);
     const sessionType = metadata.type || "";
@@ -859,6 +1099,11 @@ export async function POST(request: Request) {
       metadataType: sessionType || null,
       transactionType,
     });
+
+    if (isGrailPassCheckoutSession(session, metadata)) {
+      await handleGrailPassSubscriptionWebhook(stripe, event);
+      return NextResponse.json({ received: true });
+    }
 
     if (sessionType === "auction_reserve_fee") {
       console.info("Stripe webhook selected Reserve Commitment Fee branch:", {

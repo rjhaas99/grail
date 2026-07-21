@@ -14,6 +14,7 @@ import {
   calculateProgression,
   type ProgressionSummary,
 } from "../lib/progression";
+import type { GrailPassMembership } from "../lib/grailPass";
 
 type WalletSummary = {
   availableCredit: number;
@@ -52,6 +53,10 @@ type RewardsMarketplace = {
     label: string;
     status: string;
   };
+};
+
+type GrailPassResponse = {
+  membership?: GrailPassMembership;
 };
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -107,6 +112,7 @@ export default function ProfilePage() {
   const [rewardTier, setRewardTier] = useState<RewardTier | null>(null);
   const [nextRewardTier, setNextRewardTier] = useState<RewardTier | null>(null);
   const [marketplaceRewards, setMarketplaceRewards] = useState<RewardsMarketplace | null>(null);
+  const [grailPass, setGrailPass] = useState<GrailPassMembership | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const displayName = String(
     profile?.full_name ||
@@ -171,6 +177,7 @@ export default function ProfilePage() {
           setRewardTier(null);
           setNextRewardTier(null);
           setMarketplaceRewards(null);
+          setGrailPass(null);
         }
         return;
       }
@@ -181,6 +188,7 @@ export default function ProfilePage() {
         progressionResult,
         walletResult,
         rewardsResult,
+        grailPassResult,
       ] = await Promise.all([
         supabase
           .from("profiles")
@@ -217,6 +225,16 @@ export default function ProfilePage() {
             console.warn("Profile rewards load skipped:", error);
             return {};
           }),
+        fetch("/api/grail-pass/subscription", {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+          },
+        })
+          .then((response) => response.json())
+          .catch((error) => {
+            console.warn("Profile GRAIL Pass load skipped:", error);
+            return {};
+          }),
       ]);
 
       if (!isMounted) {
@@ -235,6 +253,7 @@ export default function ProfilePage() {
       setMarketplaceRewards(
         (rewardsResult as { marketplace?: RewardsMarketplace | null }).marketplace || null,
       );
+      setGrailPass((grailPassResult as GrailPassResponse).membership || null);
     }
 
     loadProfileProgression();
@@ -304,6 +323,7 @@ export default function ProfilePage() {
             <p>@{username}</p>
             <div className="pill-row">
               <span>Level {progression.level} {progression.title}</span>
+              <span>{grailPass?.status && grailPass.status !== "none" ? grailPass.badgeLabel : "No GRAIL Pass"}</span>
               <span>Joined June 2026</span>
               <span>United States</span>
               <Link href={publicCollectionHref}>Public Collection</Link>
@@ -351,7 +371,8 @@ export default function ProfilePage() {
             },
           ]}
           narrative="Your collector identity brings together progression, trust, rewards, and public collection history."
-          showGrailPassPreview
+          grailPass={grailPass}
+          showGrailPassPreview={!grailPass || grailPass.status === "none"}
         />
 
         <PublicTrustSection userId={user?.id} />

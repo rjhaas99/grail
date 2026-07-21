@@ -11,7 +11,9 @@ export type GrailPassMembershipStatus =
   | "trialing"
   | "paused"
   | "past_due"
-  | "canceled";
+  | "canceled"
+  | "incomplete"
+  | "expired";
 
 export type GrailPassBenefitCategory =
   | "wallet"
@@ -102,9 +104,9 @@ export const grailPassFutureBenefits: GrailPassBenefit[] = [
   {
     key: "monthly_credit",
     label: "Monthly GRAIL Credit",
-    description: "Future monthly GRAIL Credit grant support.",
+    description: "Monthly GRAIL Credit deposits recorded through the existing wallet ledger when configured.",
     category: "wallet",
-    configured: false,
+    configured: true,
   },
   {
     key: "featured_listing_credits",
@@ -217,10 +219,10 @@ export const grailPassPerkCatalog: Record<GrailPassPerkKey, GrailPassPerk> = {
   monthly_credit: {
     key: "monthly_credit",
     label: "Monthly GRAIL Credit",
-    description: "Future monthly GRAIL Credit grant support.",
+    description: "Monthly GRAIL Credit deposits recorded through the existing wallet ledger when configured.",
     category: "wallet",
-    availability: "coming_soon",
-    configured: false,
+    availability: "available",
+    configured: true,
   },
   wallet_multiplier: {
     key: "wallet_multiplier",
@@ -410,7 +412,9 @@ export function resolveGrailPassPerks(
   const normalizedMembership = normalizeGrailPassMembership(membership);
   const active = isGrailPassActive(normalizedMembership);
   const mappedPerks = grailPassMembershipPerkMap[normalizedMembership.type] || [];
-  const grantedPerkKeys = active ? mappedPerks : [];
+  const grantedPerkKeys = active
+    ? mappedPerks.filter((perkKey) => grailPassPerkCatalog[perkKey]?.configured)
+    : [];
 
   return {
     membership: normalizedMembership,
@@ -425,7 +429,9 @@ export function resolveGrailPassPerks(
         sourceMembershipType: normalizedMembership.type,
         reason: granted
           ? `${normalizedMembership.displayName} includes this perk.`
-          : "This perk is not available for the current membership state.",
+          : perk.configured
+            ? "This perk is not available for the current membership state."
+            : "This perk remains disabled until it is implemented.",
       };
     }),
   };

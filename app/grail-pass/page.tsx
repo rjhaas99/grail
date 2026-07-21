@@ -1,16 +1,65 @@
+"use client";
+
 import GrailPassBadge from "../components/GrailPassBadge";
 import PageShell from "../components/PageShell";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../../lib/supabase";
 import {
   getGrailPassPerksForMembershipType,
   grailPassMembershipCatalog,
   noGrailPassMembership,
   normalizeGrailPassMembership,
+  type GrailPassMembership,
   type GrailPassPerk,
   type GrailPassPerkKey,
 } from "../lib/grailPass";
+import type { GrailPassPlanType } from "../lib/grailPassPlans";
 
-const currentMembership = normalizeGrailPassMembership(noGrailPassMembership);
 const previewMembership = normalizeGrailPassMembership(grailPassMembershipCatalog.annual);
+
+type PassPlan = {
+  type: GrailPassPlanType;
+  displayName: string;
+  amount: number;
+  amountCents: number;
+  currency: string;
+  interval: "month" | "year";
+  intervalLabel: string;
+};
+
+type PassSubscription = {
+  plan: GrailPassPlanType;
+  status: GrailPassMembership["status"];
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: string | null;
+  latestInvoiceStatus: string | null;
+} | null;
+
+type PassBillingHistoryItem = {
+  id: string;
+  date: string | null;
+  amount: number | null;
+  currency: string;
+  status: string;
+  invoiceUrl: string | null;
+  hostedInvoiceUrl: string | null;
+};
+
+type PassActions = {
+  canCancel: boolean;
+  canResume: boolean;
+  canUpgrade: boolean;
+};
+
+type PassStatusResponse = {
+  plans: PassPlan[];
+  membership: GrailPassMembership;
+  subscription: PassSubscription;
+  billingHistory: PassBillingHistoryItem[];
+  actions: PassActions;
+  monthlyCreditAmount: number;
+  error?: string;
+};
 
 function perksFor(keys: GrailPassPerkKey[]) {
   return keys
@@ -70,6 +119,8 @@ const roadmapSections = [
     title: "Available Now",
     items: [
       "GRAIL Pass framework",
+      "Monthly and annual subscriptions",
+      "Stripe Billing checkout",
       "Reusable membership badge",
       "Collector Identity compatibility",
       "Collector Moments compatibility",
@@ -78,7 +129,6 @@ const roadmapSections = [
   {
     title: "Coming Soon",
     items: [
-      "Membership management surface",
       "Configurable benefit display",
       "Premium identity previews",
       "GRAIL Economy benefit controls",
@@ -87,15 +137,309 @@ const roadmapSections = [
   {
     title: "Future",
     items: [
-      "Subscription management",
-      "Monthly and annual plans",
       "Family plans",
-      "Billing, invoices, and membership history",
+      "Expanded membership history",
     ],
   },
 ];
 
+function formatCurrency(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "Unavailable";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatPlanPrice(plan: PassPlan) {
+  return `${formatCurrency(plan.amount)}/${plan.intervalLabel}`;
+}
+
+function formatDate(value?: string | null) {
+  if (!value) {
+    return "Not scheduled";
+  }
+
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatStatus(value?: string | null) {
+  if (!value || value === "none") {
+    return "Not active";
+  }
+
+  if (value === "past_due") {
+    return "Past due";
+  }
+
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 export default function GrailPassPage() {
+  const [data, setData] = useState<PassStatusResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSignedIn, setIsSignedIn] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [actionState, setActionState] = useState("");
+  const currentMembership = useMemo(
+    () => normalizeGrailPassMembership(data?.membership || noGrailPassMembership),
+    [data?.membership],
+  );
+  const displayedMembership =
+    currentMembership.status === "none" ? previewMembership : currentMembership;
+  const subscription = data?.subscription || null;
+  const plans = data?.plans || [];
+  const actions = data?.actions || {
+    canCancel: false,
+    canResume: false,
+    canUpgrade: false,
+  };
+  const activePlan = plans.find((plan) => plan.type === subscription?.plan);
+  const renewalLabel = subscription?.cancelAtPeriodEnd
+    ? `Access through ${formatDate(subscription.currentPeriodEnd)}`
+    : subscription?.currentPeriodEnd
+      ? `Renews ${formatDate(subscription.currentPeriodEnd)}`
+      : "Renewal date unavailable";
+
+  async function loadPassStatus(accessToken: string, syncSessionId?: string | null) {
+    if (syncSessionId) {
+      const syncResponse = await fetch("/api/grail-pass/subscription/sync", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ sessionId: syncSessionId }),
+      });
+
+      if (!syncResponse.ok) {
+        const payload = (await syncResponse.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setStatusMessage(payload.error || "Checkout is still synchronizing.");
+      } else {
+        setStatusMessage("GRAIL Pass membership synchronized.");
+      }
+    }
+
+    const response = await fetch("/api/grail-pass/subscription", {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+      },
+    });
+    const payload = (await response.json()) as PassStatusResponse;
+
+    if (!response.ok) {
+      throw new Error(payload.error || "GRAIL Pass could not be loaded.");
+    }
+
+    setData(payload);
+  }
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initialize() {
+      setIsLoading(true);
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        if (isMounted) {
+          setIsSignedIn(false);
+          setData(null);
+          setStatusMessage("Sign in to subscribe to GRAIL Pass.");
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      const params =
+        typeof window === "undefined"
+          ? new URLSearchParams()
+          : new URLSearchParams(window.location.search);
+      const checkoutState = params.get("checkout");
+      const sessionId = params.get("session_id");
+
+      try {
+        await loadPassStatus(
+          session.access_token,
+          checkoutState === "success" ? sessionId : null,
+        );
+
+        if (!isMounted) {
+          return;
+        }
+
+        setIsSignedIn(true);
+
+        if (checkoutState === "canceled") {
+          setStatusMessage("GRAIL Pass checkout was canceled.");
+        }
+      } catch (error) {
+        console.error("GRAIL Pass status load error:", error);
+
+        if (isMounted) {
+          setStatusMessage(
+            error instanceof Error ? error.message : "GRAIL Pass could not be loaded.",
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    initialize();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  async function runPassAction(action: () => Promise<Response>, successMessage: string) {
+    setActionState("Working...");
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setActionState("Sign in to manage GRAIL Pass.");
+      return;
+    }
+
+    try {
+      const response = await action();
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        url?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "GRAIL Pass action failed.");
+      }
+
+      if (payload.url) {
+        window.location.assign(payload.url);
+        return;
+      }
+
+      await loadPassStatus(session.access_token);
+      setActionState(successMessage);
+    } catch (error) {
+      console.error("GRAIL Pass action error:", error);
+      setActionState(
+        error instanceof Error ? error.message : "GRAIL Pass action failed.",
+      );
+    }
+  }
+
+  async function subscribe(plan: GrailPassPlanType) {
+    await runPassAction(
+      async () => {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        return fetch("/api/grail-pass/checkout", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${session?.access_token || ""}`,
+          },
+          body: JSON.stringify({ plan }),
+        });
+      },
+      "Redirecting to Stripe Checkout.",
+    );
+  }
+
+  async function upgradeToAnnual() {
+    await runPassAction(
+      async () => {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        return fetch("/api/grail-pass/subscription/upgrade", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${session?.access_token || ""}`,
+          },
+          body: JSON.stringify({ plan: "annual" }),
+        });
+      },
+      "GRAIL Pass upgraded to Annual.",
+    );
+  }
+
+  async function cancelAutoRenew() {
+    await runPassAction(
+      async () => {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        return fetch("/api/grail-pass/subscription/cancel", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${session?.access_token || ""}`,
+          },
+        });
+      },
+      "GRAIL Pass auto-renew canceled.",
+    );
+  }
+
+  async function resumeAutoRenew() {
+    await runPassAction(
+      async () => {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        return fetch("/api/grail-pass/subscription/resume", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${session?.access_token || ""}`,
+          },
+        });
+      },
+      "GRAIL Pass auto-renew resumed.",
+    );
+  }
+
+  async function openBillingPortal() {
+    await runPassAction(
+      async () => {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        return fetch("/api/grail-pass/billing-portal", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${session?.access_token || ""}`,
+          },
+        });
+      },
+      "Opening billing portal.",
+    );
+  }
+
   return (
     <PageShell
       className="grail-pass-page"
@@ -112,24 +456,29 @@ export default function GrailPassPage() {
             more polished GRAIL experience.
           </p>
           <div className="pass-hero-notes" aria-label="GRAIL Pass status">
-            <span>Presentation only</span>
-            <span>No subscription active</span>
-            <span>No checkout changes</span>
+            <span>{isLoading ? "Checking membership" : formatStatus(currentMembership.status)}</span>
+            <span>{activePlan ? activePlan.displayName : "Monthly or Annual"}</span>
+            <span>{isSignedIn ? renewalLabel : "Sign in required"}</span>
           </div>
         </div>
 
         <aside className="pass-preview-card" aria-label="GRAIL Pass membership preview">
           <div className="pass-preview-topline">
-            <span>Membership Preview</span>
-            <GrailPassBadge membership={previewMembership} />
+            <span>{currentMembership.status === "none" ? "Membership Preview" : "Membership"}</span>
+            <GrailPassBadge membership={displayedMembership} />
           </div>
           <div className="pass-preview-emblem" aria-hidden="true">
             GP
           </div>
-          <h2>Built for a better collector experience.</h2>
+          <h2>
+            {currentMembership.status === "none"
+              ? "Built for a better collector experience."
+              : currentMembership.displayName}
+          </h2>
           <p>
-            GRAIL Pass is designed as a central membership layer for identity,
-            wallet, marketplace, support, and future event experiences.
+            {currentMembership.status === "none"
+              ? "GRAIL Pass is designed as a central membership layer for identity, wallet, marketplace, support, and future event experiences."
+              : renewalLabel}
           </p>
         </aside>
       </section>
@@ -145,17 +494,61 @@ export default function GrailPassPage() {
             </div>
             <div>
               <dt>Membership Status</dt>
-              <dd>Not active</dd>
+              <dd>{isLoading ? "Loading" : formatStatus(currentMembership.status)}</dd>
             </div>
             <div>
               <dt>Current Benefits</dt>
-              <dd>Foundation only. No paid benefits are active.</dd>
+              <dd>
+                {currentMembership.status === "none"
+                  ? "No paid benefits are active."
+                  : "Benefits are active while the subscription remains active."}
+              </dd>
             </div>
             <div>
-              <dt>Future Benefits</dt>
-              <dd>Configured through GRAIL Economy when membership launches.</dd>
+              <dt>Renewal</dt>
+              <dd>{isSignedIn ? renewalLabel : "Sign in to view renewal information."}</dd>
             </div>
           </dl>
+          <div className="pass-plan-actions" aria-label="GRAIL Pass subscription actions">
+            {!isSignedIn ? (
+              <a href="/login">Sign In To Subscribe</a>
+            ) : currentMembership.status === "none" ? (
+              plans.map((plan) => (
+                <button
+                  key={plan.type}
+                  type="button"
+                  onClick={() => subscribe(plan.type)}
+                  disabled={Boolean(actionState && actionState === "Working...")}
+                >
+                  Subscribe {formatPlanPrice(plan)}
+                </button>
+              ))
+            ) : (
+              <>
+                {actions.canUpgrade ? (
+                  <button type="button" onClick={upgradeToAnnual}>
+                    Upgrade To Annual
+                  </button>
+                ) : null}
+                {actions.canCancel ? (
+                  <button type="button" onClick={cancelAutoRenew}>
+                    Cancel Auto-Renew
+                  </button>
+                ) : null}
+                {actions.canResume ? (
+                  <button type="button" onClick={resumeAutoRenew}>
+                    Resume Subscription
+                  </button>
+                ) : null}
+                <button type="button" onClick={openBillingPortal}>
+                  Manage Billing
+                </button>
+              </>
+            )}
+          </div>
+          {statusMessage || actionState ? (
+            <p className="pass-action-status">{actionState || statusMessage}</p>
+          ) : null}
         </article>
 
         <article className="pass-panel pass-membership-preview">
@@ -167,9 +560,9 @@ export default function GrailPassPage() {
             </div>
             <div>
               <strong>Collector Identity</strong>
-              <span>Future membership presentation</span>
+              <span>{formatStatus(currentMembership.status)}</span>
             </div>
-            <GrailPassBadge membership={previewMembership} variant="identity" />
+            <GrailPassBadge membership={displayedMembership} variant="identity" />
           </div>
           <p>
             Membership can enhance the collector card with a premium badge,
@@ -231,7 +624,11 @@ export default function GrailPassPage() {
             <span>Pass Collector</span>
             <strong>3x</strong>
           </div>
-          <p>Example only. No event multiplier logic is implemented here.</p>
+          <p>
+            {data?.monthlyCreditAmount
+              ? `Monthly GRAIL Credit is configured at ${formatCurrency(data.monthlyCreditAmount)}.`
+              : "Future event multipliers remain disabled until implemented."}
+          </p>
         </div>
       </section>
 
@@ -472,6 +869,44 @@ const pageStyles = `
     color: #F5F1E8;
     font-size: 14px;
     line-height: 20px;
+    font-weight: 800;
+  }
+
+  .pass-plan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .pass-plan-actions button,
+  .pass-plan-actions a {
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 999px;
+    background: #F5F1E8;
+    color: #08080A;
+    min-height: 38px;
+    padding: 0 15px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    font-size: 12px;
+    line-height: 15px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .pass-plan-actions button:disabled {
+    cursor: wait;
+    opacity: 0.58;
+  }
+
+  .pass-action-status {
+    margin: 12px 0 0;
+    color: #BDB7AE;
+    font-size: 12px;
+    line-height: 18px;
     font-weight: 800;
   }
 

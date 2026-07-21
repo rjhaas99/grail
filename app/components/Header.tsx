@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabase";
+import type { GrailPassMembership } from "../lib/grailPass";
 import { calculateProgression, type ProgressionSummary } from "../lib/progression";
 
 type Profile = {
@@ -46,6 +47,7 @@ export default function Header() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [progression, setProgression] = useState<ProgressionSummary>(calculateProgression(0));
+  const [grailPass, setGrailPass] = useState<GrailPassMembership | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
   const accountName =
@@ -156,11 +158,34 @@ export default function Header() {
     }
   }
 
+  async function getGrailPass(accessToken?: string | null) {
+    if (!accessToken) {
+      return null;
+    }
+
+    try {
+      const response = await fetch("/api/grail-pass/subscription", {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+        },
+      });
+      const payload = (await response.json()) as {
+        membership?: GrailPassMembership;
+      };
+
+      return payload.membership || null;
+    } catch (error) {
+      console.warn("Header GRAIL Pass load skipped:", error);
+      return null;
+    }
+  }
+
   async function handleSignOut() {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
     setProgression(calculateProgression(0));
+    setGrailPass(null);
     closeMenus();
     router.refresh();
   }
@@ -187,9 +212,10 @@ export default function Header() {
       if (session?.user && !session.user.email_confirmed_at) {
         await supabase.auth.signOut();
       }
-      const [nextProfile, nextProgression] = await Promise.all([
+      const [nextProfile, nextProgression, nextGrailPass] = await Promise.all([
         getProfile(nextUser),
         getProgression(nextUser ? session?.access_token : undefined),
+        getGrailPass(nextUser ? session?.access_token : undefined),
       ]);
 
       if (!active) {
@@ -199,6 +225,7 @@ export default function Header() {
       setUser(nextUser);
       setProfile(nextProfile);
       setProgression(nextProgression);
+      setGrailPass(nextGrailPass);
     });
 
     const {
@@ -208,13 +235,15 @@ export default function Header() {
       if (session?.user && !session.user.email_confirmed_at) {
         await supabase.auth.signOut();
       }
-      const [nextProfile, nextProgression] = await Promise.all([
+      const [nextProfile, nextProgression, nextGrailPass] = await Promise.all([
         getProfile(nextUser),
         getProgression(nextUser ? session?.access_token : undefined),
+        getGrailPass(nextUser ? session?.access_token : undefined),
       ]);
       setUser(nextUser);
       setProfile(nextProfile);
       setProgression(nextProgression);
+      setGrailPass(nextGrailPass);
     });
 
     return () => {
@@ -725,6 +754,11 @@ export default function Header() {
                     style={dropdownLinkStyle}
                   >
                     {item.label}
+                    {item.href === "/grail-pass" &&
+                    grailPass?.status &&
+                    grailPass.status !== "none"
+                      ? ` · ${grailPass.badgeLabel}`
+                      : ""}
                   </Link>
                 ))}
 

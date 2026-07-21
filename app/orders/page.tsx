@@ -20,6 +20,10 @@ type SupabaseOrderRow = {
   fulfillment_status?: string | null;
   tracking_number?: string | null;
   carrier?: string | null;
+  shipping_status?: string | null;
+  shipping_service?: string | null;
+  shippo_eta?: string | null;
+  shippo_tracking_url?: string | null;
   delivered_at?: string | null;
   dispute_status?: string | null;
   dispute_reason?: string | null;
@@ -55,6 +59,10 @@ type OrderView = {
   fulfillmentStatus?: string;
   trackingNumber?: string;
   carrier?: string;
+  shippingStatus?: string;
+  shippingService?: string;
+  estimatedDelivery?: string | null;
+  shippoTrackingUrl?: string | null;
   deliveredAt?: string | null;
   disputeStatus?: string;
   disputeReason?: string | null;
@@ -265,6 +273,16 @@ function getTrackingUrl(carrier?: string, trackingNumber?: string) {
   }
 }
 
+function formatShippingStatus(status?: string | null) {
+  const normalized = status || "pending";
+
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function getInspectionStatus(order: OrderView) {
   if (order.refundStatus === "refunded" || order.transferStatus === "refunded") {
     return "Buyer refunded.";
@@ -460,6 +478,10 @@ export default function OrdersPage() {
               fulfillmentStatus: order.fulfillment_status || "pending",
               trackingNumber: order.tracking_number || "",
               carrier: order.carrier || "",
+              shippingStatus: order.shipping_status || "pending",
+              shippingService: order.shipping_service || "",
+              estimatedDelivery: order.shippo_eta,
+              shippoTrackingUrl: order.shippo_tracking_url,
               deliveredAt: order.delivered_at,
               disputeStatus: order.dispute_status || "none",
               disputeReason: order.dispute_reason,
@@ -1083,7 +1105,8 @@ export default function OrdersPage() {
           ) : null}
 
           {!isLoading ? orders.map((order) => {
-            const trackingUrl = getTrackingUrl(order.carrier, order.trackingNumber);
+            const trackingUrl =
+              order.shippoTrackingUrl || getTrackingUrl(order.carrier, order.trackingNumber);
             const simpleStatus = getSimpleOrderStatus(order);
             const isExpanded = Boolean(expandedOrderIds[order.id]);
             const canOpenDispute =
@@ -1161,9 +1184,18 @@ export default function OrdersPage() {
                   <div className="order-detail-panel">
                     <span>{order.carrier ? `Carrier: ${order.carrier}` : "Carrier pending"}</span>
                     <span>
+                      {order.shippingService
+                        ? `Service: ${order.shippingService}`
+                        : "Service pending"}
+                    </span>
+                    <span>
                       {order.trackingNumber
                         ? `Tracking: ${order.trackingNumber}`
                         : "Tracking pending"}
+                    </span>
+                    <span>Shipment: {formatShippingStatus(order.shippingStatus)}</span>
+                    <span>
+                      Estimated Delivery: {formatDate(order.estimatedDelivery)}
                     </span>
                     {trackingUrl ? (
                       <a href={trackingUrl} target="_blank" rel="noreferrer">

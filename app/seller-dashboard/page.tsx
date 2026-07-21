@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import GrailPassPresenceCard from "../components/GrailPassPresenceCard";
 import PageShell from "../components/PageShell";
+import type { GrailPassMembership } from "../lib/grailPass";
 import { mockSellerDashboardData } from "../lib/mockData";
 import {
   calculateProgression,
@@ -43,6 +44,9 @@ type RewardsMarketplace = {
     label: string;
     status: string;
   };
+};
+type GrailPassResponse = {
+  membership?: GrailPassMembership;
 };
 type WalletSummary = {
   availableCredit: number;
@@ -95,9 +99,18 @@ type DashboardOrder = {
   disputeOpenedAt?: string | null;
   trackingNumber: string;
   carrier: string;
+  shippingStatus: string;
+  shippingService: string;
+  labelUrl?: string | null;
+  labelCost: number;
+  shippoEta?: string | null;
+  shippoTrackingUrl?: string | null;
   deliveredAt?: string | null;
   inspectionEndsAt?: string | null;
   sellerPayoutAmount: number;
+  cardPrice: number;
+  sellerFee: number;
+  paymentProcessingFee: number;
   href?: string;
 };
 type SupabaseOrderRow = {
@@ -113,6 +126,12 @@ type SupabaseOrderRow = {
   fulfillment_status?: string | null;
   tracking_number?: string | null;
   carrier?: string | null;
+  shipping_status?: string | null;
+  shipping_service?: string | null;
+  label_url?: string | null;
+  label_cost?: number | string | null;
+  shippo_eta?: string | null;
+  shippo_tracking_url?: string | null;
   shipped_at?: string | null;
   delivered_at?: string | null;
   inspection_ends_at?: string | null;
@@ -179,6 +198,29 @@ type ActiveListingRow = {
   sportscardspro_estimated_value?: number | null;
 };
 
+type ShippingLabelForm = {
+  fromName: string;
+  fromStreet1: string;
+  fromStreet2: string;
+  fromCity: string;
+  fromState: string;
+  fromZip: string;
+  fromPhone: string;
+  fromEmail: string;
+  toName: string;
+  toStreet1: string;
+  toStreet2: string;
+  toCity: string;
+  toState: string;
+  toZip: string;
+  toPhone: string;
+  toEmail: string;
+  parcelLength: string;
+  parcelWidth: string;
+  parcelHeight: string;
+  parcelWeight: string;
+};
+
 const initialOffers: DashboardOffer[] = [];
 const initialOrders = mockSellerDashboardData.recentOrders.map((order) => ({
   ...order,
@@ -196,9 +238,41 @@ const initialOrders = mockSellerDashboardData.recentOrders.map((order) => ({
   disputeOpenedAt: null,
   trackingNumber: "",
   carrier: "",
+  shippingStatus: "pending",
+  shippingService: "",
+  labelUrl: null,
+  labelCost: 0,
+  shippoEta: null,
+  shippoTrackingUrl: null,
   deliveredAt: null,
   sellerPayoutAmount: 0,
+  cardPrice: 0,
+  sellerFee: 0,
+  paymentProcessingFee: 0,
 }));
+
+const defaultShippingLabelForm: ShippingLabelForm = {
+  fromName: "",
+  fromStreet1: "",
+  fromStreet2: "",
+  fromCity: "",
+  fromState: "",
+  fromZip: "",
+  fromPhone: "",
+  fromEmail: "",
+  toName: "",
+  toStreet1: "",
+  toStreet2: "",
+  toCity: "",
+  toState: "",
+  toZip: "",
+  toPhone: "",
+  toEmail: "",
+  parcelLength: "7",
+  parcelWidth: "5",
+  parcelHeight: "1",
+  parcelWeight: "8",
+};
 
 const carrierOptions = ["USPS", "UPS", "FedEx", "DHL", "Other"];
 
@@ -375,6 +449,43 @@ function getSellerPayoutLabel(order: DashboardOrder) {
   return "Pending";
 }
 
+function formatShippingStatus(status?: string | null) {
+  const normalized = status || "pending";
+
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getTrackingUrl(order: DashboardOrder) {
+  if (order.shippoTrackingUrl) {
+    return order.shippoTrackingUrl;
+  }
+
+  if (!order.carrier || !order.trackingNumber) {
+    return null;
+  }
+
+  const tracking = encodeURIComponent(order.trackingNumber);
+  const carrier = order.carrier.toLowerCase();
+
+  if (carrier.includes("usps")) {
+    return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${tracking}`;
+  }
+
+  if (carrier.includes("ups")) {
+    return `https://www.ups.com/track?tracknum=${tracking}`;
+  }
+
+  if (carrier.includes("fedex")) {
+    return `https://www.fedex.com/fedextrack/?trknbr=${tracking}`;
+  }
+
+  return null;
+}
+
 function getSellerAuctionLifecycleLabel(auction: AuctionDashboardListing) {
   if (auction.auctionStatus === "finalizing") {
     return "Finalizing Auction";
@@ -432,6 +543,8 @@ export default function SellerDashboardPage() {
   const [trackingOrderId, setTrackingOrderId] = useState("");
   const [trackingCarrier, setTrackingCarrier] = useState("");
   const [trackingNumber, setTrackingNumber] = useState("");
+  const [shippingLabelOrderId, setShippingLabelOrderId] = useState("");
+  const [shippingLabelForm, setShippingLabelForm] = useState<ShippingLabelForm>(defaultShippingLabelForm);
   const [updatingOrderId, setUpdatingOrderId] = useState("");
   const [evidenceFiles, setEvidenceFiles] = useState<Record<string, File | null>>({});
   const [evidenceNotes, setEvidenceNotes] = useState<Record<string, string>>({});
@@ -443,6 +556,7 @@ export default function SellerDashboardPage() {
   const [marketplaceRewards, setMarketplaceRewards] = useState<RewardsMarketplace | null>(null);
   const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null);
   const [lastWalletReward, setLastWalletReward] = useState<WalletLedgerEntry | null>(null);
+  const [grailPass, setGrailPass] = useState<GrailPassMembership | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -457,7 +571,12 @@ export default function SellerDashboardPage() {
       }
 
       try {
-        const [progressionResponse, rewardsResponse, walletResponse] = await Promise.all([
+        const [
+          progressionResponse,
+          rewardsResponse,
+          walletResponse,
+          grailPassResponse,
+        ] = await Promise.all([
           fetch("/api/progression", {
             headers: {
               authorization: `Bearer ${session.access_token}`,
@@ -469,6 +588,11 @@ export default function SellerDashboardPage() {
             },
           }),
           fetch("/api/wallet", {
+            headers: {
+              authorization: `Bearer ${session.access_token}`,
+            },
+          }),
+          fetch("/api/grail-pass/subscription", {
             headers: {
               authorization: `Bearer ${session.access_token}`,
             },
@@ -485,6 +609,7 @@ export default function SellerDashboardPage() {
           wallet?: WalletSummary;
           ledger?: WalletLedgerEntry[];
         };
+        const grailPassPayload = (await grailPassResponse.json()) as GrailPassResponse;
 
         if (isMounted && payload.progression) {
           setProgression(payload.progression);
@@ -496,6 +621,7 @@ export default function SellerDashboardPage() {
           setLastWalletReward(
             (walletPayload.ledger || []).find((entry) => Number(entry.amount) > 0) || null,
           );
+          setGrailPass(grailPassPayload.membership || null);
         }
       } catch (error) {
         console.warn("Seller dashboard progression/rewards load skipped:", error);
@@ -664,6 +790,9 @@ export default function SellerDashboardPage() {
               : undefined;
             const total = Number(order.total_amount || order.card_price || 0);
             const sellerPayoutAmount = Number(order.seller_payout_amount || 0);
+            const cardPrice = Number(order.card_price || 0);
+            const sellerFee = Number(order.platform_fee || 0);
+            const paymentProcessingFee = Number(order.processing_fee || 0);
 
             return {
               id: order.id,
@@ -689,9 +818,18 @@ export default function SellerDashboardPage() {
               disputeOpenedAt: order.dispute_opened_at,
               trackingNumber: order.tracking_number || "",
               carrier: order.carrier || "",
+              shippingStatus: order.shipping_status || "pending",
+              shippingService: order.shipping_service || "",
+              labelUrl: order.label_url,
+              labelCost: Number(order.label_cost || 0),
+              shippoEta: order.shippo_eta,
+              shippoTrackingUrl: order.shippo_tracking_url,
               deliveredAt: order.delivered_at,
               inspectionEndsAt: order.inspection_ends_at,
               sellerPayoutAmount,
+              cardPrice,
+              sellerFee,
+              paymentProcessingFee,
               href: order.listing_id ? `/cards/${order.listing_id}` : "/orders",
             };
           }),
@@ -993,6 +1131,13 @@ export default function SellerDashboardPage() {
     );
   }
 
+  function updateShippingLabelForm(field: keyof ShippingLabelForm, value: string) {
+    setShippingLabelForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
   async function sendSystemNotification(
     kind: "order_tracking_added" | "order_shipped" | "order_delivered",
     orderId: string,
@@ -1082,6 +1227,134 @@ export default function SellerDashboardPage() {
     setTrackingCarrier(order.carrier);
     setTrackingNumber(order.trackingNumber);
     setDashboardMessage("");
+  }
+
+  function openShippingLabelModal(order: DashboardOrder) {
+    setShippingLabelOrderId(order.id);
+    setShippingLabelForm(defaultShippingLabelForm);
+    setDashboardMessage("");
+  }
+
+  function closeShippingLabelModal() {
+    setShippingLabelOrderId("");
+    setShippingLabelForm(defaultShippingLabelForm);
+  }
+
+  async function purchaseShippingLabel() {
+    if (!shippingLabelOrderId) {
+      return;
+    }
+
+    const accessToken = await getAccessToken();
+
+    if (!accessToken) {
+      setDashboardMessage("Sign in to purchase shipping labels.");
+      return;
+    }
+
+    setUpdatingOrderId(shippingLabelOrderId);
+    setDashboardMessage("Purchasing Shippo label...");
+
+    try {
+      const response = await fetch("/api/orders/shipping-label", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          orderId: shippingLabelOrderId,
+          from: {
+            name: shippingLabelForm.fromName,
+            street1: shippingLabelForm.fromStreet1,
+            street2: shippingLabelForm.fromStreet2,
+            city: shippingLabelForm.fromCity,
+            state: shippingLabelForm.fromState,
+            zip: shippingLabelForm.fromZip,
+            country: "US",
+            phone: shippingLabelForm.fromPhone,
+            email: shippingLabelForm.fromEmail,
+          },
+          to: {
+            name: shippingLabelForm.toName,
+            street1: shippingLabelForm.toStreet1,
+            street2: shippingLabelForm.toStreet2,
+            city: shippingLabelForm.toCity,
+            state: shippingLabelForm.toState,
+            zip: shippingLabelForm.toZip,
+            country: "US",
+            phone: shippingLabelForm.toPhone,
+            email: shippingLabelForm.toEmail,
+          },
+          parcel: {
+            length: shippingLabelForm.parcelLength,
+            width: shippingLabelForm.parcelWidth,
+            height: shippingLabelForm.parcelHeight,
+            weight: shippingLabelForm.parcelWeight,
+          },
+        }),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        order?: {
+          carrier?: string | null;
+          shipping_service?: string | null;
+          tracking_number?: string | null;
+          label_url?: string | null;
+          label_cost?: number | string | null;
+          shipping_status?: string | null;
+          fulfillment_status?: string | null;
+          shippo_tracking_url?: string | null;
+          shippo_eta?: string | null;
+          seller_payout_amount?: number | string | null;
+        };
+        shipping?: {
+          carrier?: string;
+          service?: string;
+          trackingNumber?: string;
+          labelUrl?: string;
+          labelCost?: number;
+          shippingStatus?: string;
+          estimatedDelivery?: string | null;
+        };
+        payout?: {
+          netPayout?: number;
+        };
+      };
+
+      if (!response.ok || !payload.order) {
+        throw new Error(payload.error || "Shipping label could not be purchased.");
+      }
+
+      updateLocalOrder(shippingLabelOrderId, {
+        carrier: payload.order.carrier || payload.shipping?.carrier || "USPS",
+        shippingService: payload.order.shipping_service || payload.shipping?.service || "USPS Ground Advantage",
+        trackingNumber: payload.order.tracking_number || payload.shipping?.trackingNumber || "",
+        labelUrl: payload.order.label_url || payload.shipping?.labelUrl || null,
+        labelCost: Number(payload.order.label_cost || payload.shipping?.labelCost || 0),
+        shippingStatus: payload.order.shipping_status || payload.shipping?.shippingStatus || "label_created",
+        fulfillmentStatus: payload.order.fulfillment_status || "shipped",
+        shippoTrackingUrl: payload.order.shippo_tracking_url || null,
+        shippoEta: payload.order.shippo_eta || payload.shipping?.estimatedDelivery || null,
+        sellerPayoutAmount: Number(
+          payload.order.seller_payout_amount || payload.payout?.netPayout || 0,
+        ),
+        payoutDisplay:
+          Number(payload.order.seller_payout_amount || payload.payout?.netPayout || 0) > 0
+            ? formatCurrency(Number(payload.order.seller_payout_amount || payload.payout?.netPayout || 0))
+            : "Pending",
+        transferStatus: "not_ready",
+      });
+      closeShippingLabelModal();
+      setDashboardMessage("Shipping label purchased. Tracking and payout deduction saved.");
+    } catch (error) {
+      console.error("Seller dashboard Shippo label error:", error);
+      setDashboardMessage(
+        error instanceof Error ? error.message : "Shipping label could not be purchased.",
+      );
+    } finally {
+      setUpdatingOrderId("");
+    }
   }
 
   async function saveTracking() {
@@ -1529,6 +1802,8 @@ export default function SellerDashboardPage() {
                 {orders.map((order) => {
                   const blockReason = getPayoutBlockReason(order);
                   const hasTracking = Boolean(order.carrier && order.trackingNumber);
+                  const hasShippoLabel = Boolean(order.labelUrl);
+                  const trackingUrl = getTrackingUrl(order);
                   const simpleStatus = getSellerOrderStatus(order);
                   const payoutLabel = getSellerPayoutLabel(order);
                   const isExpanded = Boolean(expandedOrderIds[order.id]);
@@ -1539,6 +1814,11 @@ export default function SellerDashboardPage() {
                   );
                   const showEvidenceUpload =
                     isExpanded && canUploadEvidence && !collapsedEvidenceUploads[order.id];
+                  const canPurchaseLabel =
+                    order.fulfillmentStatus === "pending" &&
+                    !hasShippoLabel &&
+                    order.refundStatus !== "refunded" &&
+                    order.transferStatus !== "paid";
 
                   return (
                     <article key={order.id} className="table-row order-row payout-order-row">
@@ -1568,6 +1848,11 @@ export default function SellerDashboardPage() {
                       </div>
                       <div className="row-actions">
                         {order.href ? <Link href={order.href}>View Card</Link> : null}
+                        {hasShippoLabel && order.labelUrl ? (
+                          <a href={order.labelUrl} target="_blank" rel="noreferrer">
+                            Print Label
+                          </a>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() =>
@@ -1579,8 +1864,18 @@ export default function SellerDashboardPage() {
                         >
                           {isExpanded ? "Hide Details" : "View Details"}
                         </button>
-                        {order.fulfillmentStatus === "pending" ||
-                        order.fulfillmentStatus === "shipped" ? (
+                        {canPurchaseLabel ? (
+                          <button
+                            type="button"
+                            disabled={updatingOrderId === order.id}
+                            onClick={() => openShippingLabelModal(order)}
+                          >
+                            Purchase Shipping Label
+                          </button>
+                        ) : null}
+                        {!hasShippoLabel &&
+                        (order.fulfillmentStatus === "pending" ||
+                          order.fulfillmentStatus === "shipped") ? (
                           <button
                             type="button"
                             disabled={updatingOrderId === order.id}
@@ -1598,7 +1893,7 @@ export default function SellerDashboardPage() {
                             Mark Shipped
                           </button>
                         ) : null}
-                        {order.fulfillmentStatus === "pending" && !hasTracking ? (
+                        {order.fulfillmentStatus === "pending" && !hasTracking && !canPurchaseLabel ? (
                           <span className="payout-reason">Add tracking before shipping</span>
                         ) : null}
                         {order.fulfillmentStatus === "shipped" ? (
@@ -1618,10 +1913,29 @@ export default function SellerDashboardPage() {
                         <div className="seller-order-details">
                           <span>Carrier {order.carrier || "Pending"}</span>
                           <span>Tracking {order.trackingNumber || "Not added"}</span>
+                          <span>Shipment {formatShippingStatus(order.shippingStatus)}</span>
+                          <span>Service {order.shippingService || "Pending"}</span>
+                          <span>Estimated delivery {formatDate(order.shippoEta)}</span>
+                          <span>Label cost {order.labelCost > 0 ? formatCurrency(order.labelCost) : "Pending"}</span>
+                          {trackingUrl ? (
+                            <a href={trackingUrl} target="_blank" rel="noreferrer">
+                              Track Package
+                            </a>
+                          ) : null}
+                          {order.labelUrl ? (
+                            <a href={order.labelUrl} target="_blank" rel="noreferrer">
+                              Print Label
+                            </a>
+                          ) : null}
                           <span>Delivered {formatDate(order.deliveredAt)}</span>
                           <span>Fulfillment {order.fulfillmentStatus}</span>
                           <span>Transfer {order.transferStatus}</span>
                           <span>Refund {order.refundStatus}</span>
+                          <span>Sale price {order.cardPrice > 0 ? formatCurrency(order.cardPrice) : order.total}</span>
+                          <span>Seller fee {formatCurrency(order.sellerFee)}</span>
+                          <span>Payment processing {formatCurrency(order.paymentProcessingFee)}</span>
+                          <span>Shipping label {formatCurrency(order.labelCost)}</span>
+                          <span>Net payout {formatCurrency(order.sellerPayoutAmount)}</span>
                           {order.disputeReason ? (
                             <span>Dispute reason: {order.disputeReason}</span>
                           ) : null}
@@ -1797,9 +2111,21 @@ export default function SellerDashboardPage() {
               </Link>
               <GrailPassPresenceCard
                 variant="compact"
-                eyebrow="Seller Preview"
-                title="Future marketplace tools."
-                description="GRAIL Pass can later surface featured listing credits and seller presentation benefits without changing the seller dashboard workflow."
+                eyebrow={
+                  grailPass?.status && grailPass.status !== "none"
+                    ? "GRAIL Pass Active"
+                    : "Seller Preview"
+                }
+                title={
+                  grailPass?.status && grailPass.status !== "none"
+                    ? `${grailPass.displayName} seller tools.`
+                    : "Future marketplace tools."
+                }
+                description={
+                  grailPass?.status && grailPass.status !== "none"
+                    ? "GRAIL Pass membership is active. Future seller perks remain gated until each tool is implemented."
+                    : "GRAIL Pass can later surface featured listing credits and seller presentation benefits without changing the seller dashboard workflow."
+                }
                 perkKeys={["featured_listing_credit"]}
               />
             </section>
@@ -1867,6 +2193,204 @@ export default function SellerDashboardPage() {
             <div className="row-actions">
               <button type="button" disabled={Boolean(updatingOrderId)} onClick={saveTracking}>
                 Save Tracking
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {shippingLabelOrderId ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="panel tracking-modal shipping-label-modal" role="dialog" aria-modal="true">
+            <div className="section-heading">
+              <h2>Purchase Shipping Label</h2>
+              <button type="button" onClick={closeShippingLabelModal}>
+                Close
+              </button>
+            </div>
+            <p>
+              Shippo will create a USPS Ground Advantage label, attach tracking to the order,
+              and deduct the actual label cost from the seller payout.
+            </p>
+            <div className="shipping-label-grid">
+              <div className="shipping-label-group">
+                <strong>Sender</strong>
+                <label>
+                  <span>Name</span>
+                  <input
+                    value={shippingLabelForm.fromName}
+                    onChange={(event) => updateShippingLabelForm("fromName", event.target.value)}
+                    placeholder="Sender name"
+                  />
+                </label>
+                <label>
+                  <span>Street</span>
+                  <input
+                    value={shippingLabelForm.fromStreet1}
+                    onChange={(event) => updateShippingLabelForm("fromStreet1", event.target.value)}
+                    placeholder="Street address"
+                  />
+                </label>
+                <label>
+                  <span>Apartment / Suite</span>
+                  <input
+                    value={shippingLabelForm.fromStreet2}
+                    onChange={(event) => updateShippingLabelForm("fromStreet2", event.target.value)}
+                    placeholder="Optional"
+                  />
+                </label>
+                <div className="shipping-label-row">
+                  <label>
+                    <span>City</span>
+                    <input
+                      value={shippingLabelForm.fromCity}
+                      onChange={(event) => updateShippingLabelForm("fromCity", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>State</span>
+                    <input
+                      value={shippingLabelForm.fromState}
+                      onChange={(event) => updateShippingLabelForm("fromState", event.target.value)}
+                      maxLength={2}
+                    />
+                  </label>
+                  <label>
+                    <span>ZIP</span>
+                    <input
+                      value={shippingLabelForm.fromZip}
+                      onChange={(event) => updateShippingLabelForm("fromZip", event.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="shipping-label-row two">
+                  <label>
+                    <span>Phone</span>
+                    <input
+                      value={shippingLabelForm.fromPhone}
+                      onChange={(event) => updateShippingLabelForm("fromPhone", event.target.value)}
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label>
+                    <span>Email</span>
+                    <input
+                      value={shippingLabelForm.fromEmail}
+                      onChange={(event) => updateShippingLabelForm("fromEmail", event.target.value)}
+                      placeholder="Optional"
+                    />
+                  </label>
+                </div>
+              </div>
+              <div className="shipping-label-group">
+                <strong>Recipient</strong>
+                <label>
+                  <span>Name</span>
+                  <input
+                    value={shippingLabelForm.toName}
+                    onChange={(event) => updateShippingLabelForm("toName", event.target.value)}
+                    placeholder="Recipient name"
+                  />
+                </label>
+                <label>
+                  <span>Street</span>
+                  <input
+                    value={shippingLabelForm.toStreet1}
+                    onChange={(event) => updateShippingLabelForm("toStreet1", event.target.value)}
+                    placeholder="Street address"
+                  />
+                </label>
+                <label>
+                  <span>Apartment / Suite</span>
+                  <input
+                    value={shippingLabelForm.toStreet2}
+                    onChange={(event) => updateShippingLabelForm("toStreet2", event.target.value)}
+                    placeholder="Optional"
+                  />
+                </label>
+                <div className="shipping-label-row">
+                  <label>
+                    <span>City</span>
+                    <input
+                      value={shippingLabelForm.toCity}
+                      onChange={(event) => updateShippingLabelForm("toCity", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>State</span>
+                    <input
+                      value={shippingLabelForm.toState}
+                      onChange={(event) => updateShippingLabelForm("toState", event.target.value)}
+                      maxLength={2}
+                    />
+                  </label>
+                  <label>
+                    <span>ZIP</span>
+                    <input
+                      value={shippingLabelForm.toZip}
+                      onChange={(event) => updateShippingLabelForm("toZip", event.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="shipping-label-row two">
+                  <label>
+                    <span>Phone</span>
+                    <input
+                      value={shippingLabelForm.toPhone}
+                      onChange={(event) => updateShippingLabelForm("toPhone", event.target.value)}
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label>
+                    <span>Email</span>
+                    <input
+                      value={shippingLabelForm.toEmail}
+                      onChange={(event) => updateShippingLabelForm("toEmail", event.target.value)}
+                      placeholder="Optional"
+                    />
+                  </label>
+                </div>
+              </div>
+              <div className="shipping-label-group parcel">
+                <strong>Package</strong>
+                <div className="shipping-label-row">
+                  <label>
+                    <span>Length</span>
+                    <input
+                      value={shippingLabelForm.parcelLength}
+                      onChange={(event) => updateShippingLabelForm("parcelLength", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>Width</span>
+                    <input
+                      value={shippingLabelForm.parcelWidth}
+                      onChange={(event) => updateShippingLabelForm("parcelWidth", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>Height</span>
+                    <input
+                      value={shippingLabelForm.parcelHeight}
+                      onChange={(event) => updateShippingLabelForm("parcelHeight", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>Weight oz</span>
+                    <input
+                      value={shippingLabelForm.parcelWeight}
+                      onChange={(event) => updateShippingLabelForm("parcelWeight", event.target.value)}
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div className="row-actions">
+              <button
+                type="button"
+                disabled={Boolean(updatingOrderId)}
+                onClick={purchaseShippingLabel}
+              >
+                Purchase USPS Label
               </button>
             </div>
           </section>
@@ -2106,7 +2630,8 @@ const pageStyles = `
     flex-wrap: wrap;
   }
 
-  .seller-order-details span {
+  .seller-order-details span,
+  .seller-order-details a {
     border: 1px solid rgba(201,205,211,0.14);
     border-radius: 999px;
     background: rgba(8,8,10,0.62);
@@ -2114,6 +2639,8 @@ const pageStyles = `
     padding: 0 10px;
     display: inline-flex;
     align-items: center;
+    color: #fff;
+    text-decoration: none;
   }
 
   .table-row strong {
@@ -2432,6 +2959,54 @@ const pageStyles = `
     gap: 12px;
   }
 
+  .shipping-label-modal {
+    width: min(760px, 100%);
+    max-height: calc(100vh - 36px);
+    overflow: auto;
+  }
+
+  .shipping-label-modal p {
+    margin: 0;
+    color: #C9CDD3;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  .shipping-label-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .shipping-label-group {
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    background: rgba(255,255,255,0.03);
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .shipping-label-group strong {
+    color: #fff;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .shipping-label-row {
+    display: grid;
+    grid-template-columns: 1fr 72px 110px;
+    gap: 8px;
+  }
+
+  .shipping-label-row.two {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .shipping-label-group.parcel .shipping-label-row {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
   .tracking-modal label {
     display: grid;
     gap: 7px;
@@ -2492,6 +3067,12 @@ const pageStyles = `
 
     .row-actions {
       justify-content: flex-start;
+    }
+
+    .shipping-label-row,
+    .shipping-label-row.two,
+    .shipping-label-group.parcel .shipping-label-row {
+      grid-template-columns: 1fr;
     }
   }
 `;
