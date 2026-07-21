@@ -12,6 +12,14 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
+function getListingFrontImage(listing: AuctionListingRow) {
+  return (
+    listing.listing_images?.find((image) => image.image_type === "front")?.image_url ||
+    listing.listing_images?.find((image) => Boolean(image.image_url))?.image_url ||
+    null
+  );
+}
+
 export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const listingId = String(id || "").trim();
@@ -28,7 +36,7 @@ export async function POST(request: Request, context: RouteContext) {
   } catch (error) {
     console.error("Auction winner checkout configuration error:", error);
     return NextResponse.json(
-      { error: "Auction checkout is not configured." },
+      { error: "Auction checkout is temporarily unavailable." },
       { status: 500 },
     );
   }
@@ -36,7 +44,22 @@ export async function POST(request: Request, context: RouteContext) {
   const { data, error } = await supabase
     .from("listings")
     .select(
-      "id, seller_id, title, status, sale_format, auction_status, auction_current_bid, auction_winner_id, auction_payment_due_at",
+      `
+        id,
+        seller_id,
+        title,
+        status,
+        sale_format,
+        auction_status,
+        auction_current_bid,
+        auction_winner_id,
+        auction_payment_due_at,
+        listing_images (
+          image_url,
+          image_type,
+          display_order
+        )
+      `,
     )
     .eq("id", listingId)
     .maybeSingle();
@@ -101,6 +124,7 @@ export async function POST(request: Request, context: RouteContext) {
       buyerId: user.id,
       amount: winningBid,
       title: listing.title || "GRAIL Auction",
+      imageUrl: getListingFrontImage(listing),
       cancelPath: `/cards/${listingId}?auction_checkout=canceled`,
       extraMetadata: {
         auctionId: listingId,

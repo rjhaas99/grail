@@ -37,7 +37,7 @@ export default function MarketIndexPage() {
           <div className="chart-header">
             <div>
               <h2>Sports + TCG Market</h2>
-              <p>{activeRange} mock trend view</p>
+              <p>{activeRange} trend view</p>
             </div>
             <div className="range-buttons">
               {ranges.map((range) => (

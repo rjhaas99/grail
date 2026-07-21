@@ -10,7 +10,6 @@ import {
   getAuctionEndsAt,
   getAuctionStorageDurationDays,
   isValidAuctionDuration,
-  testingOneMinuteAuctionDuration,
 } from "../lib/auctionDurations";
 import { cardImageStorageBucket, sanitizeImageFileName } from "../lib/imageUpload";
 import type { XpSource } from "../lib/progression";
@@ -286,6 +285,9 @@ const photoTypes: PhotoType[] = [
   { label: "Surface", imageType: "surface" },
   { label: "Edges", imageType: "edges" },
 ];
+const availableAuctionDurationOptions = auctionDurationSelectOptions.filter(
+  (option) => process.env.NODE_ENV !== "production" || !option.isTestingOnly,
+);
 
 const categories = ["Sports", "TCG"];
 const rawConditions = [
@@ -1026,7 +1028,7 @@ export default function ListCardPage() {
       if (result.analysis.status === "unconfigured") {
         setListingAssistantStatus({
           type: "info",
-          text: "Listing Assistant is ready, but the server vision provider is not configured yet.",
+          text: "Listing Assistant is temporarily unavailable.",
         });
         return;
       }
@@ -1923,7 +1925,7 @@ export default function ListCardPage() {
         type: "error",
         text: error instanceof Error
           ? error.message
-          : "SportsCardsPro search is unavailable right now.",
+          : "Market value unavailable.",
       });
     } finally {
       setIsSearchingSportsCardsPro(false);
@@ -2010,7 +2012,7 @@ export default function ListCardPage() {
         type: "error",
         text: error instanceof Error
           ? error.message
-          : "SportsCardsPro value is unavailable right now.",
+          : "Market value unavailable.",
       });
     } finally {
       setIsFetchingSportsCardsProValue(false);
@@ -2996,7 +2998,7 @@ export default function ListCardPage() {
                         value={auctionDurationDays}
                         onChange={(event) => setAuctionDurationDays(event.target.value)}
                       >
-                        {auctionDurationSelectOptions.map((durationOption) => (
+                        {availableAuctionDurationOptions.map((durationOption) => (
                           <option key={durationOption.option} value={durationOption.option}>
                             {durationOption.label}
                           </option>
@@ -3032,12 +3034,6 @@ export default function ListCardPage() {
                     No-reserve auctions are free to create and must sell to the
                     highest valid bidder.
                   </p>
-                  {auctionDurationDays === testingOneMinuteAuctionDuration ? (
-                    <p className="reserve-fee-note">
-                      <strong>Testing duration.</strong> The 1 minute auction duration is temporary
-                      and intended only for development testing.
-                    </p>
-                  ) : null}
                   {auctionReserveEnabled ? (
                     <div className="reserve-fee-note">
                       <strong>
@@ -3195,7 +3191,7 @@ export default function ListCardPage() {
 
             <section className="panel form-section">
               <h2>Shipping</h2>
-              <div className="field-grid three">
+              <div className="field-grid two">
                 <label>
                   <span>Shipping speed</span>
                   <select defaultValue="1-2 business days">
@@ -3204,24 +3200,10 @@ export default function ListCardPage() {
                     <option>3-5 business days</option>
                   </select>
                 </label>
-                <label>
-                  <span>Shipping cost</span>
-                  <input defaultValue="$14" />
-                </label>
-                <label className="toggle-field">
-                  <span>Local pickup placeholder</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setStatus({
-                        type: "info",
-                        text: "Local pickup toggle mock only.",
-                      })
-                    }
-                  >
-                    Off
-                  </button>
-                </label>
+                <div className="shipping-estimate-note">
+                  <span>Estimated Shipping</span>
+                  <strong>Calculated automatically when shipping label is purchased.</strong>
+                </div>
               </div>
             </section>
           </div>
@@ -3522,6 +3504,9 @@ const pageStyles = `
   .assistant-status.error { color: #fca5a5; border-color: rgba(248,113,113,0.24); background: rgba(248,113,113,0.07); }
   .field-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .field-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .shipping-estimate-note { border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); min-height: 42px; padding: 10px 12px; display: grid; gap: 4px; box-sizing: border-box; }
+  .shipping-estimate-note span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+  .shipping-estimate-note strong { color: #fff; font-size: 12px; line-height: 17px; font-weight: 900; }
   .full-width { grid-column: 1 / -1; }
   label { display: grid; gap: 7px; }
   input, select, textarea { border: 1px solid #24242a; border-radius: 10px; background: #08080a; color: #fff; min-height: 42px; padding: 0 12px; box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 800; outline: none; }

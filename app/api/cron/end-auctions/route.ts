@@ -58,7 +58,7 @@ async function endAuctions(request: Request) {
   } catch (error) {
     console.error("End auctions cron configuration error:", error);
     return NextResponse.json(
-      { error: "Auction ending is not configured." },
+      { error: "Auction ending is temporarily unavailable." },
       { status: 500 },
     );
   }

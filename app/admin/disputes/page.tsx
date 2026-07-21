@@ -452,7 +452,7 @@ export default function AdminDisputesPage() {
               {!isLoading
                 ? orders.map((order) => {
                     const refundUnavailableMessage =
-                      "This order was created before Stripe refund tracking was added, or the webhook did not store payment data. Automatic refund is unavailable for this test order. Create a new checkout order to test refunds.";
+                      "This order was created before Stripe refund tracking was added, or the webhook did not store payment data. Automatic refund is unavailable for this order.";
 
                     return (
                     <article key={order.id} className="dispute-card">

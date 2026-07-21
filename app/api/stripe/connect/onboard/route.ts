@@ -109,7 +109,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Stripe Connect onboarding configuration error:", error);
     return NextResponse.json(
-      { error: "Stripe Connect onboarding is not configured." },
+      { error: "Stripe Connect onboarding is temporarily unavailable." },
       { status: 500 },
     );
   }

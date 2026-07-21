@@ -19,6 +19,7 @@ type CreateTransactionCheckoutSessionParams = {
   buyerId?: string | null;
   amount: number;
   title: string;
+  imageUrl?: string | null;
   successPath?: string;
   cancelPath?: string;
   extraMetadata?: Record<string, MetadataValue>;
@@ -78,6 +79,24 @@ function getAbsoluteCheckoutUrl(path: string) {
   return `${getConfiguredSiteUrl()}${normalizedPath}`;
 }
 
+function getStripeProductImages(imageUrl?: string | null) {
+  const trimmedUrl = imageUrl?.trim();
+
+  if (!trimmedUrl) {
+    return undefined;
+  }
+
+  if (trimmedUrl.startsWith("https://") || trimmedUrl.startsWith("http://")) {
+    return [trimmedUrl];
+  }
+
+  if (trimmedUrl.startsWith("/")) {
+    return [getAbsoluteCheckoutUrl(trimmedUrl)];
+  }
+
+  return undefined;
+}
+
 export function getStripeCheckoutTypeForTransaction(
   transactionType: TransactionCheckoutType,
 ) {
@@ -129,6 +148,7 @@ export async function createTransactionCheckoutSession({
   buyerId,
   amount,
   title,
+  imageUrl,
   successPath,
   cancelPath,
   extraMetadata,
@@ -161,6 +181,7 @@ export async function createTransactionCheckoutSession({
   const resolvedSuccessPath =
     successPath || `/checkout/${listingId}?success=true&session_id={CHECKOUT_SESSION_ID}`;
   const resolvedCancelPath = cancelPath || `/checkout/${listingId}?canceled=true`;
+  const productImages = getStripeProductImages(imageUrl);
 
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
@@ -173,6 +194,7 @@ export async function createTransactionCheckoutSession({
           unit_amount: unitAmount,
           product_data: {
             name: title,
+            ...(productImages ? { images: productImages } : {}),
           },
         },
       },

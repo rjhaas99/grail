@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import CollectorIdentityCard from "../../components/CollectorIdentityCard";
@@ -371,10 +372,13 @@ export default function SellerPublicProfilePage() {
                     >
                       <div className="aspect-[3/4] bg-black">
                         {image ? (
-                          <img
+                          <Image
                             src={image}
                             alt={listing.title || "Card listing"}
+                            width={320}
+                            height={426}
                             className="h-full w-full object-cover transition group-hover:scale-105"
+                            unoptimized
                           />
                         ) : (
                           <div className="flex h-full items-center justify-center text-zinc-700">

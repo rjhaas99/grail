@@ -224,7 +224,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Admin wallet configuration error:", error);
     return NextResponse.json(
-      { error: "Admin wallet is not configured." },
+      { error: "Admin wallet is temporarily unavailable." },
       { status: 500 },
     );
   }
@@ -475,7 +475,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Admin wallet configuration error:", error);
     return NextResponse.json(
-      { error: "Admin wallet is not configured." },
+      { error: "Admin wallet is temporarily unavailable." },
       { status: 500 },
     );
   }

@@ -1,5 +1,5 @@
 export const walletReasonPresets = [
-  "Beta Tester Bonus",
+  "Beta Bonus",
   "Promotion",
   "Referral Reward",
   "Contest Winner",

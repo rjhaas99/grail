@@ -113,7 +113,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Support ticket configuration error:", error);
     return NextResponse.json(
-      { error: "Support is not configured yet." },
+      { error: "Support is temporarily unavailable." },
       { status: 500 },
     );
   }

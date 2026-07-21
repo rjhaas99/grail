@@ -213,7 +213,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Admin trust configuration error:", error);
     return NextResponse.json(
-      { error: "Admin trust is not configured." },
+      { error: "Admin trust is temporarily unavailable." },
       { status: 500 },
     );
   }
@@ -399,7 +399,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     console.error("Admin trust configuration error:", error);
     return NextResponse.json(
-      { error: "Admin trust is not configured." },
+      { error: "Admin trust is temporarily unavailable." },
       { status: 500 },
     );
   }

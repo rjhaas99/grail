@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import CollectorMomentLayer from "../components/CollectorMomentLayer";
@@ -39,6 +40,10 @@ type SupabaseOrderRow = {
 type ListingRow = {
   id: string;
   title: string | null;
+  listing_images?: Array<{
+    image_url: string | null;
+    image_type: string | null;
+  }> | null;
 };
 
 type ProfileRow = {
@@ -55,6 +60,7 @@ type OrderView = {
   status: string;
   date: string;
   href: string;
+  imageUrl?: string | null;
   isBuyer?: boolean;
   fulfillmentStatus?: string;
   trackingNumber?: string;
@@ -248,6 +254,14 @@ function getProfileName(profile?: ProfileRow, fallbackId?: string | null) {
   return profile?.full_name || profile?.username || shortId(fallbackId);
 }
 
+function getListingFrontImage(listing?: ListingRow | null) {
+  return (
+    listing?.listing_images?.find((image) => image.image_type === "front")?.image_url ||
+    listing?.listing_images?.find((image) => Boolean(image.image_url))?.image_url ||
+    null
+  );
+}
+
 function isInspectionActive(value?: string | null) {
   return value ? new Date(value).getTime() > Date.now() : false;
 }
@@ -411,7 +425,16 @@ export default function OrdersPage() {
         if (listingIds.length > 0) {
           const { data: listingData, error: listingError } = await supabase
             .from("listings")
-            .select("id, title")
+            .select(
+              `
+                id,
+                title,
+                listing_images (
+                  image_url,
+                  image_type
+                )
+              `,
+            )
             .in("id", listingIds);
 
           if (listingError) {
@@ -474,6 +497,7 @@ export default function OrdersPage() {
               status: order.status || "paid",
               date: formatDate(order.created_at),
               href: order.listing_id ? `/cards/${order.listing_id}` : "/orders",
+              imageUrl: getListingFrontImage(listing),
               isBuyer,
               fulfillmentStatus: order.fulfillment_status || "pending",
               trackingNumber: order.tracking_number || "",
@@ -1100,7 +1124,7 @@ export default function OrdersPage() {
           {!isLoading && orders.length === 0 ? (
             <article className="empty-orders">
               <h2>No orders yet.</h2>
-              <p>Completed Stripe test checkouts will appear here after the webhook records them.</p>
+              <p>Completed purchases will appear here after payment is confirmed.</p>
             </article>
           ) : null}
 
@@ -1133,10 +1157,23 @@ export default function OrdersPage() {
             return (
               <article key={order.id} className="order-row">
                 <div>
-                  <span>{order.id}</span>
-                  <h2>{order.cardTitle}</h2>
-                  <p>{order.participantLabel}</p>
-                  <p>{order.date}</p>
+                  <div className="order-title-block">
+                    {order.imageUrl ? (
+                      <Image
+                        src={order.imageUrl}
+                        alt={order.cardTitle}
+                        width={54}
+                        height={72}
+                        unoptimized
+                      />
+                    ) : null}
+                    <div>
+                      <span>{order.id}</span>
+                      <h2>{order.cardTitle}</h2>
+                      <p>{order.participantLabel}</p>
+                      <p>{order.date}</p>
+                    </div>
+                  </div>
                 </div>
                 <div className="order-status-stack">
                   <strong className={`status status-${simpleStatus.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
@@ -1461,6 +1498,21 @@ const pageStyles = `
     font-size: 18px;
     line-height: 22px;
     font-weight: 900;
+  }
+
+  .order-title-block {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 11px;
+    align-items: center;
+  }
+
+  .order-title-block img {
+    width: 50px;
+    height: 68px;
+    object-fit: contain;
+    border-radius: 7px;
+    background: #030304;
   }
 
   .order-row > strong {

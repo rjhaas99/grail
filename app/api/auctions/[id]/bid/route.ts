@@ -55,7 +55,7 @@ export async function POST(request: Request, context: RouteContext) {
   } catch (error) {
     console.error("Auction bid configuration error:", error);
     return NextResponse.json(
-      { error: "Auction bidding is not configured." },
+      { error: "Auction bidding is temporarily unavailable." },
       { status: 500 },
     );
   }

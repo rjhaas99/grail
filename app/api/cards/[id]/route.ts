@@ -25,7 +25,7 @@ export async function GET(request: Request, context: RouteContext) {
   } catch (error) {
     console.error("Card detail API configuration error:", error);
     return NextResponse.json(
-      { error: "Card detail lookup is not configured." },
+      { error: "Card detail lookup is temporarily unavailable." },
       { status: 500 },
     );
   }

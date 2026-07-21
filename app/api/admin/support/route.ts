@@ -138,7 +138,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Admin support configuration error:", error);
     return NextResponse.json(
-      { error: "Admin support is not configured." },
+      { error: "Admin support is temporarily unavailable." },
       { status: 500 },
     );
   }
@@ -265,7 +265,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     console.error("Admin support update configuration error:", error);
     return NextResponse.json(
-      { error: "Admin support is not configured." },
+      { error: "Admin support is temporarily unavailable." },
       { status: 500 },
     );
   }

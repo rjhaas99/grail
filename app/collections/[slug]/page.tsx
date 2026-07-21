@@ -336,7 +336,7 @@ function readLocalMockConversations() {
       ? (JSON.parse(storedConversations) as MockConversation[])
       : [];
   } catch (error) {
-    console.error("Mock conversation read error:", error);
+    console.error("Conversation read error:", error);
     return [];
   }
 }
@@ -573,7 +573,7 @@ function mapSupabaseListing(
       grader: listing.grader || "Raw",
       grade: listing.grade || listing.condition || "Raw",
       certNumber: "Not available",
-      notes: "Live Supabase listing.",
+      notes: "Not provided",
     },
     priceHistory: {
       thirtyDay: "N/A",
@@ -582,7 +582,7 @@ function mapSupabaseListing(
       averageSale: 0,
       chartPoints: [],
     },
-    overview: "Live Supabase listing.",
+    overview: "",
   };
 }
 
@@ -644,7 +644,7 @@ function MarketChart() {
       className="market-chart"
       viewBox="0 0 260 92"
       role="img"
-      aria-label="Mock collection value chart"
+      aria-label="Collection value chart"
     >
       <path
         className="chart-fill"

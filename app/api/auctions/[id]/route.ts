@@ -41,7 +41,7 @@ export async function GET(request: Request, context: RouteContext) {
   } catch (error) {
     console.error("Auction status configuration error:", error);
     return NextResponse.json(
-      { error: "Auction status is not configured." },
+      { error: "Auction status is temporarily unavailable." },
       { status: 500 },
     );
   }

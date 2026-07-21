@@ -83,7 +83,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Admin dispute message configuration error:", error);
     return NextResponse.json(
-      { error: "Admin dispute messaging is not configured." },
+      { error: "Admin dispute messaging is temporarily unavailable." },
       { status: 500 },
     );
   }

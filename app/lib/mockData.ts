@@ -435,7 +435,7 @@ const listingSeeds = [
       subject: "Rookie Guard",
       grader: "PSA",
       grade: "10",
-      certNumber: "Mock-184204",
+      certNumber: "GRAIL-184204",
       notes: "Clean slab, sharp fictional card art, no visible surface notes.",
     },
     priceHistory: {
@@ -446,7 +446,7 @@ const listingSeeds = [
       chartPoints: [1180, 1215, 1195, 1240, 1265, 1250, 1320],
     },
     overview:
-      "A premium fictional sports-card grail with strong mock market value, elevated watch activity, and a clean graded presentation.",
+      "A premium fictional sports-card grail with strong market value, elevated watch activity, and a clean graded presentation.",
   },
   {
     id: "browse-2",
@@ -471,7 +471,7 @@ const listingSeeds = [
       subject: "Field Striker",
       grader: "PSA",
       grade: "9",
-      certNumber: "Mock-680911",
+      certNumber: "GRAIL-680911",
       notes: "Well-centered slab with light fictional edge notation.",
     },
     priceHistory: {
@@ -482,7 +482,7 @@ const listingSeeds = [
       chartPoints: [642, 655, 648, 670, 676, 690, 710],
     },
     overview:
-      "A clean graded sports listing with steady mock demand and a seller known for fast fulfillment.",
+      "A clean graded sports listing with steady demand and a seller known for fast fulfillment.",
   },
   {
     id: "browse-3",
@@ -518,7 +518,7 @@ const listingSeeds = [
       chartPoints: [355, 368, 360, 376, 382, 374, 380],
     },
     overview:
-      "A raw TCG mock listing with a dark holo-style presentation and strong collector appeal.",
+      "A raw TCG listing with a dark holo-style presentation and strong collector appeal.",
   },
   {
     id: "browse-4",
@@ -543,8 +543,8 @@ const listingSeeds = [
       subject: "Field Captain",
       grader: "SGC",
       grade: "8",
-      certNumber: "Mock-520884",
-      notes: "Strong eye appeal with mock corner wear reflected in grade.",
+      certNumber: "GRAIL-520884",
+      notes: "Strong eye appeal with corner wear reflected in grade.",
     },
     priceHistory: {
       thirtyDay: "+6.2%",
@@ -554,7 +554,7 @@ const listingSeeds = [
       chartPoints: [470, 482, 510, 498, 535, 542, 560],
     },
     overview:
-      "A high-watch sports listing with above-average mock traffic and a below-market asking price.",
+      "A high-watch sports listing with above-average traffic and a below-market asking price.",
   },
   {
     id: "browse-5",
@@ -590,7 +590,7 @@ const listingSeeds = [
       chartPoints: [176, 184, 181, 194, 198, 204, 210],
     },
     overview:
-      "A raw TCG prism-style card priced below mock market with solid watch activity.",
+      "A raw TCG prism-style card priced below market with solid watch activity.",
   },
   {
     id: "browse-6",
@@ -615,7 +615,7 @@ const listingSeeds = [
       subject: "Rookie Crest",
       grader: "PSA",
       grade: "8",
-      certNumber: "Mock-910318",
+      certNumber: "GRAIL-910318",
       notes: "Attractive graded fictional card with light centering note.",
     },
     priceHistory: {
@@ -626,7 +626,7 @@ const listingSeeds = [
       chartPoints: [872, 888, 900, 914, 906, 928, 940],
     },
     overview:
-      "A graded sports-card mock listing with stable price history and trusted seller history.",
+      "A graded sports-card listing with stable price history and trusted seller history.",
   },
   {
     id: "browse-7",
@@ -651,8 +651,8 @@ const listingSeeds = [
       subject: "Archive Guardian",
       grader: "BGS",
       grade: "9.5",
-      certNumber: "Mock-760551",
-      notes: "Premium fictional graded TCG card with strong mock demand.",
+      certNumber: "GRAIL-760551",
+      notes: "Premium fictional graded TCG card with strong demand.",
     },
     priceHistory: {
       thirtyDay: "+7.8%",
@@ -662,7 +662,7 @@ const listingSeeds = [
       chartPoints: [692, 720, 704, 748, 774, 790, 820],
     },
     overview:
-      "A hot graded TCG listing with the highest mock watch count in this Browse set.",
+      "A hot graded TCG listing with the highest watch count in this Browse set.",
   },
   {
     id: "browse-8",
@@ -698,7 +698,7 @@ const listingSeeds = [
       chartPoints: [132, 139, 141, 138, 146, 149, 155],
     },
     overview:
-      "A lower-price raw sports mock listing suited for collectors browsing entry-level cards.",
+      "A lower-price raw sports listing suited for collectors browsing entry-level cards.",
   },
 ];
 

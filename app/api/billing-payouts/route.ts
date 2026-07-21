@@ -275,7 +275,7 @@ async function loadPaymentMethods(stripe: Stripe | null, user: NonNullable<Await
   if (!stripe) {
     return {
       status: "error" as SectionStatus,
-      error: "Stripe billing is not configured.",
+      error: "Stripe billing is temporarily unavailable.",
       methods: [],
     };
   }
@@ -394,7 +394,7 @@ async function loadPayouts({
       estimatedNextPayout: null,
       payoutBank: null,
       lastPayout: null,
-      error: "Stripe balance data is not configured.",
+      error: "Stripe balance data is temporarily unavailable.",
     };
   }
 
@@ -521,7 +521,7 @@ async function loadFees({
       description:
         typeof settings.buyer_protection_description === "string"
           ? settings.buyer_protection_description
-          : "Production buyer-protection pricing is not configured.",
+          : "Buyer protection pricing is unavailable.",
     },
   };
 }
@@ -866,7 +866,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Billing payouts configuration error:", error);
     return NextResponse.json(
-      { error: "Billing & Payouts is not configured." },
+      { error: "Billing & Payouts is temporarily unavailable." },
       { status: 500 },
     );
   }
@@ -931,7 +931,7 @@ export async function GET(request: Request) {
           enabled: null,
           feePercent: null,
           label: "GRAIL Buyer Protection",
-          description: "Production buyer-protection pricing is not configured.",
+          description: "Buyer protection pricing is unavailable.",
         },
       },
     ),

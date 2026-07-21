@@ -37,7 +37,7 @@ export async function GET() {
   } catch (error) {
     console.error("Marketplace status configuration error:", error);
     return NextResponse.json(
-      { error: "Marketplace status is not configured." },
+      { error: "Marketplace status is temporarily unavailable." },
       { status: 500 },
     );
   }

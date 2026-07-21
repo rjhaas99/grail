@@ -205,7 +205,7 @@ export async function getOrCreateWallet(
       errorMessage: error.message,
       userId,
     });
-    throw new Error("GRAIL Wallet is not configured yet.");
+    throw new Error("GRAIL Wallet is temporarily unavailable.");
   }
 
   if (data) {

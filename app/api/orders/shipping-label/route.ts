@@ -145,7 +145,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Shippo label configuration error:", error);
     return NextResponse.json(
-      { error: "Shipping labels are not configured." },
+      { error: "Shipping labels are temporarily unavailable." },
       { status: 500 },
     );
   }

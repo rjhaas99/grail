@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
-import { getMockListingById } from "../../lib/mockData";
 
 type SupabaseCheckoutListing = {
   id: string;
@@ -22,6 +22,10 @@ type SupabaseCheckoutListing = {
   condition: string | null;
   price: number | null;
   status: string | null;
+  listing_images?: Array<{
+    image_url: string | null;
+    image_type: string | null;
+  }> | null;
 };
 
 type ProfileRow = {
@@ -40,9 +44,8 @@ type CheckoutCard = {
   sellerHref: string;
   price: number;
   marketValue: number;
-  accent: string;
+  imageUrl?: string | null;
   status: string | null;
-  source: "mock" | "supabase" | "fallback";
 };
 
 const checkoutLegalLinks = [
@@ -100,19 +103,11 @@ function getSellerHref(profile: ProfileRow | null, sellerId: string | null) {
   return `/collections/${sellerId || "vault-runner"}`;
 }
 
-function CardArtwork({ accent }: { accent: string }) {
+function getListingFrontImage(listing: SupabaseCheckoutListing) {
   return (
-    <div className="art-shell">
-      <div
-        className="mock-art"
-        style={{
-          background: `radial-gradient(circle at 50% 22%, rgba(231,222,208,0.32), transparent 16%), linear-gradient(145deg, ${accent}, #111827 54%, #030304)`,
-        }}
-      >
-        <span />
-        <strong />
-      </div>
-    </div>
+    listing.listing_images?.find((image) => image.image_type === "front")?.image_url ||
+    listing.listing_images?.find((image) => Boolean(image.image_url))?.image_url ||
+    null
   );
 }
 
@@ -128,41 +123,11 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 export default function CheckoutPage() {
   const params = useParams();
   const id = String(params.id || "");
-  const mockCard = getMockListingById(id);
   const [realCard, setRealCard] = useState<CheckoutCard | null>(null);
+  const [isCheckoutListingLoading, setIsCheckoutListingLoading] = useState(true);
+  const [checkoutListingError, setCheckoutListingError] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
-  const mockCheckoutCard: CheckoutCard | null = mockCard
-    ? {
-        id: mockCard.id,
-        sellerId: null,
-        title: mockCard.title,
-        category: mockCard.category,
-        condition: mockCard.condition,
-        seller: mockCard.seller,
-        sellerHref: mockCard.sellerHref,
-        price: mockCard.price,
-        marketValue: mockCard.marketValue,
-        accent: mockCard.accent,
-        status: "active",
-        source: "mock",
-      }
-    : null;
-  const fallbackCard: CheckoutCard = {
-    id,
-    sellerId: null,
-    title: `Listing ${id || "live"}`,
-    category: "Live Listing",
-    condition: "Supabase listing",
-    seller: "GRAIL Seller",
-    sellerHref: "/collections/vault-runner",
-    price: 0,
-    marketValue: 0,
-    accent: "#334155",
-    status: null,
-    source: "fallback",
-  };
-  const card = mockCheckoutCard ?? realCard ?? fallbackCard;
-  const [isPlaced, setIsPlaced] = useState(false);
+  const card = realCard;
   const [isStripeSuccess] = useState(() => {
     if (typeof window === "undefined") {
       return false;
@@ -212,9 +177,16 @@ export default function CheckoutPage() {
     let isMounted = true;
 
     async function loadCheckoutListing() {
-      if (mockCard || !id) {
+      if (!id) {
+        if (isMounted) {
+          setCheckoutListingError("Choose a listing before checkout.");
+          setIsCheckoutListingLoading(false);
+        }
         return;
       }
+
+      setIsCheckoutListingLoading(true);
+      setCheckoutListingError("");
 
       try {
         const { data, error } = await supabase
@@ -234,7 +206,11 @@ export default function CheckoutPage() {
               grade,
               condition,
               price,
-              status
+              status,
+              listing_images (
+                image_url,
+                image_type
+              )
             `,
           )
           .eq("id", id)
@@ -245,6 +221,9 @@ export default function CheckoutPage() {
         }
 
         if (!data) {
+          if (isMounted) {
+            setCheckoutListingError("Listing was not found.");
+          }
           return;
         }
 
@@ -276,13 +255,19 @@ export default function CheckoutPage() {
             sellerHref: getSellerHref(profile, listing.seller_id),
             price: Number(listing.price || 0),
             marketValue: 0,
-            accent: "#334155",
+            imageUrl: getListingFrontImage(listing),
             status: listing.status,
-            source: "supabase",
           });
         }
       } catch (error) {
         console.error("Checkout listing fetch error:", error);
+        if (isMounted) {
+          setCheckoutListingError("Checkout details could not be loaded.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsCheckoutListingLoading(false);
+        }
       }
     }
 
@@ -291,14 +276,14 @@ export default function CheckoutPage() {
     return () => {
       isMounted = false;
     };
-  }, [id, mockCard]);
+  }, [id]);
 
   async function startStripeCheckout() {
     setStripeError("");
     setStripeNotice("");
 
-    if (card.source !== "supabase") {
-      setStripeError("Stripe test checkout is available for live listings only.");
+    if (!card) {
+      setStripeError("Checkout details could not be loaded.");
       return;
     }
 
@@ -345,10 +330,33 @@ export default function CheckoutPage() {
           ? error.message
           : "Stripe checkout could not be started.",
       );
-      setStripeNotice("You can still use mock checkout for now.");
+      setStripeNotice("Please try again in a moment.");
     } finally {
       setIsStartingStripeCheckout(false);
     }
+  }
+
+  if (isCheckoutListingLoading || !card) {
+    return (
+      <main className="checkout-page">
+        <style>{pageStyles}</style>
+        <div className="checkout-shell">
+          <Header />
+
+          <section className="not-found panel">
+            <p>Checkout</p>
+            <h1>
+              {isCheckoutListingLoading
+                ? "Loading checkout details."
+                : checkoutListingError || "Checkout details are unavailable."}
+            </h1>
+            <div className="owner-block-actions">
+              <Link href="/browse">Browse Cards</Link>
+            </div>
+          </section>
+        </div>
+      </main>
+    );
   }
 
   const shipping = 14;
@@ -357,16 +365,14 @@ export default function CheckoutPage() {
   const isOwnerCheckout = Boolean(currentUserId) && card.sellerId === currentUserId;
   const isCollectionCheckout = card.status === "collection";
   const showStripeCheckoutButton =
-    card.source === "supabase" && card.status === "active" && card.price > 0;
+    card.status === "active" && card.price > 0;
   const isStripePublicConfigured = Boolean(
     process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
   );
   const canAttemptStripeCheckout =
     showStripeCheckoutButton && isStripePublicConfigured;
-  const showMockCheckoutButton =
-    card.source !== "supabase" ||
-    Boolean(stripeError) ||
-    (showStripeCheckoutButton && !isStripePublicConfigured);
+  const showUnavailableCheckoutNotice =
+    !canAttemptStripeCheckout && showStripeCheckoutButton && !isStripeSuccess;
 
   if (isOwnerCheckout) {
     return (
@@ -406,7 +412,16 @@ export default function CheckoutPage() {
         <section className="checkout-layout">
           <div className="main-column">
             <section className="order-item panel">
-              <CardArtwork accent={card.accent} />
+              {card.imageUrl ? (
+                <Image
+                  className="checkout-listing-image"
+                  src={card.imageUrl}
+                  alt={card.title}
+                  width={112}
+                  height={156}
+                  unoptimized
+                />
+              ) : null}
               <div>
                 <h2>{card.title}</h2>
                 <p>
@@ -419,12 +434,6 @@ export default function CheckoutPage() {
                   <SummaryRow label="Asking Price" value={formatCurrency(card.price)} />
                   <SummaryRow label="Market Value" value={formatCurrency(card.marketValue)} />
                 </div>
-                {card.source === "fallback" ? (
-                  <p className="live-fallback-note">
-                    Live listing checkout mock. Full checkout data will be
-                    connected later.
-                  </p>
-                ) : null}
                 <Link className="text-link" href={`/cards/${card.id}`}>
                   View Card
                 </Link>
@@ -433,24 +442,14 @@ export default function CheckoutPage() {
 
             <section className="panel form-panel">
               <h2>Shipping Address</h2>
-              <div className="field-grid">
-                <input placeholder="Full name" defaultValue="Ryan Haas" />
-                <input placeholder="Address" defaultValue="123 Vault Street" />
-                <input placeholder="City" defaultValue="Tampa" />
-                <input placeholder="State" defaultValue="FL" />
-                <input placeholder="ZIP" defaultValue="33606" />
-              </div>
+              <p>Shipping details are collected securely during Stripe checkout.</p>
             </section>
 
             <section className="panel form-panel">
-              <h2>Payment Method</h2>
-              <div className="payment-row">
-                <span>Card ending in 4242</span>
-                <button type="button">Add payment method</button>
-              </div>
+              <h2>Payment</h2>
               <p>
-                Secure Stripe checkout is available for active live listings. Mock
-                checkout remains available when Stripe is not configured.
+                Payment is completed securely through Stripe. GRAIL never stores
+                your card number on this checkout page.
               </p>
             </section>
 
@@ -507,8 +506,8 @@ export default function CheckoutPage() {
 
             {!isStripePublicConfigured && showStripeCheckoutButton ? (
               <div className="stripe-status-box">
-                <strong>Stripe test checkout is not configured yet.</strong>
-                <p>Add the Stripe environment variables to enable hosted checkout.</p>
+                <strong>Secure checkout is temporarily unavailable.</strong>
+                <p>Please try again in a moment.</p>
               </div>
             ) : null}
 
@@ -531,15 +530,6 @@ export default function CheckoutPage() {
               </div>
             </div>
 
-            {isPlaced ? (
-              <div className="confirmation-box">
-                <strong>Order placed.</strong>
-                <p>This is a mock checkout. No payment was processed.</p>
-                <Link href="/orders">View Orders</Link>
-                <Link href="/browse">Continue Browsing</Link>
-              </div>
-            ) : null}
-
             {!isStripeSuccess && !isCollectionCheckout && canAttemptStripeCheckout ? (
               <button
                 type="button"
@@ -553,14 +543,8 @@ export default function CheckoutPage() {
               </button>
             ) : null}
 
-            {!isStripeSuccess && !isCollectionCheckout && showMockCheckoutButton ? (
-              <button
-                type="button"
-                className="mock-order-button"
-                onClick={() => setIsPlaced(true)}
-              >
-                Place Mock Order
-              </button>
+            {!isStripeSuccess && !isCollectionCheckout && showUnavailableCheckoutNotice ? (
+              <p className="stripe-note">Secure checkout is handled by Stripe.</p>
             ) : null}
           </aside>
         </section>
@@ -631,9 +615,7 @@ const pageStyles = `
 
   .page-heading a,
   .text-link,
-  .payment-row button,
   .place-order,
-  .mock-order-button,
   .confirmation-box a,
   .stripe-status-box a,
   .owner-block-actions a {
@@ -672,45 +654,13 @@ const pageStyles = `
     gap: 16px;
   }
 
-  .art-shell {
-    width: 120px;
-    height: 158px;
-    border: 1px solid rgba(201,205,211,0.14);
-    border-radius: 12px;
+  .checkout-listing-image {
+    width: 112px;
+    max-height: 156px;
+    object-fit: contain;
+    border-radius: 10px;
     background: #030304;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .mock-art {
-    width: 82px;
-    height: 118px;
-    border: 1px solid rgba(244,244,245,0.48);
-    border-radius: 9px;
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 16px 28px rgba(0,0,0,0.58);
-  }
-
-  .mock-art span {
-    position: absolute;
-    left: 19px;
-    top: 28px;
-    width: 42px;
-    height: 42px;
-    border: 1px solid rgba(255,255,255,0.22);
-    border-radius: 50%;
-  }
-
-  .mock-art strong {
-    position: absolute;
-    left: 35px;
-    top: 38px;
-    width: 22px;
-    height: 48px;
-    border-radius: 999px 999px 12px 12px;
-    background: rgba(255,255,255,0.72);
+    box-shadow: 0 18px 34px rgba(0,0,0,0.46);
   }
 
   .order-item h2,
@@ -739,34 +689,6 @@ const pageStyles = `
   .protection-panel,
   .summary-panel {
     padding: 16px;
-  }
-
-  .field-grid {
-    margin-top: 14px;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .field-grid input,
-  .payment-row {
-    border: 1px solid #24242a;
-    border-radius: 10px;
-    background: #08080a;
-    color: #fff;
-    min-height: 40px;
-    padding: 0 12px;
-    font: inherit;
-    font-size: 13px;
-    font-weight: 800;
-  }
-
-  .payment-row {
-    margin-top: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
   }
 
   .protection-panel ul {
@@ -886,10 +808,6 @@ const pageStyles = `
     cursor: wait;
   }
 
-  .mock-order-button {
-    min-height: 42px;
-  }
-
   .confirmation-box {
     border: 1px solid rgba(52,211,153,0.24);
     border-radius: 10px;
@@ -974,7 +892,6 @@ const pageStyles = `
     .page-heading,
     .checkout-layout,
     .order-item,
-    .field-grid,
     .protection-panel ul {
       grid-template-columns: 1fr;
     }

@@ -258,7 +258,7 @@ function readLocalMockConversations() {
       ? (JSON.parse(storedConversations) as MockConversation[])
       : [];
   } catch (error) {
-    console.error("Mock conversation read error:", error);
+    console.error("Conversation read error:", error);
     return [];
   }
 }
@@ -611,7 +611,7 @@ function mapSupabaseListing(
       grader: listing.grader || "Raw",
       grade: listing.grade || listing.condition || "Raw",
       certNumber: "Not available",
-      notes: "Live Supabase listing.",
+      notes: "Not provided",
     },
     priceHistory: {
       thirtyDay: "N/A",
@@ -620,7 +620,7 @@ function mapSupabaseListing(
       averageSale: 0,
       chartPoints: [],
     },
-    overview: "Live Supabase listing.",
+    overview: "",
   };
 }
 
@@ -1595,7 +1595,7 @@ function BrowseContent() {
         buyerId: null,
         error: sessionError,
       });
-      setMessageError("Message could not be sent. Check console for Supabase error.");
+      setMessageError("Message could not be sent.");
       return;
     }
 
@@ -1610,7 +1610,7 @@ function BrowseContent() {
     }
 
     if (!messageListing.sellerId) {
-      setMessageError("Message could not be sent. Check console for Supabase error.");
+      setMessageError("Message could not be sent.");
       console.error("Browse message setup error:", {
         step: "browse message missing seller id",
         reason: "Missing seller_id on listing.",
@@ -1625,32 +1625,36 @@ function BrowseContent() {
     setMessageError("");
 
     try {
-      const messagePayload = {
-        sender_id: session.user.id,
-        receiver_id: messageListing.sellerId,
-        listing_id: messageListing.id,
-        body,
-      };
-      const { error: messageInsertError } = await supabase
-        .from("messages")
-        .insert(messagePayload);
+      const response = await fetch("/api/messages", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          receiverId: messageListing.sellerId,
+          listingId: messageListing.id,
+          body,
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
 
-      if (messageInsertError) {
+      if (!response.ok) {
         logMessageSupabaseError({
           step: "browse message insert",
           listingId: messageListing.id,
           sellerId: messageListing.sellerId,
           buyerId: session.user.id,
-          payload: messagePayload,
-          error: messageInsertError,
+          payload,
+          error: new Error(payload.error || "Message could not be sent."),
         });
-        throw messageInsertError;
+        throw new Error(payload.error || "Message could not be sent.");
       }
 
       setMessageSuccessHref(
         `/messages?listing=${encodeURIComponent(
           messageListing.id,
-        )}&seller=${encodeURIComponent(messageListing.sellerId)}`,
+        )}&user=${encodeURIComponent(messageListing.sellerId)}`,
       );
     } catch (error) {
       logMessageSupabaseError({
@@ -1660,7 +1664,7 @@ function BrowseContent() {
         buyerId: session.user.id,
         error,
       });
-      setMessageError("Message could not be sent. Check console for Supabase error.");
+      setMessageError(error instanceof Error ? error.message : "Message could not be sent.");
       setMessageSuccessHref("");
     } finally {
       setIsSendingMessage(false);

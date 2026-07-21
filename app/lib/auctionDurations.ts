@@ -21,7 +21,7 @@ const dayMs = 24 * 60 * 60 * 1000;
 const auctionDurationOptions: Record<AuctionDurationOption, ResolvedAuctionDuration> = {
   [testingOneMinuteAuctionDuration]: {
     option: testingOneMinuteAuctionDuration,
-    label: "1 minute (testing only)",
+    label: "1 minute",
     durationMs: minuteMs,
     storageDays: 1,
     isTestingOnly: true,

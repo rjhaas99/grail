@@ -90,7 +90,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Approve inspection configuration error:", error);
     return NextResponse.json(
-      { error: "Inspection approval is not configured." },
+      { error: "Inspection approval is temporarily unavailable." },
       { status: 500 },
     );
   }

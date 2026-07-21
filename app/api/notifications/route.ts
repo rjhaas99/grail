@@ -34,7 +34,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Notification inbox configuration error:", error);
     return NextResponse.json(
-      { error: "Notifications are not configured." },
+      { error: "Notifications are temporarily unavailable." },
       { status: 500 },
     );
   }
@@ -91,7 +91,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     console.error("Notification update configuration error:", error);
     return NextResponse.json(
-      { error: "Notifications are not configured." },
+      { error: "Notifications are temporarily unavailable." },
       { status: 500 },
     );
   }

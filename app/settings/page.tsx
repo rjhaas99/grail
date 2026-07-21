@@ -219,12 +219,12 @@ export default function SettingsPage() {
           <div className="panel section-card security-card">
             <h2>Security</h2>
             <div className="security-row">
-              <span>Two-factor authentication placeholder</span>
+              <span>Two-factor authentication</span>
               <strong>Not enabled</strong>
             </div>
             <div className="security-row">
-              <span>Active sessions placeholder</span>
-              <strong>2 sessions</strong>
+              <span>Active sessions</span>
+              <strong>Unavailable</strong>
             </div>
             <button type="button" onClick={() => setStatus("Session management coming soon.")}>
               Sign out of all devices

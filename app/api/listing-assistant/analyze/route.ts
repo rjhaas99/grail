@@ -126,7 +126,7 @@ async function requireAuthenticatedUser(request: Request): Promise<AuthResult> {
     });
     return {
       response: NextResponse.json(
-        { error: "Listing Assistant is not configured yet." },
+        { error: "Listing Assistant is temporarily unavailable." },
         { status: 500 },
       ),
     };

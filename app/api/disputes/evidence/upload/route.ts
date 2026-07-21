@@ -87,7 +87,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Dispute evidence upload configuration error:", error);
     return NextResponse.json(
-      { error: "Dispute evidence upload is not configured." },
+      { error: "Dispute evidence upload is temporarily unavailable." },
       { status: 500 },
     );
   }

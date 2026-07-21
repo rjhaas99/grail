@@ -127,7 +127,7 @@ export async function POST(request: Request) {
     serviceSupabase = createServiceSupabaseClient();
   } catch (error) {
     console.error("Admin homepage banner upload configuration error:", error);
-    return NextResponse.json({ error: "Homepage banner upload is not configured." }, { status: 500 });
+    return NextResponse.json({ error: "Homepage banner upload is temporarily unavailable." }, { status: 500 });
   }
 
   const safeFileName = sanitizeImageFileName(file.name);

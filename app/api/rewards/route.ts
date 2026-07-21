@@ -78,7 +78,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Rewards configuration error:", error);
     return NextResponse.json(
-      { error: "GRAIL Economy is not configured." },
+      { error: "GRAIL Economy is temporarily unavailable." },
       { status: 500 },
     );
   }

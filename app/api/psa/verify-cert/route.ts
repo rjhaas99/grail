@@ -157,7 +157,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("PSA verification configuration error:", error);
     return NextResponse.json(
-      { error: "PSA verification is not configured." },
+      { error: "PSA verification is temporarily unavailable." },
       { status: 500 },
     );
   }

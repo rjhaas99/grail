@@ -113,7 +113,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Admin overview configuration error:", error);
     return NextResponse.json(
-      { error: "Admin overview is not configured." },
+      { error: "Admin overview is temporarily unavailable." },
       { status: 500 },
     );
   }

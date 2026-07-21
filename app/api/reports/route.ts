@@ -106,7 +106,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Listing report configuration error:", error);
     return NextResponse.json(
-      { error: "Reports are not configured yet." },
+      { error: "Reports are temporarily unavailable." },
       { status: 500 },
     );
   }

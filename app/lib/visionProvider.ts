@@ -344,7 +344,7 @@ class UnavailableVisionProvider implements VisionProvider {
     return buildEmptyResult(
       "unconfigured",
       this.name,
-      "Listing Assistant vision is not configured yet.",
+      "Listing Assistant is temporarily unavailable.",
     );
   }
 }

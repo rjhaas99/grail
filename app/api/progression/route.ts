@@ -134,7 +134,7 @@ async function getOrCreateProgressRow(
       error,
       userId,
     });
-    throw new Error("Progression is not configured yet.");
+    throw new Error("Progression is temporarily unavailable.");
   }
 
   if (data) {
@@ -253,7 +253,7 @@ export async function GET(request: Request) {
     console.error("Progression configuration error:", error);
     return NextResponse.json(
       {
-        error: "Progression is not configured yet.",
+        error: "Progression is temporarily unavailable.",
         progression: calculateProgression(0),
       },
       { status: 500 },
@@ -302,7 +302,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Progression configuration error:", error);
     return NextResponse.json(
-      { error: "Progression is not configured yet." },
+      { error: "Progression is temporarily unavailable." },
       { status: 500 },
     );
   }

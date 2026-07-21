@@ -70,7 +70,7 @@ async function releaseEligiblePayouts(request: Request) {
   } catch (error) {
     console.error("Cron payout configuration error:", error);
     return NextResponse.json(
-      { error: "Automatic payout release is not configured." },
+      { error: "Automatic payout release is temporarily unavailable." },
       { status: 500 },
     );
   }

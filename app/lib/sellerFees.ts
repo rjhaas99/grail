@@ -77,7 +77,7 @@ export async function getSellerFeeQuote({
   const sellerFeePercent = rewardSnapshot.economy.sellerFeePercent;
 
   if (sellerFeePercent === null || sellerFeePercent === undefined) {
-    throw new Error("Seller fee is not configured for this seller.");
+    throw new Error("Seller fee is unavailable for this seller.");
   }
 
   const calculated = calculateSellerFeeAmounts({

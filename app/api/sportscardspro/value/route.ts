@@ -2,16 +2,18 @@ import { NextResponse } from "next/server";
 import {
   getNumber,
   getProductName,
-  getRequiredEnv,
+  getSportsCardsProToken,
   getSetName,
   isRecord,
   normalizeProductPageUrl,
+  publicSportsCardsProUnavailableMessage,
   requireAuthenticatedUser,
   sportsCardsProBaseUrl,
   waitForSportsCardsProSlot,
 } from "../shared";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type ValuePayload = {
   sportsCardsProId?: string;
@@ -125,18 +127,22 @@ export async function POST(request: Request) {
     });
   }
 
-  let token: string;
+  const token = getSportsCardsProToken();
 
-  try {
-    token = getRequiredEnv("SPORTSCARDSPRO_API_TOKEN");
-  } catch (error) {
+  if (!token) {
     console.error("SportsCardsPro value configuration error:", {
-      error,
-      message: error instanceof Error ? error.message : String(error),
+      configured: false,
     });
     return NextResponse.json(
-      { error: "SportsCardsPro lookup is not configured yet." },
-      { status: 500 },
+      {
+        sportsCardsProId,
+        estimatedValue: null,
+        priceFieldUsed: "",
+        sourceUrl: sportsCardsProBaseUrl,
+        fetchedAt: new Date().toISOString(),
+        error: publicSportsCardsProUnavailableMessage,
+      },
+      { status: 200 },
     );
   }
 
@@ -185,7 +191,14 @@ export async function POST(request: Request) {
             : upstreamPayload,
       });
       return NextResponse.json(
-        { error: "SportsCardsPro value is unavailable right now." },
+        {
+          sportsCardsProId,
+          estimatedValue: null,
+          priceFieldUsed: priceSelection.field,
+          sourceUrl: sportsCardsProBaseUrl,
+          fetchedAt: new Date().toISOString(),
+          error: publicSportsCardsProUnavailableMessage,
+        },
         { status: 200 },
       );
     }
@@ -226,9 +239,15 @@ export async function POST(request: Request) {
       message: error instanceof Error ? error.message : String(error),
     });
     return NextResponse.json(
-      { error: "SportsCardsPro value is unavailable right now." },
+      {
+        sportsCardsProId,
+        estimatedValue: null,
+        priceFieldUsed: priceSelection.field,
+        sourceUrl: sportsCardsProBaseUrl,
+        fetchedAt: new Date().toISOString(),
+        error: publicSportsCardsProUnavailableMessage,
+      },
       { status: 200 },
     );
   }
 }
-

@@ -118,7 +118,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Admin payments configuration error:", error);
     return NextResponse.json(
-      { error: "Admin payments are not configured." },
+      { error: "Admin payments are temporarily unavailable." },
       { status: 500 },
     );
   }

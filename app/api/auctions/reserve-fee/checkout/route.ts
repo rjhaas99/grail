@@ -51,7 +51,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Reserve Commitment Fee checkout configuration error:", error);
     return NextResponse.json(
-      { error: "Reserve Commitment Fee checkout is not configured." },
+      { error: "Reserve Commitment Fee checkout is temporarily unavailable." },
       { status: 500 },
     );
   }

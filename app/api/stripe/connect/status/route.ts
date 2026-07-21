@@ -86,7 +86,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Stripe Connect status configuration error:", error);
     return NextResponse.json(
-      { error: "Stripe Connect status is not configured." },
+      { error: "Stripe Connect status is temporarily unavailable." },
       { status: 500 },
     );
   }

@@ -145,7 +145,7 @@ export async function GET(request: Request) {
     serviceSupabase = createServiceSupabaseClient();
   } catch (error) {
     console.error("Admin auctions configuration error:", error);
-    return NextResponse.json({ error: "Admin auctions are not configured." }, { status: 500 });
+    return NextResponse.json({ error: "Admin auctions are temporarily unavailable." }, { status: 500 });
   }
 
   const { response } = await requireAdmin(request);
@@ -243,7 +243,7 @@ export async function PATCH(request: Request) {
     serviceSupabase = createServiceSupabaseClient();
   } catch (error) {
     console.error("Admin auctions update configuration error:", error);
-    return NextResponse.json({ error: "Admin auctions are not configured." }, { status: 500 });
+    return NextResponse.json({ error: "Admin auctions are temporarily unavailable." }, { status: 500 });
   }
 
   const { response } = await requireAdmin(request);

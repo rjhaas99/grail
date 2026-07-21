@@ -26,7 +26,20 @@ type ListingRow = {
   title: string | null;
   status: string | null;
   sale_format?: string | null;
+  listing_images?: Array<{
+    image_url: string | null;
+    image_type: string | null;
+    display_order?: number | null;
+  }> | null;
 };
+
+function getListingFrontImage(listing: ListingRow) {
+  return (
+    listing.listing_images?.find((image) => image.image_type === "front")?.image_url ||
+    listing.listing_images?.find((image) => Boolean(image.image_url))?.image_url ||
+    null
+  );
+}
 
 export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
@@ -82,7 +95,20 @@ export async function POST(request: Request, context: RouteContext) {
 
   const { data: listingData, error: listingError } = await supabase
     .from("listings")
-    .select("id, seller_id, title, status, sale_format")
+    .select(
+      `
+        id,
+        seller_id,
+        title,
+        status,
+        sale_format,
+        listing_images (
+          image_url,
+          image_type,
+          display_order
+        )
+      `,
+    )
     .eq("id", offer.listing_id)
     .maybeSingle();
 
@@ -124,6 +150,7 @@ export async function POST(request: Request, context: RouteContext) {
       buyerId: user.id,
       amount,
       title: listing.title || "GRAIL Accepted Offer",
+      imageUrl: getListingFrontImage(listing),
       successPath: `/orders?offer_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancelPath: "/offers?checkout=canceled",
       extraMetadata: {

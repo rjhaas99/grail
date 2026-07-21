@@ -148,7 +148,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Admin rewards configuration error:", error);
     return NextResponse.json(
-      { error: "Admin rewards are not configured." },
+      { error: "Admin rewards are temporarily unavailable." },
       { status: 500 },
     );
   }
@@ -179,7 +179,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     console.error("Admin rewards configuration error:", error);
     return NextResponse.json(
-      { error: "Admin rewards are not configured." },
+      { error: "Admin rewards are temporarily unavailable." },
       { status: 500 },
     );
   }

@@ -485,7 +485,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Admin economy configuration error:", error);
     return NextResponse.json(
-      { error: "GRAIL Control Center is not configured." },
+      { error: "GRAIL Control Center is temporarily unavailable." },
       { status: 500 },
     );
   }
@@ -515,7 +515,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     console.error("Admin economy configuration error:", error);
     return NextResponse.json(
-      { error: "GRAIL Control Center is not configured." },
+      { error: "GRAIL Control Center is temporarily unavailable." },
       { status: 500 },
     );
   }

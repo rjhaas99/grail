@@ -99,7 +99,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("System notification configuration error:", error);
     return NextResponse.json(
-      { error: "System notifications are not configured." },
+      { error: "System notifications are temporarily unavailable." },
       { status: 500 },
     );
   }

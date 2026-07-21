@@ -134,7 +134,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Admin reports configuration error:", error);
     return NextResponse.json(
-      { error: "Admin reports are not configured." },
+      { error: "Admin reports are temporarily unavailable." },
       { status: 500 },
     );
   }
@@ -260,7 +260,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     console.error("Admin report update configuration error:", error);
     return NextResponse.json(
-      { error: "Admin reports are not configured." },
+      { error: "Admin reports are temporarily unavailable." },
       { status: 500 },
     );
   }

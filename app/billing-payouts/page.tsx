@@ -273,7 +273,7 @@ function getSellerFeeDetail(data: MoneyCenterData | null) {
   const fee = data?.fees.sellerMarketplaceFee;
 
   if (!fee?.rewardTier) {
-    return "Reward tier fee is not configured.";
+    return "Reward tier fee unavailable.";
   }
 
   return `${fee.rewardTier}${fee.level ? ` · Level ${fee.level}` : ""}`;
@@ -283,7 +283,7 @@ function getBuyerProtectionLabel(data: MoneyCenterData | null) {
   const buyerProtection = data?.fees.buyerProtection;
 
   if (!buyerProtection?.configured) {
-    return "Not configured";
+    return "Unavailable";
   }
 
   if (buyerProtection.feePercent === null || buyerProtection.feePercent === undefined) {
@@ -806,7 +806,7 @@ export default function BillingPayoutsPage() {
                       ? "Loading..."
                       : data?.grailPass.monthlyCreditAmount
                         ? formatCurrency(data.grailPass.monthlyCreditAmount)
-                        : "Not configured"
+                        : "Unavailable"
                   }
                   detail="Deposits are recorded in GRAIL Wallet when configured."
                 />

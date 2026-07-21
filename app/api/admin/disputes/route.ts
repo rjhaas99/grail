@@ -125,7 +125,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Admin disputes configuration error:", error);
     return NextResponse.json(
-      { error: "Admin disputes are not configured." },
+      { error: "Admin disputes are temporarily unavailable." },
       { status: 500 },
     );
   }

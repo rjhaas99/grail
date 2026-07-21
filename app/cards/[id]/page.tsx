@@ -254,7 +254,7 @@ function readLocalMockConversations() {
       ? (JSON.parse(storedConversations) as MockConversation[])
       : [];
   } catch (error) {
-    console.error("Mock conversation read error:", error);
+    console.error("Conversation read error:", error);
     return [];
   }
 }
@@ -464,6 +464,7 @@ function mapSupabaseCard(
     listing.title ||
     [listing.year, listing.brand, listing.player].filter(Boolean).join(" ") ||
     "Untitled Card";
+  const overview = listing.collection_note?.trim() || "";
 
   return {
     seller: {
@@ -541,7 +542,7 @@ function mapSupabaseCard(
           listing.psa_cert_number ||
           listing.cert_number ||
           "Not available",
-        notes: listing.collection_note || "Live Supabase listing.",
+        notes: overview || "Not provided",
       },
       psaVerified: Boolean(listing.psa_verified),
       psaCertNumber: listing.psa_cert_number || listing.cert_number,
@@ -573,7 +574,7 @@ function mapSupabaseCard(
         averageSale: 0,
         chartPoints: [],
       },
-      overview: "Live Supabase listing from GRAIL Browse.",
+      overview,
     },
   };
 }
@@ -682,7 +683,7 @@ function PriceHistoryChart() {
       className="price-chart"
       viewBox="0 0 520 160"
       role="img"
-      aria-label="Mock price history chart"
+      aria-label="Price history chart"
     >
       <path
         className="chart-fill"
@@ -1459,7 +1460,7 @@ export default function CardDetailPage() {
         buyerId: null,
         error: sessionError,
       });
-      setMessageError("Message could not be sent. Check console for Supabase error.");
+      setMessageError("Message could not be sent.");
       return;
     }
 
@@ -1474,7 +1475,7 @@ export default function CardDetailPage() {
     }
 
     if (!card.sellerId) {
-      setMessageError("Message could not be sent. Check console for Supabase error.");
+      setMessageError("Message could not be sent.");
       console.error("Card detail message setup error:", {
         step: "card detail message missing seller id",
         reason: "Missing seller_id on listing.",
@@ -1489,30 +1490,34 @@ export default function CardDetailPage() {
     setMessageError("");
 
     try {
-      const messagePayload = {
-        sender_id: session.user.id,
-        receiver_id: card.sellerId,
-        listing_id: card.id,
-        body,
-      };
-      const { error: messageInsertError } = await supabase
-        .from("messages")
-        .insert(messagePayload);
+      const response = await fetch("/api/messages", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          receiverId: card.sellerId,
+          listingId: card.id,
+          body,
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
 
-      if (messageInsertError) {
+      if (!response.ok) {
         logMessageSupabaseError({
           step: "card detail message insert",
           listingId: card.id,
           sellerId: card.sellerId,
           buyerId: session.user.id,
-          payload: messagePayload,
-          error: messageInsertError,
+          payload,
+          error: new Error(payload.error || "Message could not be sent."),
         });
-        throw messageInsertError;
+        throw new Error(payload.error || "Message could not be sent.");
       }
 
       setMessageSuccessHref(
-        `/messages?listing=${encodeURIComponent(card.id)}&seller=${encodeURIComponent(
+        `/messages?listing=${encodeURIComponent(card.id)}&user=${encodeURIComponent(
           card.sellerId,
         )}`,
       );
@@ -1524,7 +1529,7 @@ export default function CardDetailPage() {
         buyerId: session.user.id,
         error,
       });
-      setMessageError("Message could not be sent. Check console for Supabase error.");
+      setMessageError(error instanceof Error ? error.message : "Message could not be sent.");
       setMessageSuccessHref("");
     } finally {
       setIsSendingMessage(false);
@@ -1533,7 +1538,7 @@ export default function CardDetailPage() {
 
   async function deleteCardFromCollection() {
     if (!card || mockCard) {
-      setOwnerActionStatus("Collection management is mock-only for demo cards.");
+      setOwnerActionStatus("Collection management is unavailable for sample cards.");
       return;
     }
 
@@ -1595,7 +1600,7 @@ export default function CardDetailPage() {
           <Header />
           <section className="not-found panel">
             <p>Card not found</p>
-            <h1>This mock listing is not available.</h1>
+            <h1>This listing is not available.</h1>
             <Link href="/browse">Return to Browse</Link>
           </section>
         </div>
@@ -1690,6 +1695,15 @@ export default function CardDetailPage() {
         } bids`;
   const hasSportsCardsProValue = Boolean(
     card.sportsCardsProEstimatedValue && card.sportsCardsProEstimatedValue > 0,
+  );
+  const hasOverview = Boolean(card.overview?.trim());
+  const priceHistory = card.priceHistory;
+  const hasPriceHistory = Boolean(
+    priceHistory.chartPoints?.length ||
+      priceHistory.lastSale > 0 ||
+      priceHistory.averageSale > 0 ||
+      (priceHistory.thirtyDay && priceHistory.thirtyDay !== "N/A") ||
+      (priceHistory.ninetyDay && priceHistory.ninetyDay !== "N/A"),
   );
   const salePriceDisplay = isSold
     ? soldPriceDisplay
@@ -1850,8 +1864,7 @@ export default function CardDetailPage() {
                 </p>
               ) : (
                 <p className="market-data-note">
-                  Market data integration planned: Card Ladder / Sports Card
-                  Investor style price tracking.
+                  Market value unavailable.
                 </p>
               )}
 
@@ -2066,10 +2079,12 @@ export default function CardDetailPage() {
         </section>
 
         <section className="bottom-panels">
-          <article className="panel content-panel">
-            <h2>Overview</h2>
-            <p>{card.overview}</p>
-          </article>
+          {hasOverview ? (
+            <article className="panel content-panel">
+              <h2>Overview</h2>
+              <p>{card.overview}</p>
+            </article>
+          ) : null}
 
           <article className="panel content-panel">
             <h2>Card Details</h2>
@@ -2149,29 +2164,39 @@ export default function CardDetailPage() {
             </article>
           ) : null}
 
-          <article className="panel content-panel price-history-panel">
-            <h2>Price History</h2>
-            <PriceHistoryChart />
-            <div className="history-grid">
-              <DetailRow label="30D" value={card.priceHistory.thirtyDay} />
-              <DetailRow label="90D" value={card.priceHistory.ninetyDay} />
-              <DetailRow
-                label="Last Sale"
-                value={formatCurrency(card.priceHistory.lastSale)}
-              />
-              <DetailRow
-                label="Average Sale"
-                value={formatCurrency(card.priceHistory.averageSale)}
-              />
-            </div>
-          </article>
+          {hasPriceHistory ? (
+            <article className="panel content-panel price-history-panel">
+              <h2>Price History</h2>
+              <PriceHistoryChart />
+              <div className="history-grid">
+                {card.priceHistory.thirtyDay !== "N/A" ? (
+                  <DetailRow label="30D" value={card.priceHistory.thirtyDay} />
+                ) : null}
+                {card.priceHistory.ninetyDay !== "N/A" ? (
+                  <DetailRow label="90D" value={card.priceHistory.ninetyDay} />
+                ) : null}
+                {card.priceHistory.lastSale > 0 ? (
+                  <DetailRow
+                    label="Last Sale"
+                    value={formatCurrency(card.priceHistory.lastSale)}
+                  />
+                ) : null}
+                {card.priceHistory.averageSale > 0 ? (
+                  <DetailRow
+                    label="Average Sale"
+                    value={formatCurrency(card.priceHistory.averageSale)}
+                  />
+                ) : null}
+              </div>
+            </article>
+          ) : null}
 
           <article className="panel content-panel">
             <h2>Shipping & Returns</h2>
             <div className="detail-list">
               <DetailRow label="Handling" value="Ships in 1-2 business days" />
               <DetailRow label="Shipping" value="Tracked shipping" />
-              <DetailRow label="Returns" value="Returns policy placeholder" />
+              <DetailRow label="Returns" value="Supported through GRAIL Buyer Protection" />
             </div>
           </article>
         </section>

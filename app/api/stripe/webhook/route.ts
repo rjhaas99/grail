@@ -1037,7 +1037,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Stripe webhook configuration error:", error);
     return NextResponse.json(
-      { error: "Stripe webhook is not configured." },
+      { error: "Stripe webhook is temporarily unavailable." },
       { status: 500 },
     );
   }

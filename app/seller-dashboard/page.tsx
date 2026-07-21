@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import GrailPassPresenceCard from "../components/GrailPassPresenceCard";
@@ -111,6 +112,7 @@ type DashboardOrder = {
   cardPrice: number;
   sellerFee: number;
   paymentProcessingFee: number;
+  imageUrl?: string | null;
   href?: string;
 };
 type SupabaseOrderRow = {
@@ -152,6 +154,10 @@ type SupabaseOrderRow = {
 type ListingRow = {
   id: string;
   title: string | null;
+  listing_images?: Array<{
+    image_url: string | null;
+    image_type: string | null;
+  }> | null;
 };
 type ProfileRow = {
   id: string;
@@ -274,8 +280,6 @@ const defaultShippingLabelForm: ShippingLabelForm = {
   parcelWeight: "8",
 };
 
-const carrierOptions = ["USPS", "UPS", "FedEx", "DHL", "Other"];
-
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -298,6 +302,14 @@ function shortId(value?: string | null) {
 
 function getProfileName(profile?: ProfileRow, fallbackId?: string | null) {
   return profile?.full_name || profile?.username || shortId(fallbackId);
+}
+
+function getListingFrontImage(listing?: ListingRow | null) {
+  return (
+    listing?.listing_images?.find((image) => image.image_type === "front")?.image_url ||
+    listing?.listing_images?.find((image) => Boolean(image.image_url))?.image_url ||
+    null
+  );
 }
 
 function normalizeOrderStatus(status?: string | null): OrderStatus {
@@ -394,8 +406,28 @@ function getInspectionStatus(order: DashboardOrder) {
     return "Dispute opened. Payout blocked.";
   }
 
+  if (!order.labelUrl) {
+    return "Paid. Purchase a shipping label to ship this order.";
+  }
+
+  if (order.shippingStatus === "label_created") {
+    return "Ready to print label.";
+  }
+
+  if (order.shippingStatus === "in_transit") {
+    return "Shipped. Package is in transit.";
+  }
+
+  if (order.shippingStatus === "out_for_delivery") {
+    return "Out for delivery.";
+  }
+
+  if (order.shippingStatus === "delivery_exception" || order.shippingStatus === "returned") {
+    return "Delivery issue reported. Review tracking.";
+  }
+
   if (order.fulfillmentStatus !== "delivered") {
-    return "Waiting for delivery.";
+    return "Shipping label created. Tracking will update automatically.";
   }
 
   if (order.inspectionEndsAt && !hasInspectionPassed(order.inspectionEndsAt)) {
@@ -411,7 +443,7 @@ function getSellerOrderStatus(order: DashboardOrder) {
   }
 
   if (order.transferStatus === "paid" || order.completedAt) {
-    return "Complete";
+    return "Payout Released";
   }
 
   if (["opened", "under_review"].includes(order.disputeStatus)) {
@@ -419,14 +451,26 @@ function getSellerOrderStatus(order: DashboardOrder) {
   }
 
   if (order.fulfillmentStatus === "delivered") {
-    return "Delivered / Inspecting";
+    return "Inspection";
+  }
+
+  if (order.shippingStatus === "out_for_delivery") {
+    return "Out for Delivery";
+  }
+
+  if (order.shippingStatus === "in_transit") {
+    return "In Transit";
+  }
+
+  if (order.shippingStatus === "label_created" && order.labelUrl) {
+    return "Ready to Print Label";
   }
 
   if (order.fulfillmentStatus === "shipped") {
     return "Shipped";
   }
 
-  return "Paid";
+  return order.labelUrl ? "Ready to Print Label" : "Ready to Ship";
 }
 
 function getSellerPayoutLabel(order: DashboardOrder) {
@@ -540,9 +584,6 @@ export default function SellerDashboardPage() {
   const [isStartingPayouts, setIsStartingPayouts] = useState(false);
   const [payoutMessage, setPayoutMessage] = useState("");
   const [dashboardMessage, setDashboardMessage] = useState("");
-  const [trackingOrderId, setTrackingOrderId] = useState("");
-  const [trackingCarrier, setTrackingCarrier] = useState("");
-  const [trackingNumber, setTrackingNumber] = useState("");
   const [shippingLabelOrderId, setShippingLabelOrderId] = useState("");
   const [shippingLabelForm, setShippingLabelForm] = useState<ShippingLabelForm>(defaultShippingLabelForm);
   const [updatingOrderId, setUpdatingOrderId] = useState("");
@@ -752,7 +793,16 @@ export default function SellerDashboardPage() {
         if (listingIds.length > 0) {
           const { data: listingData, error: listingError } = await supabase
             .from("listings")
-            .select("id, title")
+            .select(
+              `
+                id,
+                title,
+                listing_images (
+                  image_url,
+                  image_type
+                )
+              `,
+            )
             .in("id", listingIds);
 
           if (listingError) {
@@ -830,6 +880,7 @@ export default function SellerDashboardPage() {
               cardPrice,
               sellerFee,
               paymentProcessingFee,
+              imageUrl: getListingFrontImage(listing),
               href: order.listing_id ? `/cards/${order.listing_id}` : "/orders",
             };
           }),
@@ -1138,97 +1189,6 @@ export default function SellerDashboardPage() {
     }));
   }
 
-  async function sendSystemNotification(
-    kind: "order_tracking_added" | "order_shipped" | "order_delivered",
-    orderId: string,
-  ) {
-    const accessToken = await getAccessToken();
-
-    if (!accessToken) {
-      return;
-    }
-
-    try {
-      await fetch("/api/notifications/system", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ kind, orderId }),
-      });
-    } catch (error) {
-      console.warn("Seller dashboard system notification skipped:", error);
-    }
-  }
-
-  async function updateOrderFields(
-    orderId: string,
-    fields: Record<string, unknown>,
-    actionLabel = "Order update",
-  ) {
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
-
-    if (sessionError) {
-      console.error("Seller dashboard fulfillment auth error:", sessionError);
-    }
-
-    if (!session?.user.id) {
-      setDashboardMessage("Sign in to manage fulfillment.");
-      return false;
-    }
-
-    const { data, error, status, statusText } = await supabase
-      .from("orders")
-      .update(fields)
-      .eq("id", orderId)
-      .eq("seller_id", session.user.id)
-      .select("id, carrier, tracking_number")
-      .maybeSingle();
-
-    if (error) {
-      console.error("Seller dashboard fulfillment update error:", {
-        actionLabel,
-        error,
-        errorMessage: error.message,
-        status,
-        statusText,
-        orderId,
-        sellerId: session.user.id,
-        fields,
-      });
-      setDashboardMessage(`${actionLabel} failed: ${error.message}`);
-      return false;
-    }
-
-    if (!data) {
-      const detail =
-        "No matching order row was updated. Check that this order belongs to the logged-in seller and that RLS allows seller updates.";
-      console.error("Seller dashboard fulfillment update matched no rows:", {
-        actionLabel,
-        orderId,
-        sellerId: session.user.id,
-        fields,
-        status,
-        statusText,
-      });
-      setDashboardMessage(`${actionLabel} failed: ${detail}`);
-      return false;
-    }
-
-    return true;
-  }
-
-  function openTrackingModal(order: DashboardOrder) {
-    setTrackingOrderId(order.id);
-    setTrackingCarrier(order.carrier);
-    setTrackingNumber(order.trackingNumber);
-    setDashboardMessage("");
-  }
-
   function openShippingLabelModal(order: DashboardOrder) {
     setShippingLabelOrderId(order.id);
     setShippingLabelForm(defaultShippingLabelForm);
@@ -1355,99 +1315,6 @@ export default function SellerDashboardPage() {
     } finally {
       setUpdatingOrderId("");
     }
-  }
-
-  async function saveTracking() {
-    if (!trackingOrderId) {
-      return;
-    }
-
-    if (!trackingCarrier.trim() || !trackingNumber.trim()) {
-      setDashboardMessage("Carrier and tracking number are required.");
-      return;
-    }
-
-    setUpdatingOrderId(trackingOrderId);
-
-    const success = await updateOrderFields(trackingOrderId, {
-      carrier: trackingCarrier.trim(),
-      tracking_number: trackingNumber.trim(),
-    }, "Save tracking");
-
-    if (success) {
-      updateLocalOrder(trackingOrderId, {
-        carrier: trackingCarrier.trim(),
-        trackingNumber: trackingNumber.trim(),
-      });
-      setTrackingOrderId("");
-      setTrackingCarrier("");
-      setTrackingNumber("");
-      setDashboardMessage("Tracking saved.");
-      void sendSystemNotification("order_tracking_added", trackingOrderId);
-    }
-
-    setUpdatingOrderId("");
-  }
-
-  async function markShipped(order: DashboardOrder) {
-    if (!order.carrier || !order.trackingNumber) {
-      setDashboardMessage("Add carrier and tracking number before marking shipped.");
-      return;
-    }
-
-    setUpdatingOrderId(order.id);
-
-    const now = new Date().toISOString();
-    const success = await updateOrderFields(order.id, {
-      fulfillment_status: "shipped",
-      shipped_at: now,
-      transfer_status: "not_ready",
-    });
-
-    if (success) {
-      updateLocalOrder(order.id, {
-        fulfillmentStatus: "shipped",
-        transferStatus: "not_ready",
-      });
-      setDashboardMessage("Order marked shipped.");
-      void sendSystemNotification("order_shipped", order.id);
-    }
-
-    setUpdatingOrderId("");
-  }
-
-  async function markDelivered(order: DashboardOrder) {
-    if (order.fulfillmentStatus !== "shipped") {
-      setDashboardMessage("Mark the order shipped before marking it delivered.");
-      return;
-    }
-
-    setUpdatingOrderId(order.id);
-
-    const deliveredAt = new Date();
-    const inspectionEndsAt = new Date(deliveredAt.getTime() + 3 * 24 * 60 * 60 * 1000);
-    const success = await updateOrderFields(order.id, {
-      fulfillment_status: "delivered",
-      delivered_at: deliveredAt.toISOString(),
-      inspection_ends_at: inspectionEndsAt.toISOString(),
-      transfer_status: "not_ready",
-      dispute_status: order.disputeStatus || "none",
-      seller_payout_amount: order.sellerPayoutAmount,
-    });
-
-    if (success) {
-      updateLocalOrder(order.id, {
-        fulfillmentStatus: "delivered",
-        transferStatus: "not_ready",
-        disputeStatus: order.disputeStatus || "none",
-        deliveredAt: deliveredAt.toISOString(),
-        inspectionEndsAt: inspectionEndsAt.toISOString(),
-      });
-      setDashboardMessage("Order marked delivered. Payout waits for the inspection window.");
-      void sendSystemNotification("order_delivered", order.id);
-    }
-
-    setUpdatingOrderId("");
   }
 
   async function uploadEvidence(order: DashboardOrder) {
@@ -1822,10 +1689,21 @@ export default function SellerDashboardPage() {
 
                   return (
                     <article key={order.id} className="table-row order-row payout-order-row">
-                      <div>
-                        <strong>{order.card}</strong>
-                        <span>Order {order.id}</span>
-                        <span>Buyer {order.buyer}</span>
+                      <div className="order-title-cell">
+                        {order.imageUrl ? (
+                          <Image
+                            src={order.imageUrl}
+                            alt={order.card}
+                            width={54}
+                            height={72}
+                            unoptimized
+                          />
+                        ) : null}
+                        <div>
+                          <strong>{order.card}</strong>
+                          <span>Order {order.id}</span>
+                          <span>Buyer {order.buyer}</span>
+                        </div>
                       </div>
                       <div>
                         <strong>{order.total}</strong>
@@ -1873,37 +1751,8 @@ export default function SellerDashboardPage() {
                             Purchase Shipping Label
                           </button>
                         ) : null}
-                        {!hasShippoLabel &&
-                        (order.fulfillmentStatus === "pending" ||
-                          order.fulfillmentStatus === "shipped") ? (
-                          <button
-                            type="button"
-                            disabled={updatingOrderId === order.id}
-                            onClick={() => openTrackingModal(order)}
-                          >
-                            {hasTracking ? "Edit Tracking" : "Add Tracking"}
-                          </button>
-                        ) : null}
-                        {order.fulfillmentStatus === "pending" && hasTracking ? (
-                          <button
-                            type="button"
-                            disabled={updatingOrderId === order.id}
-                            onClick={() => markShipped(order)}
-                          >
-                            Mark Shipped
-                          </button>
-                        ) : null}
                         {order.fulfillmentStatus === "pending" && !hasTracking && !canPurchaseLabel ? (
-                          <span className="payout-reason">Add tracking before shipping</span>
-                        ) : null}
-                        {order.fulfillmentStatus === "shipped" ? (
-                          <button
-                            type="button"
-                            disabled={updatingOrderId === order.id}
-                            onClick={() => markDelivered(order)}
-                          >
-                            Mark Delivered
-                          </button>
+                          <span className="payout-reason">Purchase a shipping label to continue</span>
                         ) : null}
                         {showPayoutReason ? (
                           <span className="payout-reason">{blockReason}</span>
@@ -1912,7 +1761,7 @@ export default function SellerDashboardPage() {
                       {isExpanded ? (
                         <div className="seller-order-details">
                           <span>Carrier {order.carrier || "Pending"}</span>
-                          <span>Tracking {order.trackingNumber || "Not added"}</span>
+                          <span>Tracking {order.trackingNumber || "Pending"}</span>
                           <span>Shipment {formatShippingStatus(order.shippingStatus)}</span>
                           <span>Service {order.shippingService || "Pending"}</span>
                           <span>Estimated delivery {formatDate(order.shippoEta)}</span>
@@ -2152,52 +2001,6 @@ export default function SellerDashboardPage() {
             </section>
           </aside>
         </section>
-      {trackingOrderId ? (
-        <div className="modal-backdrop" role="presentation">
-          <section className="panel tracking-modal" role="dialog" aria-modal="true">
-            <div className="section-heading">
-              <h2>Add Tracking</h2>
-              <button
-                type="button"
-                onClick={() => {
-                  setTrackingOrderId("");
-                  setTrackingCarrier("");
-                  setTrackingNumber("");
-                }}
-              >
-                Close
-              </button>
-            </div>
-            <label>
-              <span>Carrier</span>
-              <select
-                value={trackingCarrier}
-                onChange={(event) => setTrackingCarrier(event.target.value)}
-              >
-                <option value="">Select carrier</option>
-                {carrierOptions.map((carrier) => (
-                  <option key={carrier} value={carrier}>
-                    {carrier}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Tracking number</span>
-              <input
-                value={trackingNumber}
-                onChange={(event) => setTrackingNumber(event.target.value)}
-                placeholder="Tracking number"
-              />
-            </label>
-            <div className="row-actions">
-              <button type="button" disabled={Boolean(updatingOrderId)} onClick={saveTracking}>
-                Save Tracking
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
       {shippingLabelOrderId ? (
         <div className="modal-backdrop" role="presentation">
           <section className="panel tracking-modal shipping-label-modal" role="dialog" aria-modal="true">
@@ -2616,6 +2419,21 @@ const pageStyles = `
   .seller-order-summary {
     display: grid;
     gap: 6px;
+  }
+
+  .order-title-cell {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .order-title-cell img {
+    width: 46px;
+    height: 62px;
+    object-fit: contain;
+    border-radius: 7px;
+    background: #030304;
   }
 
   .seller-order-details {

@@ -324,7 +324,7 @@ async function saveHomepageBanner(
     serviceSupabase = createServiceSupabaseClient();
   } catch (error) {
     console.error("Admin homepage banner configuration error:", error);
-    return NextResponse.json({ error: "Homepage banner is not configured." }, { status: 500 });
+    return NextResponse.json({ error: "Homepage banner is temporarily unavailable." }, { status: 500 });
   }
 
   const banner = payload.banner;
@@ -425,7 +425,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Admin homepage configuration error:", error);
     return NextResponse.json(
-      { error: "Homepage curation is not configured." },
+      { error: "Homepage curation is temporarily unavailable." },
       { status: 500 },
     );
   }
@@ -581,7 +581,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     console.error("Admin homepage update configuration error:", error);
     return NextResponse.json(
-      { error: "Homepage curation is not configured." },
+      { error: "Homepage curation is temporarily unavailable." },
       { status: 500 },
     );
   }

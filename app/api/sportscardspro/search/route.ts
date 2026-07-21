@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import {
   extractProducts,
-  getRequiredEnv,
+  getSportsCardsProToken,
   normalizeProductCandidate,
+  publicSportsCardsProUnavailableMessage,
   requireAuthenticatedUser,
   sportsCardsProBaseUrl,
   waitForSportsCardsProSlot,
 } from "../shared";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type SearchPayload = {
   category?: string;
@@ -70,18 +72,15 @@ export async function POST(request: Request) {
     );
   }
 
-  let token: string;
+  const token = getSportsCardsProToken();
 
-  try {
-    token = getRequiredEnv("SPORTSCARDSPRO_API_TOKEN");
-  } catch (error) {
+  if (!token) {
     console.error("SportsCardsPro search configuration error:", {
-      error,
-      message: error instanceof Error ? error.message : String(error),
+      configured: false,
     });
     return NextResponse.json(
-      { error: "SportsCardsPro lookup is not configured yet." },
-      { status: 500 },
+      { error: publicSportsCardsProUnavailableMessage, candidates: [] },
+      { status: 200 },
     );
   }
 
@@ -130,7 +129,7 @@ export async function POST(request: Request) {
             : upstreamPayload,
       });
       return NextResponse.json(
-        { error: "SportsCardsPro search is unavailable right now." },
+        { error: publicSportsCardsProUnavailableMessage, candidates: [] },
         { status: 200 },
       );
     }
@@ -153,9 +152,8 @@ export async function POST(request: Request) {
       message: error instanceof Error ? error.message : String(error),
     });
     return NextResponse.json(
-      { error: "SportsCardsPro search is unavailable right now." },
+      { error: publicSportsCardsProUnavailableMessage, candidates: [] },
       { status: 200 },
     );
   }
 }
-

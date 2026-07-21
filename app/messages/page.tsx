@@ -1,20 +1,27 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
-import {
-  type MockConversation,
-  mockConversations,
-} from "../lib/mockData";
+import type { MockConversation } from "../lib/mockData";
 
-type Conversation = MockConversation & {
+type ConversationMessage = MockConversation["messages"][number] & {
+  listingId?: string | null;
+  listingTitle?: string | null;
+  listingImageUrl?: string | null;
+  listingHref?: string | null;
+};
+
+type Conversation = Omit<MockConversation, "messages"> & {
+  messages: ConversationMessage[];
   source?: "mock" | "supabase";
   buyerId?: string | null;
   sellerId?: string | null;
   listingId?: string | null;
+  listingImageUrl?: string | null;
 };
 
 type MessageRow = {
@@ -31,6 +38,10 @@ type ListingRow = {
   title: string | null;
   price: number | null;
   seller_id: string | null;
+  listing_images?: Array<{
+    image_url: string | null;
+    image_type: string | null;
+  }> | null;
 };
 
 type ProfileRow = {
@@ -39,7 +50,7 @@ type ProfileRow = {
   username: string | null;
 };
 
-const initialConversations: Conversation[] = mockConversations;
+const initialConversations: Conversation[] = [];
 const mockConversationStorageKey = "grail-mock-conversations";
 
 function formatCurrency(value: number) {
@@ -75,8 +86,16 @@ function getSortRank(value: string | null) {
   return new Date(value).getTime();
 }
 
-function getMessageGroupId(listingId: string | null, otherUserId: string | null) {
-  return `${listingId || "no-listing"}:${otherUserId || "unknown-user"}`;
+function getMessageGroupId(otherUserId: string | null) {
+  return otherUserId || "unknown-user";
+}
+
+function getListingFrontImage(listing?: ListingRow | null) {
+  return (
+    listing?.listing_images?.find((image) => image.image_type === "front")?.image_url ||
+    listing?.listing_images?.find((image) => Boolean(image.image_url))?.image_url ||
+    null
+  );
 }
 
 function getErrorMessage(error: unknown) {
@@ -131,23 +150,9 @@ function readLocalMockConversations(): Conversation[] {
       ? (JSON.parse(storedConversations) as Conversation[])
       : [];
   } catch (error) {
-    console.error("Mock conversation read error:", error);
+    console.error("Conversation read error:", error);
     return [];
   }
-}
-
-function getMockFallbackConversations() {
-  const storedConversations = readLocalMockConversations();
-  const storedIds = new Set(
-    storedConversations.map((conversation) => conversation.id),
-  );
-
-  return [
-    ...storedConversations,
-    ...initialConversations.filter(
-      (conversation) => !storedIds.has(conversation.id),
-    ),
-  ];
 }
 
 function CardArtwork({ accent }: { accent: string }) {
@@ -205,10 +210,11 @@ function MessagesContent() {
   const searchParams = useSearchParams();
   const requestedListingId = searchParams.get("listing");
   const requestedSellerId = searchParams.get("seller");
+  const requestedUserId = searchParams.get("user");
   const requestedMockConversationId = searchParams.get("mockConversation");
   const [conversations, setConversations] =
     useState<Conversation[]>(initialConversations);
-  const [activeId, setActiveId] = useState(initialConversations[0].id);
+  const [activeId, setActiveId] = useState(initialConversations[0]?.id || "");
   const [searchQuery, setSearchQuery] = useState("");
   const [draft, setDraft] = useState("");
   const [counterAmount, setCounterAmount] = useState("");
@@ -239,18 +245,10 @@ function MessagesContent() {
         });
 
         if (isMounted) {
-          const fallbackConversations = getMockFallbackConversations();
-
-          setUsesRealMessages(false);
-          setConversations(fallbackConversations);
-          setActiveId(
-            requestedMockConversationId ||
-              fallbackConversations[0]?.id ||
-              "",
-          );
-          setStatusMessage(
-            "Demo messages shown because real messages are unavailable.",
-          );
+          setUsesRealMessages(true);
+          setConversations([]);
+          setActiveId("");
+          setStatusMessage("Messages are temporarily unavailable.");
           setIsLoadingMessages(false);
         }
 
@@ -290,9 +288,10 @@ function MessagesContent() {
         }
 
         const messageRows = (messageData || []) as MessageRow[];
+        const requestedOtherUserId = requestedUserId || requestedSellerId || "";
         const requestedGroupId =
-          requestedListingId && requestedSellerId
-            ? getMessageGroupId(requestedListingId, requestedSellerId)
+          requestedOtherUserId
+            ? getMessageGroupId(requestedOtherUserId)
             : "";
         const listingIds = Array.from(
           new Set(
@@ -310,7 +309,7 @@ function MessagesContent() {
                   ? message.receiver_id
                   : message.sender_id,
               ]),
-              requestedSellerId,
+              requestedOtherUserId,
             ].filter((participantId): participantId is string =>
               Boolean(participantId),
             ),
@@ -323,7 +322,18 @@ function MessagesContent() {
         if (listingIds.length > 0) {
           const { data: listingData, error: listingError } = await supabase
             .from("listings")
-            .select("id, title, price, seller_id")
+            .select(
+              `
+                id,
+                title,
+                price,
+                seller_id,
+                listing_images (
+                  image_url,
+                  image_type
+                )
+              `,
+            )
             .in("id", listingIds);
 
           if (listingError) {
@@ -376,11 +386,14 @@ function MessagesContent() {
         messageRows.forEach((message) => {
           const otherUserId =
             message.sender_id === userId ? message.receiver_id : message.sender_id;
-          const groupId = getMessageGroupId(message.listing_id, otherUserId);
+          const groupId = getMessageGroupId(otherUserId);
           const existingGroup = groupedMessages.get(groupId);
 
           if (existingGroup) {
             existingGroup.messages.push(message);
+            if (message.listing_id) {
+              existingGroup.listingId = message.listing_id;
+            }
           } else {
             groupedMessages.set(groupId, {
               listingId: message.listing_id,
@@ -390,12 +403,18 @@ function MessagesContent() {
           }
         });
 
-        if (requestedListingId && requestedSellerId && !groupedMessages.has(requestedGroupId)) {
+        if (requestedOtherUserId && requestedGroupId && !groupedMessages.has(requestedGroupId)) {
           groupedMessages.set(requestedGroupId, {
             listingId: requestedListingId,
-            otherUserId: requestedSellerId,
+            otherUserId: requestedOtherUserId,
             messages: [],
           });
+        } else if (requestedListingId && requestedGroupId) {
+          const requestedGroup = groupedMessages.get(requestedGroupId);
+
+          if (requestedGroup) {
+            requestedGroup.listingId = requestedListingId;
+          }
         }
 
         const mappedConversations = Array.from(groupedMessages.entries())
@@ -408,36 +427,43 @@ function MessagesContent() {
             const listing = group.listingId
               ? listingsById.get(group.listingId)
               : undefined;
+            const latestListing = latestMessage?.listing_id
+              ? listingsById.get(latestMessage.listing_id)
+              : listing;
             const otherProfile = group.otherUserId
               ? profilesById.get(group.otherUserId)
               : undefined;
             const participantName = getProfileName(otherProfile);
-            const cardTitle = listing?.title || "GRAIL Listing";
-            const cardHref = group.listingId ? `/cards/${group.listingId}` : "/browse";
+            const cardTitle = latestListing?.title || listing?.title || "GRAIL Card";
+            const cardHref = latestListing?.id || group.listingId
+              ? `/cards/${latestListing?.id || group.listingId}`
+              : "/browse";
             const latestTime = latestMessage?.created_at || null;
             const snippet = latestMessage?.body || "Conversation ready.";
             const participantRole =
-              listing?.seller_id && group.otherUserId === listing.seller_id
+              latestListing?.seller_id && group.otherUserId === latestListing.seller_id
                 ? "Seller"
-                : listing
+                : latestListing
                   ? "Buyer"
                   : "GRAIL User";
+            const listingImageUrl = getListingFrontImage(latestListing || listing);
 
             return {
               id: groupId,
               source: "supabase" as const,
               buyerId: userId,
               sellerId: group.otherUserId,
-              listingId: group.listingId,
+              listingId: latestListing?.id || group.listingId,
               participantName,
               participantRole,
               person: participantName,
               badge: participantRole,
-              cardId: group.listingId || groupId,
+              cardId: latestListing?.id || group.listingId || groupId,
               cardTitle,
               cardRoute: cardHref,
               cardHref,
-              price: Number(listing?.price || 0),
+              listingImageUrl,
+              price: Number(latestListing?.price || listing?.price || 0),
               snippet,
               lastSnippet: snippet,
               timestamp: latestMessage ? formatTimestamp(latestTime) : "Ready",
@@ -450,6 +476,14 @@ function MessagesContent() {
                 sender: message.sender_id === userId ? "buyer" as const : "seller" as const,
                 body: message.body || "",
                 time: formatTimestamp(message.created_at),
+                listingId: message.listing_id,
+                listingTitle: message.listing_id
+                  ? listingsById.get(message.listing_id)?.title || "GRAIL Card"
+                  : null,
+                listingImageUrl: message.listing_id
+                  ? getListingFrontImage(listingsById.get(message.listing_id))
+                  : null,
+                listingHref: message.listing_id ? `/cards/${message.listing_id}` : null,
               })),
             };
           })
@@ -468,7 +502,7 @@ function MessagesContent() {
               : mappedConversations
             : requestedMockConversation
               ? [requestedMockConversation]
-              : getMockFallbackConversations();
+              : [];
 
         if (!isMounted) {
           return;
@@ -496,27 +530,14 @@ function MessagesContent() {
           buyerId: userId,
           error,
         });
-        console.warn(
-          "Supabase messages table unavailable; using mock conversations.",
-          error,
-        );
-
         if (!isMounted) {
           return;
         }
 
-        setUsesRealMessages(false);
-        const fallbackConversations = getMockFallbackConversations();
-
-        setConversations(fallbackConversations);
-        setActiveId(
-          requestedMockConversationId ||
-            fallbackConversations[0]?.id ||
-            "",
-        );
-        setStatusMessage(
-          "Demo messages shown because real messages are unavailable.",
-        );
+        setUsesRealMessages(true);
+        setConversations([]);
+        setActiveId("");
+        setStatusMessage("Messages are temporarily unavailable.");
         setIsLoadingMessages(false);
       }
     }
@@ -530,6 +551,7 @@ function MessagesContent() {
     requestedListingId,
     requestedMockConversationId,
     requestedSellerId,
+    requestedUserId,
   ]);
 
   const filteredConversations = useMemo(() => {
@@ -578,44 +600,58 @@ function MessagesContent() {
         return;
       }
 
-      if (!activeConversation.sellerId || !activeConversation.listingId) {
+      if (!activeConversation.sellerId) {
         logMessageSupabaseError({
           step: "messages composer missing receiver or listing",
           listingId: activeConversation.listingId,
           sellerId: activeConversation.sellerId,
           buyerId: currentUserId,
-          error: new Error("Missing receiver_id or listing_id for direct message."),
+          error: new Error("Missing receiver_id for direct message."),
         });
-        setStatusMessage("Message could not be sent. Check console for Supabase error.");
+        setStatusMessage("Message could not be sent.");
         return;
       }
 
-      const messagePayload = {
-        sender_id: currentUserId,
-        receiver_id: activeConversation.sellerId,
-        listing_id: activeConversation.listingId,
-        body,
-      };
-      const { data, error } = await supabase
-        .from("messages")
-        .insert(messagePayload)
-        .select("id, sender_id, receiver_id, listing_id, body, created_at")
-        .single();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      if (error) {
+      if (!session?.access_token) {
+        setStatusMessage("Sign in to send messages.");
+        return;
+      }
+
+      const response = await fetch("/api/messages", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          receiverId: activeConversation.sellerId,
+          listingId: activeConversation.listingId,
+          body,
+        }),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        message?: MessageRow;
+      };
+
+      if (!response.ok || !payload.message) {
         logMessageSupabaseError({
           step: "messages composer message insert",
           listingId: activeConversation.listingId,
           sellerId: activeConversation.sellerId,
           buyerId: currentUserId,
-          payload: messagePayload,
-          error,
+          payload,
+          error: new Error(payload.error || "Message could not be sent."),
         });
-        setStatusMessage("Message could not be sent. Check console for Supabase error.");
+        setStatusMessage(payload.error || "Message could not be sent.");
         return;
       }
 
-      const insertedMessage = data as MessageRow;
+      const insertedMessage = payload.message;
 
       setConversations((items) =>
         items.map((conversation) =>
@@ -634,6 +670,10 @@ function MessagesContent() {
                     sender: "buyer",
                     body,
                     time: "Now",
+                    listingId: activeConversation.listingId,
+                    listingTitle: activeConversation.cardTitle,
+                    listingImageUrl: activeConversation.listingImageUrl,
+                    listingHref: activeConversation.cardHref,
                   },
                 ],
               }
@@ -804,7 +844,17 @@ function MessagesContent() {
                 </header>
 
                 <Link className="card-preview" href={activeConversation.cardHref}>
-                  <CardArtwork accent={activeConversation.accent} />
+                  {activeConversation.listingImageUrl ? (
+                    <Image
+                      src={activeConversation.listingImageUrl}
+                      alt={activeConversation.cardTitle}
+                      width={72}
+                      height={96}
+                      unoptimized
+                    />
+                  ) : activeConversation.source === "mock" ? (
+                    <CardArtwork accent={activeConversation.accent} />
+                  ) : null}
                   <div>
                     <h3>{activeConversation.cardTitle}</h3>
                     <p>{formatCurrency(activeConversation.price)}</p>
@@ -869,6 +919,23 @@ function MessagesContent() {
                       key={message.id}
                       className={`message-bubble ${message.sender}`}
                     >
+                      {message.listingTitle ? (
+                        <Link
+                          className="message-listing-context"
+                          href={message.listingHref || activeConversation.cardHref}
+                        >
+                          <strong>{message.listingTitle}</strong>
+                          {message.listingImageUrl ? (
+                            <Image
+                              src={message.listingImageUrl}
+                              alt={message.listingTitle}
+                              width={52}
+                              height={68}
+                              unoptimized
+                            />
+                          ) : null}
+                        </Link>
+                      ) : null}
                       <p>{message.body}</p>
                       <span>{message.time}</span>
                     </div>
@@ -1184,6 +1251,14 @@ const pageStyles = `
     text-decoration: none;
   }
 
+  .card-preview > img {
+    width: 74px;
+    height: 96px;
+    object-fit: contain;
+    border-radius: 9px;
+    background: #030304;
+  }
+
   .card-art {
     width: 74px;
     height: 96px;
@@ -1296,6 +1371,35 @@ const pageStyles = `
     align-self: flex-end;
     border-color: rgba(231,222,208,0.26);
     background: rgba(231,222,208,0.07);
+  }
+
+  .message-listing-context {
+    border: 1px solid rgba(201,205,211,0.14);
+    border-radius: 10px;
+    background: rgba(0,0,0,0.24);
+    margin-bottom: 8px;
+    padding: 8px;
+    display: grid;
+    gap: 8px;
+    color: #fff;
+    text-decoration: none;
+  }
+
+  .message-listing-context strong {
+    color: #fff;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 900;
+  }
+
+  .message-listing-context img {
+    max-width: 92px;
+    max-height: 126px;
+    width: auto;
+    height: auto;
+    border-radius: 8px;
+    object-fit: contain;
+    background: #030304;
   }
 
   .message-bubble p {

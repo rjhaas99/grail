@@ -213,7 +213,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Buyer transactions configuration error:", error);
     return NextResponse.json(
-      { error: "Buyer transactions are not configured." },
+      { error: "Buyer transactions are temporarily unavailable." },
       { status: 500 },
     );
   }

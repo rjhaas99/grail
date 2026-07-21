@@ -323,7 +323,7 @@ export async function getStoredGrailPassSubscription(
       errorMessage: error.message,
       userId,
     });
-    throw new Error("GRAIL Pass subscription state is not configured.");
+    throw new Error("GRAIL Pass subscription state is temporarily unavailable.");
   }
 
   return (data || null) as GrailPassSubscriptionRow | null;
@@ -647,7 +647,7 @@ export async function grantGrailPassMonthlyCreditForInvoice({
   const amount = getGrailPassMonthlyCreditAmount();
 
   if (amount <= 0) {
-    return { granted: false, reason: "Monthly GRAIL Credit is not configured." };
+    return { granted: false, reason: "Monthly GRAIL Credit is unavailable." };
   }
 
   const userId = subscription.metadata?.grailUserId;

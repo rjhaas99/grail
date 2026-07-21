@@ -2,6 +2,7 @@ import { createClient, type User } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 export const sportsCardsProBaseUrl = "https://www.sportscardspro.com";
+export const publicSportsCardsProUnavailableMessage = "Market value unavailable.";
 
 type ApiRecord = Record<string, unknown>;
 
@@ -32,6 +33,15 @@ export function getRequiredEnv(name: string) {
   }
 
   return value;
+}
+
+export function getSportsCardsProToken() {
+  return (
+    process.env.SPORTSCARDSPRO_API_TOKEN?.trim() ||
+    process.env.SPORTSCARDSPRO_API_KEY?.trim() ||
+    process.env.PRICECHARTING_API_TOKEN?.trim() ||
+    ""
+  );
 }
 
 function createAnonSupabaseClient() {
@@ -80,7 +90,7 @@ export async function requireAuthenticatedUser(request: Request): Promise<
     });
     return {
       response: NextResponse.json(
-        { error: "SportsCardsPro lookup is not configured yet." },
+        { error: publicSportsCardsProUnavailableMessage },
         { status: 500 },
       ),
     };
@@ -272,4 +282,3 @@ export function getSetName(product: ApiRecord) {
     "series",
   ]);
 }
-

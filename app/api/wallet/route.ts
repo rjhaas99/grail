@@ -142,7 +142,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Wallet configuration error:", error);
     return NextResponse.json(
-      { error: "GRAIL Wallet is not configured." },
+      { error: "GRAIL Wallet is temporarily unavailable." },
       { status: 500 },
     );
   }

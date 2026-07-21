@@ -48,6 +48,7 @@ export default function Header() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [progression, setProgression] = useState<ProgressionSummary>(calculateProgression(0));
   const [grailPass, setGrailPass] = useState<GrailPassMembership | null>(null);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
 
   const accountName =
@@ -180,12 +181,36 @@ export default function Header() {
     }
   }
 
+  async function getNotificationUnreadCount(accessToken?: string | null) {
+    if (!accessToken) {
+      return 0;
+    }
+
+    try {
+      const response = await fetch("/api/notifications", {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+        },
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as {
+        unreadCount?: number;
+      };
+
+      return Number(payload.unreadCount || 0);
+    } catch (error) {
+      console.warn("Header notification count load skipped:", error);
+      return 0;
+    }
+  }
+
   async function handleSignOut() {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
     setProgression(calculateProgression(0));
     setGrailPass(null);
+    setNotificationUnreadCount(0);
     closeMenus();
     router.refresh();
   }
@@ -212,10 +237,11 @@ export default function Header() {
       if (session?.user && !session.user.email_confirmed_at) {
         await supabase.auth.signOut();
       }
-      const [nextProfile, nextProgression, nextGrailPass] = await Promise.all([
+      const [nextProfile, nextProgression, nextGrailPass, nextUnreadCount] = await Promise.all([
         getProfile(nextUser),
         getProgression(nextUser ? session?.access_token : undefined),
         getGrailPass(nextUser ? session?.access_token : undefined),
+        getNotificationUnreadCount(nextUser ? session?.access_token : undefined),
       ]);
 
       if (!active) {
@@ -226,6 +252,7 @@ export default function Header() {
       setProfile(nextProfile);
       setProgression(nextProgression);
       setGrailPass(nextGrailPass);
+      setNotificationUnreadCount(nextUnreadCount);
     });
 
     const {
@@ -235,15 +262,17 @@ export default function Header() {
       if (session?.user && !session.user.email_confirmed_at) {
         await supabase.auth.signOut();
       }
-      const [nextProfile, nextProgression, nextGrailPass] = await Promise.all([
+      const [nextProfile, nextProgression, nextGrailPass, nextUnreadCount] = await Promise.all([
         getProfile(nextUser),
         getProgression(nextUser ? session?.access_token : undefined),
         getGrailPass(nextUser ? session?.access_token : undefined),
+        getNotificationUnreadCount(nextUser ? session?.access_token : undefined),
       ]);
       setUser(nextUser);
       setProfile(nextProfile);
       setProgression(nextProgression);
       setGrailPass(nextGrailPass);
+      setNotificationUnreadCount(nextUnreadCount);
     });
 
     return () => {
@@ -272,6 +301,38 @@ export default function Header() {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) {
+      return undefined;
+    }
+
+    const channel = supabase
+      .channel(`notifications-header-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${user.id}`,
+        },
+        async () => {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+
+          setNotificationUnreadCount(
+            await getNotificationUnreadCount(session?.access_token),
+          );
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     return () => {
@@ -658,6 +719,26 @@ export default function Header() {
               >
                 L{progression.level}
               </span>
+              {notificationUnreadCount > 0 ? (
+                <span
+                  aria-label={`${notificationUnreadCount} unread notifications`}
+                  style={{
+                    minWidth: "20px",
+                    height: "20px",
+                    borderRadius: "999px",
+                    background: "#fff",
+                    color: "#111",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "10px",
+                    fontWeight: 900,
+                    flexShrink: 0,
+                  }}
+                >
+                  {notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}
+                </span>
+              ) : null}
             </button>
 
             {accountOpen && (
@@ -754,6 +835,9 @@ export default function Header() {
                     style={dropdownLinkStyle}
                   >
                     {item.label}
+                    {item.href === "/notifications" && notificationUnreadCount > 0
+                      ? ` · ${notificationUnreadCount}`
+                      : ""}
                     {item.href === "/grail-pass" &&
                     grailPass?.status &&
                     grailPass.status !== "none"

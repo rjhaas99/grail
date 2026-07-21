@@ -100,7 +100,7 @@ export default function AdminWalletPage() {
   const [selectedUserId, setSelectedUserId] = useState("");
   const [action, setAction] = useState<WalletAction>("grant");
   const [amount, setAmount] = useState("");
-  const [reason, setReason] = useState<WalletReasonPreset>("Beta Tester Bonus");
+  const [reason, setReason] = useState<WalletReasonPreset>("Beta Bonus");
   const [internalNote, setInternalNote] = useState("");
   const [correctionDirection, setCorrectionDirection] = useState<"increase" | "decrease">("increase");
   const [historyUserFilter, setHistoryUserFilter] = useState("all");
@@ -292,7 +292,7 @@ export default function AdminWalletPage() {
     if (nextAction === "remove" || nextAction === "adjust") {
       setReason("Manual Correction");
     } else {
-      setReason("Beta Tester Bonus");
+      setReason("Beta Bonus");
     }
   }
 

@@ -18,6 +18,11 @@ type CheckoutListing = {
   price: number | null;
   status: string | null;
   sale_format?: string | null;
+  listing_images?: Array<{
+    image_url: string | null;
+    image_type: string | null;
+    display_order?: number | null;
+  }> | null;
 };
 
 function buildListingTitle(listing: CheckoutListing) {
@@ -30,13 +35,21 @@ function buildListingTitle(listing: CheckoutListing) {
   );
 }
 
+function getListingFrontImage(listing: CheckoutListing) {
+  return (
+    listing.listing_images?.find((image) => image.image_type === "front")?.image_url ||
+    listing.listing_images?.find((image) => Boolean(image.image_url))?.image_url ||
+    null
+  );
+}
+
 export async function POST(request: Request) {
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
   if (!stripeSecretKey) {
     return NextResponse.json(
       {
-        error: "Stripe test checkout is not configured yet.",
+        error: "Checkout is temporarily unavailable.",
       },
       { status: 503 },
     );
@@ -78,7 +91,12 @@ export async function POST(request: Request) {
           card_number,
           price,
           status,
-          sale_format
+          sale_format,
+          listing_images (
+            image_url,
+            image_type,
+            display_order
+          )
         `,
       )
       .eq("id", listingId)
@@ -161,6 +179,7 @@ export async function POST(request: Request) {
       buyerId,
       amount: price,
       title,
+      imageUrl: getListingFrontImage(listing),
     });
 
     if (!checkout.url) {
