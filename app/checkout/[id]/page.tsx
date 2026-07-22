@@ -299,7 +299,7 @@ export default function CheckoutPage() {
             throw new Error(
               "error" in quotePayload && quotePayload.error
                 ? quotePayload.error
-                : "Shipping quote could not be loaded.",
+                : "Shipping rate could not be loaded.",
             );
           }
 
@@ -307,12 +307,12 @@ export default function CheckoutPage() {
             setShippingQuote(quotePayload as CheckoutShippingQuote);
           }
         } catch (quoteError) {
-          console.error("Checkout shipping quote error:", quoteError);
+          console.error("Checkout shipping rate error:", quoteError);
           if (isMounted) {
             setShippingQuoteError(
               quoteError instanceof Error
                 ? quoteError.message
-                : "Shipping quote could not be loaded.",
+                : "Shipping rate could not be loaded.",
             );
           }
         } finally {
@@ -363,8 +363,8 @@ export default function CheckoutPage() {
     if (!activeShippingProfile || !shippingQuote) {
       setStripeError(
         isShippingQuoteLoading
-          ? "Shipping quote is still loading."
-          : "Shipping quote could not be loaded.",
+          ? "Shipping rate is still loading."
+          : "Shipping rate could not be loaded.",
       );
       return;
     }

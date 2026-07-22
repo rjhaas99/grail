@@ -29,16 +29,22 @@ export type ShippingProfile = {
 
 export type ShippingRateSettings = {
   pweFlatRate: number;
+  groundAdvantageRate: number;
+  priorityMailRate: number;
   pweMaxListingValue: number;
 };
 
 export const shippingRateSettingKeys = {
   pweFlatRate: "shipping_pwe_flat_rate",
+  groundAdvantageRate: "shipping_usps_ground_advantage_rate",
+  priorityMailRate: "shipping_usps_priority_mail_rate",
   pweMaxListingValue: "shipping_pwe_max_listing_value",
 } as const satisfies Record<keyof ShippingRateSettings, string>;
 
 export const defaultShippingRateSettings = {
   pweFlatRate: 1.5,
+  groundAdvantageRate: 5.99,
+  priorityMailRate: 9.99,
   pweMaxListingValue: 20,
 } as const satisfies ShippingRateSettings;
 
@@ -213,6 +219,23 @@ export function getEligibleShippingProfiles(
   );
 }
 
+export function getMarketplaceShippingRateForProfile(
+  profileId?: string | null,
+  settings: ShippingRateSettings = defaultShippingRateSettings,
+) {
+  const profile = getShippingProfile(profileId);
+
+  if (profile.id === "plain_white_envelope") {
+    return roundCurrency(settings.pweFlatRate);
+  }
+
+  if (profile.id === "usps_priority_mail") {
+    return roundCurrency(settings.priorityMailRate);
+  }
+
+  return roundCurrency(settings.groundAdvantageRate);
+}
+
 export function getShippingProfilePublicPayload(
   profile: ShippingProfile,
   settings: ShippingRateSettings = defaultShippingRateSettings,
@@ -230,6 +253,7 @@ export function getShippingProfilePublicPayload(
     buyerDescription: profile.buyerDescription,
     checkoutBullets: [...profile.checkoutBullets],
     carrier: profile.carrier,
+    marketplaceRate: getMarketplaceShippingRateForProfile(profile.id, settings),
     maxListingValue,
     capabilities: profile.capabilities,
   };

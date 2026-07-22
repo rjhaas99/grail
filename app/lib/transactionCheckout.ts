@@ -242,7 +242,7 @@ export async function createTransactionCheckoutSession({
   }
 
   if (!Number.isFinite(shippingAmount) || shippingAmount < 0) {
-    throw new Error("A valid shipping quote is required for checkout.");
+    throw new Error("A valid shipping rate is required for checkout.");
   }
 
   const stripe = new Stripe(getRequiredEnv("STRIPE_SECRET_KEY"));

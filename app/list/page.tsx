@@ -17,6 +17,7 @@ import type { XpSource } from "../lib/progression";
 import {
   defaultShippingProfileId,
   defaultShippingRateSettings,
+  getMarketplaceShippingRateForProfile,
   getShippingProfile,
   isShippingProfileEligibleForValue,
   shippingProfiles,
@@ -409,6 +410,49 @@ function formatCurrencyWithCents(value: string | number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(number);
+}
+
+function formatMarketplaceLimit(value: number) {
+  return Number.isInteger(value)
+    ? formatCurrency(value)
+    : formatCurrencyWithCents(value);
+}
+
+function getShippingMethodPresentation(
+  profileId: ShippingProfileId,
+  pweMaxListingValue: number,
+) {
+  if (profileId === "plain_white_envelope") {
+    return {
+      highlights: [
+        "Lowest cost",
+        "Recommended for inexpensive cards.",
+        "No tracking.",
+      ],
+      unavailableMessage: `Only available for listings priced at ${formatMarketplaceLimit(
+        pweMaxListingValue,
+      )} or less.`,
+    };
+  }
+
+  if (profileId === "usps_priority_mail") {
+    return {
+      highlights: [
+        "Tracked Priority Mail.",
+        "Faster delivery.",
+        "Recommended for higher-value cards.",
+      ],
+      unavailableMessage: "",
+    };
+  }
+
+  return {
+    highlights: [
+      "Tracked shipping through USPS.",
+      "Recommended for most cards.",
+    ],
+    unavailableMessage: "",
+  };
 }
 
 function calculateReserveFee(reservePrice: number) {
@@ -3342,6 +3386,14 @@ export default function ListCardPage() {
                       settings: shippingSettings,
                     });
                   const isSelected = shippingProfileId === profile.id;
+                  const marketplaceRate = getMarketplaceShippingRateForProfile(
+                    profile.id,
+                    shippingSettings,
+                  );
+                  const presentation = getShippingMethodPresentation(
+                    profile.id,
+                    shippingSettings.pweMaxListingValue,
+                  );
 
                   return (
                     <label
@@ -3357,12 +3409,22 @@ export default function ListCardPage() {
                       />
                       <span>
                         <strong>{profile.label}</strong>
-                        <small>{profile.description}</small>
-                        {profile.capabilities.trackingSupported ? (
-                          <em>Tracking supported</em>
-                        ) : (
-                          <em>No tracking for this initial implementation</em>
-                        )}
+                        <small className="shipping-buyer-rate">
+                          Buyer pays {formatCurrencyWithCents(marketplaceRate)}
+                        </small>
+                        {presentation.highlights.map((highlight) => (
+                          <small key={highlight}>{highlight}</small>
+                        ))}
+                        <em>
+                          {profile.capabilities.trackingSupported
+                            ? "Tracking included"
+                            : "No tracking"}
+                        </em>
+                        {!isEligible && presentation.unavailableMessage ? (
+                          <small className="shipping-unavailable">
+                            {presentation.unavailableMessage}
+                          </small>
+                        ) : null}
                       </span>
                     </label>
                   );
@@ -3682,12 +3744,14 @@ const pageStyles = `
   .shipping-profile-list { display: grid; gap: 10px; }
   .shipping-profile-option { border: 1px solid rgba(201,205,211,0.16); border-radius: 12px; background: rgba(201,205,211,0.045); padding: 12px; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
   .shipping-profile-option.active { border-color: rgba(231,222,208,0.36); background: rgba(231,222,208,0.07); }
-  .shipping-profile-option.disabled { opacity: 0.52; cursor: not-allowed; }
+  .shipping-profile-option.disabled { opacity: 0.76; cursor: not-allowed; }
   .shipping-profile-option input { margin-top: 3px; accent-color: #E7DED0; }
   .shipping-profile-option span { display: grid; gap: 4px; }
   .shipping-profile-option strong { color: #fff; font-size: 13px; line-height: 17px; font-weight: 900; }
   .shipping-profile-option small { color: #a1a1aa; font-size: 12px; line-height: 17px; font-weight: 800; }
+  .shipping-profile-option .shipping-buyer-rate { color: #E7DED0; font-size: 13px; line-height: 18px; font-weight: 900; }
   .shipping-profile-option em { color: #C9CDD3; font-size: 11px; line-height: 15px; font-style: normal; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; }
+  .shipping-profile-option .shipping-unavailable { color: #fbbf24; font-weight: 900; }
   .shipping-warning { margin: 10px 0 0; color: #fbbf24; font-size: 12px; line-height: 17px; font-weight: 900; }
   .shipping-estimate-note { margin-top: 10px; border: 1px solid rgba(201,205,211,0.16); border-radius: 10px; background: rgba(201,205,211,0.045); min-height: 42px; padding: 10px 12px; display: grid; gap: 4px; box-sizing: border-box; }
   .shipping-estimate-note span { color: #C9CDD3; font-size: 11px; line-height: 14px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }

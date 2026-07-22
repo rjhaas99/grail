@@ -120,6 +120,7 @@ type MoneyCenterData = {
     labelsPurchased: number | null;
     shippingCollected: number | null;
     totalShippingCost: number | null;
+    shippingDifference: number | null;
     lastShippingMethod: string | null;
     lastLabelPurchased: string | null;
     note: string;
@@ -173,6 +174,16 @@ function formatCurrency(value: number | null | undefined, fallback = "Unavailabl
     currency: "USD",
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+function formatDifferenceCurrency(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "Unavailable";
+  }
+
+  const prefix = value > 0 ? "+" : value < 0 ? "-" : "";
+
+  return `${prefix}${formatCurrency(Math.abs(value), "$0.00")}`;
 }
 
 function formatSignedAmount(transaction: Transaction) {
@@ -883,12 +894,17 @@ export default function BillingPayoutsPage() {
                   }
                 />
                 <InfoCard
-                  label="Shipping Collected"
+                  label="Buyer Paid Shipping"
                   value={isLoading ? "Loading..." : formatCurrency(data?.shipping.shippingCollected)}
                 />
                 <InfoCard
-                  label="Total Shipping Cost"
+                  label="Actual Shippo Label"
                   value={isLoading ? "Loading..." : formatCurrency(data?.shipping.totalShippingCost)}
+                />
+                <InfoCard
+                  label="Difference"
+                  value={isLoading ? "Loading..." : formatDifferenceCurrency(data?.shipping.shippingDifference)}
+                  detail="Buyer-paid shipping minus actual Shippo label cost."
                 />
                 <InfoCard
                   label="Last Shipping Method"

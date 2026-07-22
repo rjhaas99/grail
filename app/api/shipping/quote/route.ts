@@ -59,7 +59,7 @@ export async function POST(request: Request) {
   try {
     payload = (await request.json()) as ShippingQuotePayload;
   } catch {
-    return NextResponse.json({ error: "Invalid shipping quote request." }, { status: 400 });
+    return NextResponse.json({ error: "Invalid shipping rate request." }, { status: 400 });
   }
 
   const listingId = payload.listingId?.trim();
@@ -73,9 +73,9 @@ export async function POST(request: Request) {
   try {
     supabase = createServiceSupabaseClient();
   } catch (error) {
-    console.error("Shipping quote configuration error:", error);
+    console.error("Shipping rate configuration error:", error);
     return NextResponse.json(
-      { error: "Shipping quote is temporarily unavailable." },
+      { error: "Shipping rate is temporarily unavailable." },
       { status: 500 },
     );
   }
@@ -87,11 +87,11 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (error) {
-    console.error("Shipping quote listing fetch error:", {
+    console.error("Shipping rate listing fetch error:", {
       listingId,
       error: error.message,
     });
-    return NextResponse.json({ error: "Shipping quote could not be loaded." }, { status: 500 });
+    return NextResponse.json({ error: "Shipping rate could not be loaded." }, { status: 500 });
   }
 
   if (!data) {
@@ -112,5 +112,6 @@ export async function POST(request: Request) {
   return NextResponse.json({
     shippingAmount: quote.shippingAmount,
     profile: quote.publicProfile,
+    source: quote.source,
   });
 }

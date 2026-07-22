@@ -112,6 +112,7 @@ type ShippingSection = {
   labelsPurchased: number | null;
   shippingCollected: number | null;
   totalShippingCost: number | null;
+  shippingDifference: number | null;
   lastShippingMethod: string | null;
   lastLabelPurchased: string | null;
   note: string;
@@ -569,6 +570,7 @@ async function loadShipping({
   const totalShippingCost = roundCurrency(
     labelOrders.reduce((total, order) => total + toNumber(order.label_cost), 0),
   );
+  const shippingDifference = roundCurrency(shippingCollected - totalShippingCost);
   const lastLabel = labelOrders.find((order) =>
     order.shippo_label_purchased_at || order.shipped_at,
   );
@@ -588,12 +590,11 @@ async function loadShipping({
     labelsPurchased,
     shippingCollected,
     totalShippingCost,
+    shippingDifference,
     lastShippingMethod: labelOrders.find((order) => order.shipping_profile_label)
       ?.shipping_profile_label || null,
     lastLabelPurchased: lastLabel?.shippo_label_purchased_at || lastLabel?.shipped_at || null,
-    note: labelsPurchased > 0
-      ? "Shipping label costs are deducted from seller payouts."
-      : "No labels purchased yet.",
+    note: "Buyer-paid shipping and actual label costs are tracked separately.",
   };
 }
 
@@ -957,6 +958,7 @@ export async function GET(request: Request) {
       labelsPurchased: null,
       shippingCollected: null,
       totalShippingCost: null,
+      shippingDifference: null,
       lastShippingMethod: null,
       lastLabelPurchased: null,
       note: "No labels purchased yet.",

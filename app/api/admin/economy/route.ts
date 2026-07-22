@@ -10,6 +10,11 @@ import {
   type MarketplaceEvent,
   type MarketplaceSwitches,
 } from "../../../lib/marketplaceEconomy";
+import {
+  defaultShippingRateSettings,
+  shippingRateSettingKeys,
+  type ShippingRateSettings,
+} from "../../../lib/shippingProfiles";
 
 export const runtime = "nodejs";
 
@@ -23,6 +28,10 @@ type EconomyPatchPayload =
   | {
       action?: "save_event";
       event?: Partial<MarketplaceEvent>;
+    }
+  | {
+      action?: "update_shipping_rates";
+      shippingRates?: Partial<ShippingRateSettings>;
     };
 
 type MetricOrderRow = {
@@ -147,8 +156,93 @@ function cleanPriority(value: unknown) {
   return Math.round(parsed);
 }
 
+function cleanMoney(value: unknown, label: string) {
+  const parsed = Number(value ?? 0);
+
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1000) {
+    throw new Error(`${label} must be a valid amount.`);
+  }
+
+  return Math.round(parsed * 100) / 100;
+}
+
+function cleanPositiveMoney(value: unknown, label: string) {
+  const parsed = Number(value ?? 0);
+
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 100000) {
+    throw new Error(`${label} must be greater than $0.`);
+  }
+
+  return Math.round(parsed * 100) / 100;
+}
+
 function cleanText(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
+}
+
+async function loadShippingRates(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+) {
+  const { data, error } = await supabase
+    .from("marketplace_settings")
+    .select("key, value")
+    .in("key", Object.values(shippingRateSettingKeys));
+
+  if (error) {
+    console.warn("Admin economy shipping rates unavailable:", {
+      error,
+      errorMessage: error.message,
+    });
+    return defaultShippingRateSettings;
+  }
+
+  const settingsByKey = new Map(
+    ((data || []) as Array<{ key: string; value: boolean | string | number | null }>).map(
+      (setting) => [setting.key, setting.value],
+    ),
+  );
+  const readNumber = (key: string, fallback: number, allowZero: boolean) => {
+    const raw = settingsByKey.get(key);
+    const parsed =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string"
+          ? Number(raw)
+          : Number.NaN;
+
+    if (!Number.isFinite(parsed)) {
+      return fallback;
+    }
+
+    if (allowZero ? parsed < 0 : parsed <= 0) {
+      return fallback;
+    }
+
+    return Math.round(parsed * 100) / 100;
+  };
+
+  return {
+    pweFlatRate: readNumber(
+      shippingRateSettingKeys.pweFlatRate,
+      defaultShippingRateSettings.pweFlatRate,
+      true,
+    ),
+    groundAdvantageRate: readNumber(
+      shippingRateSettingKeys.groundAdvantageRate,
+      defaultShippingRateSettings.groundAdvantageRate,
+      true,
+    ),
+    priorityMailRate: readNumber(
+      shippingRateSettingKeys.priorityMailRate,
+      defaultShippingRateSettings.priorityMailRate,
+      true,
+    ),
+    pweMaxListingValue: readNumber(
+      shippingRateSettingKeys.pweMaxListingValue,
+      defaultShippingRateSettings.pweMaxListingValue,
+      false,
+    ),
+  } satisfies ShippingRateSettings;
 }
 
 function cleanNullableDate(value: unknown) {
@@ -311,6 +405,7 @@ async function getControlCenterData(supabase: ReturnType<typeof createServiceSup
     walletLiability,
     orderMetrics,
     rewardCostMetrics,
+    shippingRates,
   ] =
     await Promise.all([
       getMarketplaceSwitches(supabase),
@@ -323,6 +418,7 @@ async function getControlCenterData(supabase: ReturnType<typeof createServiceSup
       getWalletLiability(supabase),
       getOrderMetrics(supabase),
       getRewardCostMetrics(supabase),
+      loadShippingRates(supabase),
     ]);
   const currentTier = tiers.find((tier) => tier.enabled) || tiers[0] || null;
 
@@ -357,6 +453,7 @@ async function getControlCenterData(supabase: ReturnType<typeof createServiceSup
       ...event,
       status: getEventStatus(event),
     })),
+    shippingRates,
     currentEvent: eventState.currentEvent,
     upcomingEvent: eventState.upcomingEvent,
     endedEvent: eventState.endedEvent,
@@ -377,6 +474,53 @@ async function getControlCenterData(supabase: ReturnType<typeof createServiceSup
         }
       : null,
   };
+}
+
+async function updateShippingRates(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+  shippingRates: Partial<ShippingRateSettings> | undefined,
+) {
+  if (!shippingRates) {
+    throw new Error("Shipping rates are required.");
+  }
+
+  const rows = [
+    {
+      key: shippingRateSettingKeys.pweFlatRate,
+      value: cleanMoney(shippingRates.pweFlatRate, "PWE rate"),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      key: shippingRateSettingKeys.groundAdvantageRate,
+      value: cleanMoney(shippingRates.groundAdvantageRate, "Ground Advantage rate"),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      key: shippingRateSettingKeys.priorityMailRate,
+      value: cleanMoney(shippingRates.priorityMailRate, "Priority Mail rate"),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      key: shippingRateSettingKeys.pweMaxListingValue,
+      value: cleanPositiveMoney(
+        shippingRates.pweMaxListingValue,
+        "PWE maximum listing value",
+      ),
+      updated_at: new Date().toISOString(),
+    },
+  ];
+
+  const { error } = await supabase
+    .from("marketplace_settings")
+    .upsert(rows, { onConflict: "key" });
+
+  if (error) {
+    console.error("Admin economy shipping rate update error:", {
+      error,
+      errorMessage: error.message,
+    });
+    throw new Error("Shipping rates could not be saved.");
+  }
 }
 
 async function updateSwitches(
@@ -533,6 +677,8 @@ export async function PATCH(request: Request) {
       await updateSwitches(supabase, payload.switches);
     } else if (payload.action === "save_event") {
       await saveEvent(supabase, payload.event);
+    } else if (payload.action === "update_shipping_rates") {
+      await updateShippingRates(supabase, payload.shippingRates);
     } else {
       return NextResponse.json({ error: "Unsupported Control Center action." }, { status: 400 });
     }

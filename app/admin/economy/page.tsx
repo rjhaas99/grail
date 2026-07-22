@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import AdminLayout from "../AdminLayout";
 import Header from "../../components/Header";
 import { supabase } from "../../../lib/supabase";
+import {
+  defaultShippingRateSettings,
+  type ShippingRateSettings,
+} from "../../lib/shippingProfiles";
 
 const adminEmails = ["ryanjhaas99@gmail.com"];
 
@@ -85,6 +89,7 @@ type ControlCenterResponse = {
   marketplaceStatus?: MarketplaceStatus;
   switches?: MarketplaceSwitches;
   events?: MarketplaceEvent[];
+  shippingRates?: ShippingRateSettings;
   currentEvent?: MarketplaceEvent | null;
   upcomingEvent?: MarketplaceEvent | null;
   currentEconomy?: CurrentEconomy | null;
@@ -228,6 +233,9 @@ export default function AdminEconomyPage() {
   const [currentEvent, setCurrentEvent] = useState<MarketplaceEvent | null>(null);
   const [upcomingEvent, setUpcomingEvent] = useState<MarketplaceEvent | null>(null);
   const [currentEconomy, setCurrentEconomy] = useState<CurrentEconomy | null>(null);
+  const [shippingRates, setShippingRates] = useState<ShippingRateSettings>(
+    defaultShippingRateSettings,
+  );
   const [eventDraft, setEventDraft] = useState<Partial<MarketplaceEvent>>(emptyEvent);
   const [saving, setSaving] = useState(false);
 
@@ -276,6 +284,7 @@ export default function AdminEconomyPage() {
       setMarketplaceStatus(payload.marketplaceStatus || null);
       setSwitches(payload.switches || emptySwitches);
       setEvents(payload.events || []);
+      setShippingRates(payload.shippingRates || defaultShippingRateSettings);
       setCurrentEvent(payload.currentEvent || null);
       setUpcomingEvent(payload.upcomingEvent || null);
       setCurrentEconomy(payload.currentEconomy || null);
@@ -356,6 +365,42 @@ export default function AdminEconomyPage() {
     } catch (error) {
       console.error("Admin economy event save error:", error);
       setStatus(error instanceof Error ? error.message : "Marketplace event could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveShippingRates() {
+    setSaving(true);
+    setStatus("");
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    try {
+      const response = await fetch("/api/admin/economy", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${session?.access_token || ""}`,
+        },
+        body: JSON.stringify({
+          action: "update_shipping_rates",
+          shippingRates,
+        }),
+      });
+      const payload = (await response.json()) as ControlCenterResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Shipping rates could not be saved.");
+      }
+
+      setStatus(payload.message || "Shipping rates saved.");
+      await loadControlCenter();
+    } catch (error) {
+      console.error("Admin economy shipping rate save error:", error);
+      setStatus(error instanceof Error ? error.message : "Shipping rates could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -496,6 +541,80 @@ export default function AdminEconomyPage() {
               <div className="section-heading">
                 <div>
                   <span>Section 3</span>
+                  <h2>Marketplace Shipping Rates</h2>
+                </div>
+                <button type="button" disabled={saving} onClick={saveShippingRates}>
+                  {saving ? "Saving..." : "Save Shipping Rates"}
+                </button>
+              </div>
+              <div className="event-form-grid">
+                <label>
+                  <span>PWE Rate</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={shippingRates.pweFlatRate}
+                    onChange={(event) =>
+                      setShippingRates((current) => ({
+                        ...current,
+                        pweFlatRate: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Ground Advantage Rate</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={shippingRates.groundAdvantageRate}
+                    onChange={(event) =>
+                      setShippingRates((current) => ({
+                        ...current,
+                        groundAdvantageRate: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Priority Mail Rate</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={shippingRates.priorityMailRate}
+                    onChange={(event) =>
+                      setShippingRates((current) => ({
+                        ...current,
+                        priorityMailRate: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  <span>PWE Max Listing Value</span>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={shippingRates.pweMaxListingValue}
+                    onChange={(event) =>
+                      setShippingRates((current) => ({
+                        ...current,
+                        pweMaxListingValue: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="panel event-panel">
+              <div className="section-heading">
+                <div>
+                  <span>Section 4</span>
                   <h2>Event Engine</h2>
                 </div>
                 <button type="button" disabled={saving} onClick={saveEvent}>
@@ -543,7 +662,7 @@ export default function AdminEconomyPage() {
             <section className="panel events-list-panel">
               <div className="section-heading">
                 <div>
-                  <span>Section 4</span>
+                  <span>Section 5</span>
                   <h2>Upcoming Events</h2>
                 </div>
               </div>
@@ -570,7 +689,7 @@ export default function AdminEconomyPage() {
             <section className="panel preview-panel">
               <div className="section-heading">
                 <div>
-                  <span>Section 5</span>
+                  <span>Section 6</span>
                   <h2>Event Preview</h2>
                 </div>
               </div>
@@ -587,7 +706,7 @@ export default function AdminEconomyPage() {
             <section className="panel economy-panel">
               <div className="section-heading">
                 <div>
-                  <span>Section 6</span>
+                  <span>Section 7</span>
                   <h2>Current Economy</h2>
                 </div>
               </div>
