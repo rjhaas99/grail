@@ -15,6 +15,7 @@ import {
   type ShippoAddress,
   type ShippoParcel,
 } from "../../../lib/shippo";
+import { normalizeOrderShippingAddress } from "../../../lib/shippingAddresses";
 import { getShippingProfile } from "../../../lib/shippingProfiles";
 import { createSystemNotifications } from "../../../lib/serverNotifications";
 
@@ -23,7 +24,6 @@ export const runtime = "nodejs";
 type ShippingLabelPayload = {
   orderId?: string;
   from?: Partial<ShippoAddress>;
-  to?: Partial<ShippoAddress>;
   parcel?: Partial<ShippoParcel>;
 };
 
@@ -47,6 +47,7 @@ type OrderRow = {
   label_cost?: number | string | null;
   shippo_transaction_id?: string | null;
   shipping_profile_id?: string | null;
+  shipping_to_address?: Record<string, unknown> | null;
 };
 
 function getRequiredEnv(name: string) {
@@ -173,12 +174,10 @@ export async function POST(request: Request) {
   }
 
   const addressFrom = cleanShippoAddress(payload.from || {});
-  const addressTo = cleanShippoAddress(payload.to || {});
   const parcel = cleanShippoParcel(payload.parcel || {});
 
   try {
     validateAddress(addressFrom, "Sender");
-    validateAddress(addressTo, "Recipient");
     validateParcel(parcel);
   } catch (error) {
     return NextResponse.json(
@@ -190,7 +189,7 @@ export async function POST(request: Request) {
   const { data, error } = await serviceSupabase
     .from("orders")
     .select(
-      "id, listing_id, buyer_id, seller_id, status, fulfillment_status, transfer_status, refund_status, dispute_status, carrier, tracking_number, seller_payout_amount, card_price, platform_fee, processing_fee, label_url, label_cost, shippo_transaction_id, shipping_profile_id",
+      "id, listing_id, buyer_id, seller_id, status, fulfillment_status, transfer_status, refund_status, dispute_status, carrier, tracking_number, seller_payout_amount, card_price, platform_fee, processing_fee, label_url, label_cost, shippo_transaction_id, shipping_profile_id, shipping_to_address",
     )
     .eq("id", orderId)
     .maybeSingle();
@@ -208,6 +207,27 @@ export async function POST(request: Request) {
 
   if (!order) {
     return NextResponse.json({ error: "Order not found." }, { status: 404 });
+  }
+
+  const addressTo = normalizeOrderShippingAddress(order.shipping_to_address);
+
+  if (!addressTo) {
+    return NextResponse.json(
+      {
+        error:
+          "Buyer shipping address is missing. Stripe Checkout must collect a shipping address before a label can be purchased.",
+      },
+      { status: 400 },
+    );
+  }
+
+  try {
+    validateAddress(addressTo as ShippoAddress, "Recipient");
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Buyer shipping address is invalid." },
+      { status: 400 },
+    );
   }
 
   if (order.seller_id !== user.id) {

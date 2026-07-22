@@ -61,6 +61,8 @@ export const transactionLifecycleLabels = {
   cancelled: "Cancelled",
 } as const;
 
+const supportedShippingCountries = ["US"] as const;
+
 function getRequiredEnv(name: string) {
   const value = process.env[name];
 
@@ -308,6 +310,9 @@ export async function createTransactionCheckoutSession({
     mode: "payment",
     client_reference_id: buyerId || undefined,
     line_items: lineItems,
+    shipping_address_collection: {
+      allowed_countries: [...supportedShippingCountries],
+    },
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata,
@@ -327,6 +332,9 @@ export async function createTransactionCheckoutSession({
     shippingAmount,
     shippingUnitAmount,
     shippingLabel,
+    shippingAddressCollection: {
+      allowedCountries: supportedShippingCountries,
+    },
     title,
     successUrl,
     cancelUrl,

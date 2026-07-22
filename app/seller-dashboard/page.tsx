@@ -13,6 +13,11 @@ import {
   getNextProgressionRank,
   type ProgressionSummary,
 } from "../lib/progression";
+import {
+  formatOrderShippingAddress,
+  normalizeOrderShippingAddress,
+  type OrderShippingAddress,
+} from "../lib/shippingAddresses";
 import { getShippingProfile } from "../lib/shippingProfiles";
 
 type OfferStatus = "Pending" | "Accepted" | "Countered" | "Declined" | "Withdrawn" | "Expired" | "Completed";
@@ -117,6 +122,7 @@ type DashboardOrder = {
   cardPrice: number;
   sellerFee: number;
   paymentProcessingFee: number;
+  shippingAddress?: OrderShippingAddress | null;
   imageUrl?: string | null;
   href?: string;
 };
@@ -139,6 +145,7 @@ type SupabaseOrderRow = {
   shipping_profile_label?: string | null;
   shipping_tracking_supported?: boolean | null;
   shipping_label_required?: boolean | null;
+  shipping_to_address?: Record<string, unknown> | null;
   label_url?: string | null;
   label_cost?: number | string | null;
   shippo_eta?: string | null;
@@ -222,14 +229,6 @@ type ShippingLabelForm = {
   fromZip: string;
   fromPhone: string;
   fromEmail: string;
-  toName: string;
-  toStreet1: string;
-  toStreet2: string;
-  toCity: string;
-  toState: string;
-  toZip: string;
-  toPhone: string;
-  toEmail: string;
   parcelLength: string;
   parcelWidth: string;
   parcelHeight: string;
@@ -268,6 +267,7 @@ const initialOrders = mockSellerDashboardData.recentOrders.map((order) => ({
   cardPrice: 0,
   sellerFee: 0,
   paymentProcessingFee: 0,
+  shippingAddress: null,
 }));
 
 const defaultShippingLabelForm: ShippingLabelForm = {
@@ -279,14 +279,6 @@ const defaultShippingLabelForm: ShippingLabelForm = {
   fromZip: "",
   fromPhone: "",
   fromEmail: "",
-  toName: "",
-  toStreet1: "",
-  toStreet2: "",
-  toCity: "",
-  toState: "",
-  toZip: "",
-  toPhone: "",
-  toEmail: "",
   parcelLength: "7",
   parcelWidth: "5",
   parcelHeight: "1",
@@ -918,6 +910,7 @@ export default function SellerDashboardPage() {
               cardPrice,
               sellerFee,
               paymentProcessingFee,
+              shippingAddress: normalizeOrderShippingAddress(order.shipping_to_address),
               imageUrl: getListingFrontImage(listing),
               href: order.listing_id ? `/cards/${order.listing_id}` : "/orders",
             };
@@ -1273,17 +1266,6 @@ export default function SellerDashboardPage() {
             phone: shippingLabelForm.fromPhone,
             email: shippingLabelForm.fromEmail,
           },
-          to: {
-            name: shippingLabelForm.toName,
-            street1: shippingLabelForm.toStreet1,
-            street2: shippingLabelForm.toStreet2,
-            city: shippingLabelForm.toCity,
-            state: shippingLabelForm.toState,
-            zip: shippingLabelForm.toZip,
-            country: "US",
-            phone: shippingLabelForm.toPhone,
-            email: shippingLabelForm.toEmail,
-          },
           parcel: {
             length: shippingLabelForm.parcelLength,
             width: shippingLabelForm.parcelWidth,
@@ -1589,6 +1571,13 @@ export default function SellerDashboardPage() {
   const payoutButtonLabel = payoutConnected ? "Continue Payout Setup" : "Set Up Payouts";
   const upcomingProgressionRank = getNextProgressionRank(progression.level);
   const activeInventoryCount = activeListings.length + auctionListings.length;
+  const shippingLabelOrder = shippingLabelOrderId
+    ? orders.find((order) => order.id === shippingLabelOrderId) || null
+    : null;
+  const shippingLabelAddressLines = formatOrderShippingAddress(
+    shippingLabelOrder?.shippingAddress || null,
+  );
+  const hasSavedShippingAddress = shippingLabelAddressLines.length > 0;
 
   return (
     <PageShell
@@ -2161,8 +2150,9 @@ export default function SellerDashboardPage() {
               </button>
             </div>
             <p>
-              Shippo will create a USPS Ground Advantage label, attach tracking to the order,
-              and deduct the actual label cost from the seller payout.
+              Shippo will create a USPS label, attach tracking to the order,
+              and deduct the actual label cost from the seller payout. The buyer
+              shipping address is collected by Stripe Checkout.
             </p>
             <div className="shipping-label-grid">
               <div className="shipping-label-group">
@@ -2235,73 +2225,19 @@ export default function SellerDashboardPage() {
                 </div>
               </div>
               <div className="shipping-label-group">
-                <strong>Recipient</strong>
-                <label>
-                  <span>Name</span>
-                  <input
-                    value={shippingLabelForm.toName}
-                    onChange={(event) => updateShippingLabelForm("toName", event.target.value)}
-                    placeholder="Recipient name"
-                  />
-                </label>
-                <label>
-                  <span>Street</span>
-                  <input
-                    value={shippingLabelForm.toStreet1}
-                    onChange={(event) => updateShippingLabelForm("toStreet1", event.target.value)}
-                    placeholder="Street address"
-                  />
-                </label>
-                <label>
-                  <span>Apartment / Suite</span>
-                  <input
-                    value={shippingLabelForm.toStreet2}
-                    onChange={(event) => updateShippingLabelForm("toStreet2", event.target.value)}
-                    placeholder="Optional"
-                  />
-                </label>
-                <div className="shipping-label-row">
-                  <label>
-                    <span>City</span>
-                    <input
-                      value={shippingLabelForm.toCity}
-                      onChange={(event) => updateShippingLabelForm("toCity", event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    <span>State</span>
-                    <input
-                      value={shippingLabelForm.toState}
-                      onChange={(event) => updateShippingLabelForm("toState", event.target.value)}
-                      maxLength={2}
-                    />
-                  </label>
-                  <label>
-                    <span>ZIP</span>
-                    <input
-                      value={shippingLabelForm.toZip}
-                      onChange={(event) => updateShippingLabelForm("toZip", event.target.value)}
-                    />
-                  </label>
-                </div>
-                <div className="shipping-label-row two">
-                  <label>
-                    <span>Phone</span>
-                    <input
-                      value={shippingLabelForm.toPhone}
-                      onChange={(event) => updateShippingLabelForm("toPhone", event.target.value)}
-                      placeholder="Optional"
-                    />
-                  </label>
-                  <label>
-                    <span>Email</span>
-                    <input
-                      value={shippingLabelForm.toEmail}
-                      onChange={(event) => updateShippingLabelForm("toEmail", event.target.value)}
-                      placeholder="Optional"
-                    />
-                  </label>
-                </div>
+                <strong>Ship To</strong>
+                {hasSavedShippingAddress ? (
+                  <div className="saved-shipping-address">
+                    {shippingLabelAddressLines.map((line, index) => (
+                      <span key={`${line}-${index}`}>{line}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="shipping-address-warning">
+                    Buyer shipping address has not been saved yet. Stripe
+                    Checkout must collect it before a label can be purchased.
+                  </p>
+                )}
               </div>
               <div className="shipping-label-group parcel">
                 <strong>Package</strong>
@@ -2340,7 +2276,7 @@ export default function SellerDashboardPage() {
             <div className="row-actions">
               <button
                 type="button"
-                disabled={Boolean(updatingOrderId)}
+                disabled={Boolean(updatingOrderId) || !hasSavedShippingAddress}
                 onClick={purchaseShippingLabel}
               >
                 Purchase USPS Label
@@ -2959,6 +2895,26 @@ const pageStyles = `
     font-size: 12px;
     letter-spacing: 0.12em;
     text-transform: uppercase;
+  }
+
+  .saved-shipping-address {
+    border: 1px solid rgba(201,205,211,0.12);
+    border-radius: 12px;
+    background: rgba(8,8,10,0.58);
+    padding: 11px;
+    display: grid;
+    gap: 4px;
+  }
+
+  .saved-shipping-address span {
+    color: #E7DED0;
+    font-size: 12px;
+    line-height: 17px;
+    font-weight: 800;
+  }
+
+  .shipping-address-warning {
+    color: #fca5a5 !important;
   }
 
   .shipping-label-row {

@@ -11,6 +11,10 @@ import {
 } from "../../../lib/grailPassSubscription";
 import { getSellerFeeQuote } from "../../../lib/sellerFees";
 import { createSystemNotifications } from "../../../lib/serverNotifications";
+import {
+  normalizeOrderShippingAddress,
+  type OrderShippingAddress,
+} from "../../../lib/shippingAddresses";
 import { getShippingProfile } from "../../../lib/shippingProfiles";
 import { getTransactionTypeFromStripeCheckoutType } from "../../../lib/transactionCheckout";
 
@@ -35,6 +39,7 @@ type OrderInsert = {
   shipping_tracking_supported?: boolean;
   shipping_label_required?: boolean;
   shipping_buyer_acknowledged_at?: string | null;
+  shipping_to_address?: OrderShippingAddress | null;
   shipping_service?: string;
   shipping_status?: string;
   transfer_status: "not_ready";
@@ -69,6 +74,7 @@ type ExistingOrderRow = {
   stripe_payment_intent_id: string | null;
   stripe_charge_id: string | null;
   refund_status: string | null;
+  shipping_to_address?: OrderShippingAddress | null;
 };
 
 type CheckoutMetadata = Record<string, string>;
@@ -250,7 +256,31 @@ async function resolveStripePaymentData(
   return {
     paymentIntentId,
     latestChargeId,
+    resolvedSession,
   };
+}
+
+function getShippingAddressFromStripeSession(session: Stripe.Checkout.Session) {
+  const stripeShippingDetails = session.collected_information?.shipping_details;
+  const stripeShippingAddress = stripeShippingDetails?.address;
+  const stripeCustomerAddress = session.customer_details?.address;
+  const address = stripeShippingAddress || stripeCustomerAddress;
+
+  if (!address) {
+    return null;
+  }
+
+  return normalizeOrderShippingAddress({
+    name: stripeShippingDetails?.name || session.customer_details?.name || "",
+    street1: address.line1 || "",
+    street2: address.line2 || "",
+    city: address.city || "",
+    state: address.state || "",
+    zip: address.postal_code || "",
+    country: address.country || "",
+    phone: session.customer_details?.phone || "",
+    email: session.customer_details?.email || "",
+  });
 }
 
 async function refundReserveFeeIfNeeded(
@@ -710,10 +740,11 @@ async function handleCheckoutSessionCompleted(
   const buyerId = metadata.buyerId || session.client_reference_id || null;
   const totalAmount = Number(session.amount_total || 0) / 100;
   const subtotalAmount = Number(session.amount_subtotal || 0) / 100;
-  const { paymentIntentId, latestChargeId } = await resolveStripePaymentData(
+  const { paymentIntentId, latestChargeId, resolvedSession } = await resolveStripePaymentData(
     stripe,
     session,
   );
+  const shippingToAddress = getShippingAddressFromStripeSession(resolvedSession);
 
   if (sessionType === "auction_reserve_fee") {
     throw new Error("Reserve Commitment Fee sessions cannot enter sale handling.");
@@ -735,7 +766,7 @@ async function handleCheckoutSessionCompleted(
 
   const { data: existingOrder, error: existingOrderError } = await supabase
     .from("orders")
-    .select("id, stripe_payment_intent_id, stripe_charge_id, refund_status")
+    .select("id, stripe_payment_intent_id, stripe_charge_id, refund_status, shipping_to_address")
     .eq("stripe_session_id", session.id)
     .maybeSingle();
 
@@ -801,7 +832,7 @@ async function handleCheckoutSessionCompleted(
 
   if (existingOrder) {
     const existing = existingOrder as ExistingOrderRow;
-    const orderPaymentPatch: Record<string, string> = {};
+    const orderPaymentPatch: Record<string, unknown> = {};
 
     if (!existing.stripe_payment_intent_id) {
       orderPaymentPatch.stripe_payment_intent_id = paymentIntentId;
@@ -813,6 +844,10 @@ async function handleCheckoutSessionCompleted(
 
     if (!existing.refund_status) {
       orderPaymentPatch.refund_status = "none";
+    }
+
+    if (!existing.shipping_to_address && shippingToAddress) {
+      orderPaymentPatch.shipping_to_address = shippingToAddress;
     }
 
     if (Object.keys(orderPaymentPatch).length > 0) {
@@ -881,6 +916,7 @@ async function handleCheckoutSessionCompleted(
       latestChargeId: latestChargeId || null,
       orderId: existing.id,
       updatedPaymentFields: Object.keys(orderPaymentPatch),
+      shippingAddressSaved: Boolean(shippingToAddress),
     });
 
     if (isAuctionSale) {
@@ -908,6 +944,18 @@ async function handleCheckoutSessionCompleted(
   const shippingProfile = getShippingProfile(
     metadata.shippingProfileId || listing.shipping_profile_id,
   );
+
+  if (!shippingToAddress) {
+    console.error("Stripe webhook missing collected shipping address:", {
+      stripeSessionId: session.id,
+      listingId,
+      sellerId,
+      buyerId,
+      shippingAddressCollection: resolvedSession.shipping_address_collection || null,
+      customerEmailPresent: Boolean(resolvedSession.customer_details?.email),
+    });
+  }
+
   const sellerFeeQuote = await getSellerFeeQuote({
     supabase,
     sellerId,
@@ -944,6 +992,7 @@ async function handleCheckoutSessionCompleted(
         : shippingProfile.capabilities.labelGenerationSupported,
     shipping_buyer_acknowledged_at:
       metadata.shippingBuyerAcknowledged === "true" ? new Date().toISOString() : null,
+    shipping_to_address: shippingToAddress,
     shipping_service: metadata.shippingProfileLabel || shippingProfile.label,
     shipping_status: "pending",
     transfer_status: "not_ready",

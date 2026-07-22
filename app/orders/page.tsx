@@ -8,6 +8,11 @@ import CollectorMomentLayer from "../components/CollectorMomentLayer";
 import PageShell from "../components/PageShell";
 import type { CollectorMoment } from "../lib/collectorMoments";
 import { mockOrders } from "../lib/mockData";
+import {
+  formatOrderShippingAddress,
+  normalizeOrderShippingAddress,
+  type OrderShippingAddress,
+} from "../lib/shippingAddresses";
 import { getShippingProfile } from "../lib/shippingProfiles";
 
 type SupabaseOrderRow = {
@@ -27,6 +32,7 @@ type SupabaseOrderRow = {
   shipping_profile_id?: string | null;
   shipping_profile_label?: string | null;
   shipping_tracking_supported?: boolean | null;
+  shipping_to_address?: Record<string, unknown> | null;
   shippo_eta?: string | null;
   shippo_tracking_url?: string | null;
   delivered_at?: string | null;
@@ -74,6 +80,7 @@ type OrderView = {
   shippingProfileId?: string;
   shippingProfileLabel?: string;
   shippingTrackingSupported?: boolean;
+  shippingAddress?: OrderShippingAddress | null;
   estimatedDelivery?: string | null;
   shippoTrackingUrl?: string | null;
   deliveredAt?: string | null;
@@ -183,6 +190,7 @@ const mockOrderViews: OrderView[] = mockOrders.map((order) => ({
   inspectionCompletedAt: null,
   completedAt: null,
   refundStatus: "none",
+  shippingAddress: null,
 }));
 
 const disputeReasons = [
@@ -525,6 +533,7 @@ export default function OrdersPage() {
               shippingTrackingSupported:
                 order.shipping_tracking_supported ??
                 getShippingProfile(order.shipping_profile_id).capabilities.trackingSupported,
+              shippingAddress: normalizeOrderShippingAddress(order.shipping_to_address),
               estimatedDelivery: order.shippo_eta,
               shippoTrackingUrl: order.shippo_tracking_url,
               deliveredAt: order.delivered_at,
@@ -1211,6 +1220,9 @@ export default function OrdersPage() {
               ["opened", "under_review"].includes(order.disputeStatus || "");
             const showEvidenceUpload =
               canUploadEvidence && !collapsedEvidenceUploads[order.id];
+            const shippingAddressLines = formatOrderShippingAddress(
+              order.shippingAddress || null,
+            );
 
             return (
               <article key={order.id} className="order-row">
@@ -1281,6 +1293,16 @@ export default function OrdersPage() {
                     <span>
                       Shipping Method: {order.shippingProfileLabel || order.shippingService || "Pending"}
                     </span>
+                    {shippingAddressLines.length > 0 ? (
+                      <div className="order-shipping-address">
+                        <strong>Ship To</strong>
+                        {shippingAddressLines.map((line, index) => (
+                          <span key={`${line}-${index}`}>{line}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span>Shipping Address: Pending from Stripe Checkout</span>
+                    )}
                     <span>{order.carrier ? `Carrier: ${order.carrier}` : "Carrier pending"}</span>
                     <span>
                       {order.shippingService
@@ -1639,6 +1661,38 @@ const pageStyles = `
     font-weight: 900;
     letter-spacing: 0;
     text-transform: none;
+  }
+
+  .order-shipping-address {
+    border: 1px solid rgba(201,205,211,0.14);
+    border-radius: 10px;
+    background: rgba(8,8,10,0.62);
+    color: #C9CDD3;
+    padding: 8px 10px;
+    display: grid;
+    gap: 3px;
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: 800;
+  }
+
+  .order-shipping-address strong {
+    color: #E7DED0;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .order-detail-panel .order-shipping-address span {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    min-height: 0;
+    padding: 0;
+    display: block;
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: 800;
   }
 
   .evidence-upload {
