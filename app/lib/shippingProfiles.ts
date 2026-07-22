@@ -28,7 +28,7 @@ export type ShippingProfile = {
 };
 
 export type ShippingRateSettings = {
-  pweFlatRate: number | null;
+  pweFlatRate: number;
   pweMaxListingValue: number;
 };
 
@@ -38,7 +38,7 @@ export const shippingRateSettingKeys = {
 } as const satisfies Record<keyof ShippingRateSettings, string>;
 
 export const defaultShippingRateSettings = {
-  pweFlatRate: null,
+  pweFlatRate: 1.5,
   pweMaxListingValue: 20,
 } as const satisfies ShippingRateSettings;
 

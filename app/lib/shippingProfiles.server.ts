@@ -101,23 +101,6 @@ function parseRequiredSettingNumber(
   return fallback;
 }
 
-function parseOptionalSettingNumber(
-  value: boolean | string | number | null | undefined,
-  fallback: number | null,
-) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : fallback;
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number(value);
-
-    return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  return fallback;
-}
-
 function parseSettingString(value: boolean | string | number | null | undefined) {
   if (typeof value === "string") {
     return value.trim();
@@ -177,7 +160,7 @@ export async function loadShippingRateSettings(supabase: SupabaseClient) {
   }
 
   return {
-    pweFlatRate: parseOptionalSettingNumber(
+    pweFlatRate: parseRequiredSettingNumber(
       settingsByKey.get(shippingRateSettingKeys.pweFlatRate),
       defaultShippingRateSettings.pweFlatRate,
     ),
@@ -278,11 +261,7 @@ export async function getCheckoutShippingQuote({
   const profile = getShippingProfile(profileId);
 
   if (profile.id === "plain_white_envelope") {
-    if (
-      settings.pweFlatRate === null ||
-      !Number.isFinite(settings.pweFlatRate) ||
-      settings.pweFlatRate < 0
-    ) {
+    if (!Number.isFinite(settings.pweFlatRate) || settings.pweFlatRate < 0) {
       return {
         ok: false as const,
         error: "Shipping quote is temporarily unavailable.",

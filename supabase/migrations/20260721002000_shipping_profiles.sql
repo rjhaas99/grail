@@ -40,14 +40,14 @@ alter table public.listings
 
 create table if not exists public.marketplace_settings (
   key text primary key,
-  value jsonb,
+  value jsonb not null,
   updated_at timestamptz not null default now()
 );
 
 insert into public.marketplace_settings (key, value)
 values
-  ('shipping_pwe_flat_rate', null),
-  ('shipping_pwe_max_listing_value', '20.00')
+  ('shipping_pwe_flat_rate', '1.50'::jsonb),
+  ('shipping_pwe_max_listing_value', '20.00'::jsonb)
 on conflict (key) do nothing;
 
 create or replace function public.validate_listing_shipping_profile()
