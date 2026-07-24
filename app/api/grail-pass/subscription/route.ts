@@ -3,20 +3,28 @@ import {
   buildGrailPassPlansPayload,
   createServiceSupabaseClient,
   getAuthenticatedUser,
+  getGrailPassErrorResponse,
   getGrailPassMonthlyCreditAmount,
   getGrailPassSubscriptionForUser,
   getStoredGrailPassSubscription,
   getSubscriptionManageableState,
   listGrailPassBillingHistory,
+  logGrailPassDiagnostic,
 } from "../../../lib/grailPassSubscription";
 import { createStripeClient } from "../../../lib/stripeCustomers";
+import { getGrailPassRewardBoostConfig } from "../../../lib/grailPassRewards";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
+  logGrailPassDiagnostic("subscription.route_entered", request);
   const { user, error } = await getAuthenticatedUser(request);
 
   if (!user) {
+    logGrailPassDiagnostic("subscription.auth_failed", request, {
+      authenticatedUserFound: false,
+      failureBranch: "not_authenticated",
+    });
     return NextResponse.json(
       { error: error || "Sign in to view GRAIL Pass membership." },
       { status: 401 },
@@ -24,6 +32,9 @@ export async function GET(request: Request) {
   }
 
   try {
+    logGrailPassDiagnostic("subscription.authenticated", request, {
+      authenticatedUserFound: true,
+    });
     const supabase = createServiceSupabaseClient();
     const subscriptionRow = await getStoredGrailPassSubscription(supabase, user.id);
     const subscription = await getGrailPassSubscriptionForUser(supabase, user.id);
@@ -49,13 +60,28 @@ export async function GET(request: Request) {
       billingHistory,
       actions: getSubscriptionManageableState(subscriptionRow),
       monthlyCreditAmount: getGrailPassMonthlyCreditAmount(),
+      rewardBoost: getGrailPassRewardBoostConfig(),
     });
   } catch (loadError) {
-    console.error("GRAIL Pass subscription status error:", loadError);
+    const mappedError = getGrailPassErrorResponse(loadError);
+
+    console.error("GRAIL Pass subscription status error:", {
+      error: loadError,
+      failureBranch: mappedError.failureBranch,
+    });
+    logGrailPassDiagnostic("subscription.failed", request, {
+      authenticatedUserFound: true,
+      failureBranch: mappedError.failureBranch,
+    });
 
     return NextResponse.json(
-      { error: "GRAIL Pass subscription status could not be loaded." },
-      { status: 500 },
+      {
+        error:
+          mappedError.failureBranch === "unknown_failure"
+            ? "GRAIL Pass subscription status could not be loaded."
+            : mappedError.error,
+      },
+      { status: mappedError.failureBranch === "unknown_failure" ? 500 : mappedError.status },
     );
   }
 }

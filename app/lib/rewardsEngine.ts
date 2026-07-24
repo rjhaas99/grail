@@ -25,6 +25,11 @@ import {
 } from "./marketplaceEconomy";
 import { createSystemNotification } from "./serverNotifications";
 import { addCredit, type WalletLedgerEntry } from "./wallet";
+import {
+  getGrailPassRewardBoostConfig,
+  resolveGrailPassRewardBoostForUser,
+  type GrailPassRewardBoostResolution,
+} from "./grailPassRewards";
 
 export const rewardEventTypes = [
   "LIST_CARD",
@@ -72,6 +77,7 @@ export type ProcessRewardEventResult = {
     xpMultiplier: number;
     buyerRewardPercent: number | null;
     sellerRewardPercent: number | null;
+    grailPassRewardBoost: GrailPassRewardBoostResolution;
   };
   marketplace: {
     switches: MarketplaceSwitches;
@@ -123,7 +129,7 @@ export type ProcessRewardEventResult = {
     planned: string[];
   };
   future: {
-    grailPassBonusApplied: false;
+    grailPassBonusApplied: boolean;
     seasonalBonusApplied: false;
     treasureChestChance: number;
     challengeProgressApplied: false;
@@ -178,6 +184,9 @@ type WalletAwardPlan = {
   actualBuyerMultiplier: number | null;
   actualSellerMultiplier: number | null;
   walletMultiplierUsed: number;
+  grailPassActive: boolean;
+  grailPassBuyerBonusPercent: number | null;
+  grailPassSellerBonusPercent: number | null;
 };
 
 function isCompletedNonRefundedOrder(order: OrderRow) {
@@ -323,7 +332,29 @@ async function getMarketplaceContext(supabase: SupabaseClient) {
   };
 }
 
-function buildEconomySnapshot(level: number, tier: RewardTier | null) {
+const inactiveGrailPassRewardBoost: GrailPassRewardBoostResolution = {
+  active: false,
+  configured: getGrailPassRewardBoostConfig().configured,
+  buyerBonusPercent: 0,
+  sellerBonusPercent: 0,
+  membershipStatus: null,
+  membershipPlan: null,
+};
+
+function buildEconomySnapshot(
+  level: number,
+  tier: RewardTier | null,
+  grailPassRewardBoost: GrailPassRewardBoostResolution = inactiveGrailPassRewardBoost,
+) {
+  const buyerRewardPercent =
+    tier?.buyerRewardPercent !== undefined && tier?.buyerRewardPercent !== null
+      ? roundCurrency(tier.buyerRewardPercent + grailPassRewardBoost.buyerBonusPercent)
+      : grailPassRewardBoost.buyerBonusPercent || null;
+  const sellerRewardPercent =
+    tier?.sellerRewardPercent !== undefined && tier?.sellerRewardPercent !== null
+      ? roundCurrency(tier.sellerRewardPercent + grailPassRewardBoost.sellerBonusPercent)
+      : grailPassRewardBoost.sellerBonusPercent || null;
+
   return {
     currentRank: tier?.rankName || null,
     currentTier: tier,
@@ -334,14 +365,15 @@ function buildEconomySnapshot(level: number, tier: RewardTier | null) {
     sellerMultiplier: tier?.sellerMultiplier ?? 1,
     walletMultiplier: tier?.walletMultiplier ?? 1,
     xpMultiplier: tier?.xpMultiplier ?? 1,
-    buyerRewardPercent: tier?.buyerRewardPercent ?? null,
-    sellerRewardPercent: tier?.sellerRewardPercent ?? null,
+    buyerRewardPercent,
+    sellerRewardPercent,
+    grailPassRewardBoost,
     level,
   };
 }
 
 export async function getRewardEngineSnapshot(supabase: SupabaseClient, userId: string) {
-  const [rewardContext, marketplace, tiers] = await Promise.all([
+  const [rewardContext, marketplace, tiers, grailPassRewardBoost] = await Promise.all([
     getRewardContext(supabase, userId),
     getMarketplaceContext(supabase),
     getRewardTiers(supabase).catch((error) => {
@@ -351,8 +383,13 @@ export async function getRewardEngineSnapshot(supabase: SupabaseClient, userId: 
       });
       return [] as RewardTier[];
     }),
+    resolveGrailPassRewardBoostForUser(supabase, userId),
   ]);
-  const economy = buildEconomySnapshot(rewardContext.level, rewardContext.tier);
+  const economy = buildEconomySnapshot(
+    rewardContext.level,
+    rewardContext.tier,
+    grailPassRewardBoost,
+  );
   const nextTier =
     tiers
       .filter((tier) => tier.enabled && tier.minLevel > rewardContext.level)
@@ -365,6 +402,7 @@ export async function getRewardEngineSnapshot(supabase: SupabaseClient, userId: 
     tier: rewardContext.tier,
     nextTier,
     configured: rewardContext.configured,
+    grailPassRewardBoost,
     walletRewardsEnabled: marketplace.switches.walletRewardsEnabled,
     walletRewardsMessage: marketplace.switches.walletRewardsEnabled
       ? "Automatic GRAIL Credit rewards are active for completed eligible orders."
@@ -437,6 +475,7 @@ function calculateWalletRewardAmount({
   eventMultiplier,
   tierWalletMultiplier,
   eventWalletMultiplier,
+  grailPassBonusPercent,
 }: {
   salePrice: number;
   basePercent: number | null;
@@ -444,10 +483,12 @@ function calculateWalletRewardAmount({
   eventMultiplier: number;
   tierWalletMultiplier: number;
   eventWalletMultiplier: number;
+  grailPassBonusPercent: number;
 }) {
   const percent = Number(basePercent || 0);
+  const bonusPercent = Number(grailPassBonusPercent || 0);
 
-  if (!Number.isFinite(salePrice) || salePrice <= 0 || percent <= 0) {
+  if (!Number.isFinite(salePrice) || salePrice <= 0 || (percent <= 0 && bonusPercent <= 0)) {
     return {
       amount: 0,
       actualPercent: 0,
@@ -458,7 +499,10 @@ function calculateWalletRewardAmount({
 
   const actualMultiplier = roundCurrency(tierMultiplier * eventMultiplier);
   const walletMultiplierUsed = roundCurrency(tierWalletMultiplier * eventWalletMultiplier);
-  const actualPercent = roundCurrency(percent * actualMultiplier * walletMultiplierUsed);
+  const rankRewardPercent = roundCurrency(
+    Math.max(0, percent) * actualMultiplier * walletMultiplierUsed,
+  );
+  const actualPercent = roundCurrency(rankRewardPercent + Math.max(0, bonusPercent));
 
   return {
     amount: roundCurrency(salePrice * (actualPercent / 100)),
@@ -532,6 +576,9 @@ async function buildWalletAwardPlan({
       : marketplace.currentMultipliers.sellerMultiplier,
     tierWalletMultiplier: economy.walletMultiplier,
     eventWalletMultiplier: marketplace.currentMultipliers.walletMultiplier,
+    grailPassBonusPercent: isBuyer
+      ? economy.grailPassRewardBoost.buyerBonusPercent
+      : economy.grailPassRewardBoost.sellerBonusPercent,
   });
 
   if (reward.amount <= 0) {
@@ -558,6 +605,13 @@ async function buildWalletAwardPlan({
     actualBuyerMultiplier: isBuyer ? reward.actualMultiplier : null,
     actualSellerMultiplier: isBuyer ? null : reward.actualMultiplier,
     walletMultiplierUsed: reward.walletMultiplierUsed,
+    grailPassActive: economy.grailPassRewardBoost.active,
+    grailPassBuyerBonusPercent: isBuyer
+      ? economy.grailPassRewardBoost.buyerBonusPercent
+      : null,
+    grailPassSellerBonusPercent: isBuyer
+      ? null
+      : economy.grailPassRewardBoost.sellerBonusPercent,
   };
 }
 
@@ -834,7 +888,7 @@ async function recordRewardEvent({
     actual_buyer_multiplier: actualBuyerMultiplier,
     actual_seller_multiplier: actualSellerMultiplier,
     wallet_multiplier_used: walletMultiplierUsed,
-    grail_pass_active: false,
+    grail_pass_active: economy.grailPassRewardBoost.active,
     seasonal_event: null,
     treasure_chest_triggered: false,
     challenge_triggered: false,
@@ -872,9 +926,16 @@ export async function processRewardEvent({
     throw new Error("Reward event requires a reference id.");
   }
 
-  const rewardContext = await getRewardContext(supabase, userId);
-  const marketplace = await getMarketplaceContext(supabase);
-  const economy = buildEconomySnapshot(rewardContext.level, rewardContext.tier);
+  const [rewardContext, marketplace, grailPassRewardBoost] = await Promise.all([
+    getRewardContext(supabase, userId),
+    getMarketplaceContext(supabase),
+    resolveGrailPassRewardBoostForUser(supabase, userId),
+  ]);
+  const economy = buildEconomySnapshot(
+    rewardContext.level,
+    rewardContext.tier,
+    grailPassRewardBoost,
+  );
   const xpMultiplier = rewardContext.tier?.xpMultiplier || 1;
   const awardPlans = await buildXpAwardPlans({
     supabase,
@@ -1118,7 +1179,11 @@ export async function processRewardEvent({
       ],
     },
     future: {
-      grailPassBonusApplied: false,
+      grailPassBonusApplied: Boolean(
+        walletAwardPlan?.grailPassActive &&
+          ((actualBuyerPercent !== null && walletAwardPlan.grailPassBuyerBonusPercent) ||
+            (actualSellerPercent !== null && walletAwardPlan.grailPassSellerBonusPercent)),
+      ),
       seasonalBonusApplied: false,
       treasureChestChance: 0,
       challengeProgressApplied: false,

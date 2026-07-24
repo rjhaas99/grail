@@ -1,4 +1,7 @@
-export type SavedItemType = "listing";
+import { resolveMarketplacePresentationState } from "./marketplacePresentationState";
+import { getPublicCollectorHref } from "./publicCollectorLinks";
+
+export type SavedItemType = "listing" | "collection";
 
 export type ListingImageRow = {
   image_url: string | null;
@@ -45,6 +48,13 @@ export type WatchlistRow = {
   listing?: SavedListingRow | SavedListingRow[] | null;
 };
 
+export type CollectionFollowRow = {
+  id: string;
+  user_id: string;
+  collection_owner_id: string;
+  created_at: string | null;
+};
+
 export type SavedSellerProfile = {
   id: string;
   full_name: string | null;
@@ -53,7 +63,7 @@ export type SavedSellerProfile = {
 
 export type SavedListingItem = {
   id: string;
-  itemType: SavedItemType;
+  itemType: "listing";
   savedAt: string | null;
   listingId: string;
   title: string;
@@ -75,6 +85,19 @@ export type SavedListingItem = {
   isOwner: boolean;
   auctionEndsAt: string | null;
   auctionBidCount: number;
+};
+
+export type SavedCollectionItem = {
+  id: string;
+  itemType: "collection";
+  savedAt: string | null;
+  collectionOwnerId: string;
+  collectorName: string;
+  collectionTitle: string;
+  route: string;
+  cardCount: number;
+  collectionValue: number;
+  latestAddedAt: string | null;
 };
 
 export function formatSavedCurrency(value: number) {
@@ -103,13 +126,7 @@ function getListingFromWatchRow(row: WatchlistRow) {
 }
 
 function getSellerHref(profile: SavedSellerProfile | undefined, sellerId: string | null) {
-  const username = profile?.username?.replace(/^@/, "").trim();
-
-  if (username) {
-    return `/collections/${encodeURIComponent(username)}`;
-  }
-
-  return `/collections/${sellerId || ""}`;
+  return getPublicCollectorHref(profile, sellerId);
 }
 
 function getSellerName(profile: SavedSellerProfile | undefined) {
@@ -152,14 +169,14 @@ function getSavedListingImage(listing: SavedListingRow) {
 function getStatus(listing: SavedListingRow, nowMs: number) {
   const listingStatus = listing.status?.toLowerCase() || "";
   const auctionStatus = listing.auction_status?.toLowerCase() || "";
-  const isAuction = listing.sale_format === "auction";
+  const marketplaceState = resolveMarketplacePresentationState(listing, nowMs);
 
-  if (listingStatus === "sold" || auctionStatus === "paid") {
+  if (marketplaceState === "sold") {
     return { label: "Sold", tone: "sold" as const };
   }
 
-  if (isAuction) {
-    if (auctionStatus === "active" && listing.auction_ends_at) {
+  if (marketplaceState === "active_auction") {
+    if (listing.auction_ends_at) {
       const remaining = new Date(listing.auction_ends_at).getTime() - nowMs;
 
       if (remaining > 0 && remaining <= 60 * 60 * 1000) {
@@ -170,32 +187,22 @@ function getStatus(listing: SavedListingRow, nowMs: number) {
         return { label: "Auction Live", tone: "auction" as const };
       }
     }
+  }
 
-    if (auctionStatus === "awaiting_payment") {
-      return { label: "Payment Pending", tone: "pending" as const };
-    }
+  if (auctionStatus === "awaiting_payment") {
+    return { label: "Payment Pending", tone: "pending" as const };
+  }
 
-    if (auctionStatus === "finalizing") {
-      return { label: "Finalizing Auction", tone: "pending" as const };
-    }
+  if (auctionStatus === "finalizing") {
+    return { label: "Finalizing Auction", tone: "pending" as const };
+  }
 
-    if (auctionStatus === "payment_expired") {
-      return { label: "Payment Expired", tone: "unavailable" as const };
-    }
-
-    return { label: "Auction Ended", tone: "unavailable" as const };
+  if (marketplaceState === "collection_offer_only") {
+    return { label: "Offer Only", tone: "pending" as const };
   }
 
   if (listingStatus === "active") {
     return { label: "Active", tone: "active" as const };
-  }
-
-  if (
-    listingStatus === "collection" ||
-    listing.is_collection_card ||
-    listing.is_public_collection
-  ) {
-    return { label: "Collection", tone: "pending" as const };
   }
 
   return { label: "Unavailable", tone: "unavailable" as const };
@@ -220,7 +227,10 @@ export function normalizeSavedListingItem({
     return null;
   }
 
-  const isAuction = listing.sale_format === "auction";
+  const marketplaceState = resolveMarketplacePresentationState(listing, nowMs);
+  const isAuction = marketplaceState === "active_auction";
+  const isCollectionOnly = marketplaceState === "collection_offer_only";
+  const isForSale = marketplaceState === "for_sale";
   const isOwner = Boolean(currentUserId && listing.seller_id === currentUserId);
   const title = getSavedListingTitle(listing);
   const condition = getConditionDisplay(listing);
@@ -228,7 +238,11 @@ export function normalizeSavedListingItem({
   const currentBid = Number(listing.auction_current_bid || 0);
   const startingBid = Number(listing.auction_starting_bid || 0);
   const fixedPrice = Number(listing.price || 0);
-  const displayPrice = isAuction ? currentBid || startingBid : fixedPrice;
+  const displayPrice = isAuction
+    ? currentBid || startingBid
+    : isCollectionOnly
+      ? 0
+      : fixedPrice;
   const marketValue =
     Number(listing.sportscardspro_estimated_value || 0) ||
     Number(listing.estimated_value || 0);
@@ -257,7 +271,9 @@ export function normalizeSavedListingItem({
       ? currentBid
         ? `Current Bid ${formatSavedCurrencyWithCents(currentBid)}`
         : `Starting Bid ${formatSavedCurrencyWithCents(startingBid)}`
-      : fixedPrice
+      : isCollectionOnly
+        ? "Offer Only"
+        : fixedPrice
         ? formatSavedCurrency(fixedPrice)
         : "Price not listed",
     marketValue,
@@ -267,11 +283,7 @@ export function normalizeSavedListingItem({
     imageUrl: getSavedListingImage(listing),
     watchCount,
     isAuction,
-    isBuyable:
-      !isOwner &&
-      !isAuction &&
-      listing.status === "active" &&
-      fixedPrice > 0,
+    isBuyable: !isOwner && isForSale && fixedPrice > 0,
     isBiddable: !isOwner && isAuctionLive,
     isOwner,
     auctionEndsAt,

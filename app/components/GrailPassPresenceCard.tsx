@@ -36,7 +36,7 @@ const defaultItems = [
 export default function GrailPassPresenceCard({
   eyebrow = "GRAIL Pass",
   title = "Premium collector experience.",
-  description = "GRAIL Pass will bring future membership benefits into identity, wallet, events, and marketplace presentation.",
+  description = "GRAIL Pass brings membership benefits into rewards, events, collector identity, and convenience tools.",
   items,
   href = "/grail-pass",
   ctaLabel = "View GRAIL Pass",

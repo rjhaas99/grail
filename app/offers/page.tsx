@@ -1,13 +1,31 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "../../lib/supabase";
 import PageShell from "../components/PageShell";
 
 type OfferRole = "buyer" | "seller";
-type OfferStatus = "pending" | "accepted" | "declined" | "countered" | "withdrawn" | "expired" | "completed";
-type OfferTab = "received" | "sent" | "accepted" | "countered" | "declined" | "expired" | "completed";
+type OfferStatus =
+  | "pending"
+  | "accepted"
+  | "declined"
+  | "countered"
+  | "withdrawn"
+  | "expired"
+  | "completed";
+type OfferTab =
+  | "received"
+  | "sent"
+  | "accepted"
+  | "countered"
+  | "declined"
+  | "expired"
+  | "completed";
+type OfferViewMode = "grid" | "compact";
+type OfferFilter = "raw" | "graded" | "sports" | "tcg" | "hot";
+type OfferSort = "recently_updated" | "newest" | "oldest" | "highest_offer" | "lowest_offer";
 
 type OfferView = {
   id: string;
@@ -16,8 +34,25 @@ type OfferView = {
   cardHref: string;
   buyerName: string;
   sellerName: string;
+  buyerHref?: string;
+  sellerHref?: string;
   amount: number;
   askingPrice: number;
+  minimumOffer?: number;
+  imageUrl?: string | null;
+  player?: string;
+  year?: string;
+  brand?: string;
+  cardNumber?: string;
+  category?: string;
+  cardType?: string;
+  grader?: string;
+  grade?: string;
+  condition?: string;
+  watchCount?: number;
+  isHot?: boolean;
+  isGraded?: boolean;
+  isRaw?: boolean;
   message: string | null;
   status: OfferStatus;
   statusLabel: string;
@@ -31,6 +66,8 @@ type OfferView = {
   canAcceptCounter: boolean;
   canDeclineCounter: boolean;
   canCheckout: boolean;
+  orderId?: string | null;
+  orderHref?: string;
   shippingProfileId?: string;
   shippingProfileLabel?: string;
   requiresPweAcknowledgement?: boolean;
@@ -45,6 +82,26 @@ const offerTabs: Array<{ id: OfferTab; label: string }> = [
   { id: "expired", label: "Expired" },
   { id: "completed", label: "Completed" },
 ];
+
+const offerFilters: Array<{ id: OfferFilter; label: string }> = [
+  { id: "raw", label: "Raw" },
+  { id: "graded", label: "Graded" },
+  { id: "sports", label: "Sports" },
+  { id: "tcg", label: "TCG" },
+  { id: "hot", label: "Hot" },
+];
+
+const offerSortOptions: Array<{ id: OfferSort; label: string }> = [
+  { id: "recently_updated", label: "Recently Updated" },
+  { id: "newest", label: "Newest" },
+  { id: "oldest", label: "Oldest" },
+  { id: "highest_offer", label: "Highest Offer" },
+  { id: "lowest_offer", label: "Lowest Offer" },
+];
+
+const offerViewPreferenceKey = "grail-offers-view";
+const gridPageSize = 18;
+const compactPageSize = 36;
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -66,6 +123,16 @@ function formatDate(value?: string | null) {
   });
 }
 
+function getOfferViewPreference(): OfferViewMode {
+  if (typeof window === "undefined") {
+    return "grid";
+  }
+
+  return window.localStorage.getItem(offerViewPreferenceKey) === "compact"
+    ? "compact"
+    : "grid";
+}
+
 function getTabMatch(offer: OfferView, activeTab: OfferTab) {
   if (activeTab === "received") {
     return offer.role === "seller" && offer.status === "pending";
@@ -85,50 +152,124 @@ function getTabMatch(offer: OfferView, activeTab: OfferTab) {
 function getEmptyCopy(tab: OfferTab) {
   if (tab === "received") {
     return {
-      title: "No received offers.",
-      body: "Incoming buyer offers will appear here when collectors make real offers on your listings.",
+      title: "No Received Offers",
+      body: "Incoming buyer offers will appear here when collectors negotiate on your listings.",
     };
   }
 
   if (tab === "sent") {
     return {
-      title: "No sent offers.",
-      body: "Offers you send to sellers will appear here.",
+      title: "No Sent Offers",
+      body: "Offers you send to sellers will appear here while they wait for a response.",
     };
   }
 
   if (tab === "accepted") {
     return {
-      title: "No accepted offers.",
-      body: "Accepted offers awaiting payment will appear here.",
+      title: "No Accepted Offers",
+      body: "Accepted offers awaiting checkout or order creation will appear here.",
     };
   }
 
   if (tab === "countered") {
     return {
-      title: "No counter offers.",
-      body: "Counter offers will appear here when a seller negotiates the amount.",
+      title: "No Countered Offers",
+      body: "Counter offers will appear here when a negotiation changes price.",
     };
   }
 
   if (tab === "completed") {
     return {
-      title: "No completed offers.",
+      title: "No Completed Offers",
       body: "Paid accepted offers move here after checkout creates an order.",
     };
   }
 
   if (tab === "expired") {
     return {
-      title: "No expired offers.",
-      body: "Expired offer transactions will appear here.",
+      title: "No Expired Offers",
+      body: "Expired negotiation windows will appear here.",
     };
   }
 
   return {
-    title: "No declined offers.",
-    body: "Declined and withdrawn offers will appear here.",
+    title: "No Declined Offers",
+    body: "Declined and withdrawn offer negotiations will appear here.",
   };
+}
+
+function getDisplayStatus(offer: OfferView) {
+  if (offer.status === "pending" && offer.role === "seller") {
+    return "Received";
+  }
+
+  if (offer.status === "pending" && offer.role === "buyer") {
+    return "Sent";
+  }
+
+  if (offer.status === "withdrawn") {
+    return "Withdrawn";
+  }
+
+  return offer.statusLabel;
+}
+
+function getStatusClassName(offer: OfferView) {
+  if (offer.status === "pending" && offer.role === "seller") {
+    return "received";
+  }
+
+  if (offer.status === "pending" && offer.role === "buyer") {
+    return "sent";
+  }
+
+  return offer.status;
+}
+
+function getCardMeta(offer: OfferView) {
+  return [offer.year, offer.brand, offer.cardNumber].filter(Boolean).join(" · ");
+}
+
+function getRelationshipLabel(offer: OfferView) {
+  return offer.role === "seller"
+    ? `Buyer ${offer.buyerName}`
+    : `Seller ${offer.sellerName}`;
+}
+
+function getCounterpartyName(offer: OfferView) {
+  return offer.role === "seller" ? offer.buyerName : offer.sellerName;
+}
+
+function getCounterpartyHref(offer: OfferView) {
+  return offer.role === "seller" ? offer.buyerHref : offer.sellerHref;
+}
+
+function renderCounterpartyLink(offer: OfferView, label = getCounterpartyName(offer)) {
+  const href = getCounterpartyHref(offer);
+
+  return href ? (
+    <Link className="offer-collector-link" href={href}>
+      {label}
+    </Link>
+  ) : (
+    <span>{label}</span>
+  );
+}
+
+function isSportsOffer(offer: OfferView) {
+  const value = `${offer.category || ""} ${offer.cardTitle}`.toLowerCase();
+
+  return ["sport", "baseball", "basketball", "football", "hockey", "soccer"].some((term) =>
+    value.includes(term),
+  );
+}
+
+function isTcgOffer(offer: OfferView) {
+  const value = `${offer.category || ""} ${offer.cardTitle}`.toLowerCase();
+
+  return ["tcg", "pokemon", "pokémon", "magic", "yugioh", "yu-gi-oh"].some((term) =>
+    value.includes(term),
+  );
 }
 
 export default function OffersPage() {
@@ -140,6 +281,11 @@ export default function OffersPage() {
   const [counterAmount, setCounterAmount] = useState("");
   const [busyOfferId, setBusyOfferId] = useState("");
   const [pweAcknowledgements, setPweAcknowledgements] = useState<Record<string, boolean>>({});
+  const [viewMode, setViewMode] = useState<OfferViewMode>(() => getOfferViewPreference());
+  const [searchTerm, setSearchTerm] = useState("");
+  const [activeFilters, setActiveFilters] = useState<OfferFilter[]>([]);
+  const [sortMode, setSortMode] = useState<OfferSort>("recently_updated");
+  const [page, setPage] = useState(1);
 
   const loadOffers = useCallback(async () => {
     setIsLoading(true);
@@ -191,25 +337,149 @@ export default function OffersPage() {
     };
   }, [loadOffers]);
 
+  useEffect(() => {
+    window.localStorage.setItem(offerViewPreferenceKey, viewMode);
+  }, [viewMode]);
+
   const tabCounts = useMemo(() => {
-    return offerTabs.reduce<Record<OfferTab, number>>((counts, tab) => {
-      counts[tab.id] = offers.filter((offer) => getTabMatch(offer, tab.id)).length;
-      return counts;
-    }, {
-      received: 0,
-      sent: 0,
-      accepted: 0,
-      countered: 0,
-      declined: 0,
-      expired: 0,
-      completed: 0,
-    });
+    return offerTabs.reduce<Record<OfferTab, number>>(
+      (counts, tab) => {
+        counts[tab.id] = offers.filter((offer) => getTabMatch(offer, tab.id)).length;
+        return counts;
+      },
+      {
+        received: 0,
+        sent: 0,
+        accepted: 0,
+        countered: 0,
+        declined: 0,
+        expired: 0,
+        completed: 0,
+      },
+    );
   }, [offers]);
 
-  const visibleOffers = useMemo(
-    () => offers.filter((offer) => getTabMatch(offer, activeTab)),
-    [activeTab, offers],
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const pageSize = viewMode === "compact" ? compactPageSize : gridPageSize;
+
+  const getOfferSearchText = useCallback((offer: OfferView) => {
+    return [
+      offer.cardTitle,
+      offer.player,
+      offer.buyerName,
+      offer.sellerName,
+      offer.amount,
+      offer.year,
+      offer.brand,
+      offer.cardNumber,
+      offer.category,
+      offer.statusLabel,
+    ]
+      .join(" ")
+      .toLowerCase();
+  }, []);
+
+  const matchesFilters = useCallback(
+    (offer: OfferView) => {
+      if (activeFilters.length === 0) {
+        return true;
+      }
+
+      return activeFilters.every((filter) => {
+        if (filter === "raw") return Boolean(offer.isRaw);
+        if (filter === "graded") return Boolean(offer.isGraded);
+        if (filter === "sports") return isSportsOffer(offer);
+        if (filter === "tcg") return isTcgOffer(offer);
+        if (filter === "hot") return Boolean(offer.isHot || Number(offer.watchCount || 0) >= 15);
+        return true;
+      });
+    },
+    [activeFilters],
   );
+
+  const sortOffers = useCallback(
+    (items: OfferView[]) => {
+      return items.slice().sort((first, second) => {
+        if (sortMode === "highest_offer") {
+          return second.amount - first.amount;
+        }
+
+        if (sortMode === "lowest_offer") {
+          return first.amount - second.amount;
+        }
+
+        const firstTime = new Date(first.createdAt || 0).getTime();
+        const secondTime = new Date(second.createdAt || 0).getTime();
+
+        return sortMode === "oldest" ? firstTime - secondTime : secondTime - firstTime;
+      });
+    },
+    [sortMode],
+  );
+
+  const visibleOffers = useMemo(() => {
+    const matchingOffers = offers.filter((offer) => {
+      if (!getTabMatch(offer, activeTab)) {
+        return false;
+      }
+
+      if (!matchesFilters(offer)) {
+        return false;
+      }
+
+      if (!normalizedSearch) {
+        return true;
+      }
+
+      return getOfferSearchText(offer).includes(normalizedSearch);
+    });
+
+    return sortOffers(matchingOffers);
+  }, [
+    activeTab,
+    getOfferSearchText,
+    matchesFilters,
+    normalizedSearch,
+    offers,
+    sortOffers,
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(visibleOffers.length / pageSize));
+  const paginatedOffers = visibleOffers.slice((page - 1) * pageSize, page * pageSize);
+  const emptyCopy = getEmptyCopy(activeTab);
+
+  function resetContentState() {
+    setPage(1);
+  }
+
+  function selectTab(tab: OfferTab) {
+    setActiveTab(tab);
+    resetContentState();
+  }
+
+  function updateSearch(value: string) {
+    setSearchTerm(value);
+    resetContentState();
+  }
+
+  function updateViewMode(mode: OfferViewMode) {
+    setViewMode(mode);
+    resetContentState();
+  }
+
+  function updateSortMode(value: OfferSort) {
+    setSortMode(value);
+    resetContentState();
+  }
+
+  function toggleFilter(filter: OfferFilter) {
+    setActiveFilters((currentFilters) =>
+      currentFilters.includes(filter)
+        ? currentFilters.filter((currentFilter) => currentFilter !== filter)
+        : [...currentFilters, filter],
+    );
+    resetContentState();
+  }
 
   async function updateOffer(offerId: string, action: string, amount?: number) {
     setBusyOfferId(offerId);
@@ -320,7 +590,359 @@ export default function OffersPage() {
     void updateOffer(offerId, "counter", amount);
   }
 
-  const emptyCopy = getEmptyCopy(activeTab);
+  function renderOfferImage(offer: OfferView, variant: "grid" | "compact") {
+    const size = variant === "grid" ? { width: 172, height: 230 } : { width: 54, height: 72 };
+
+    return (
+      <div className={`offer-image offer-image-${variant}`}>
+        {offer.imageUrl ? (
+          <Image
+            src={offer.imageUrl}
+            alt={offer.cardTitle}
+            width={size.width}
+            height={size.height}
+            unoptimized
+          />
+        ) : (
+          <div aria-hidden="true" className="offer-image-fallback">
+            <span />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderStatusPill(offer: OfferView) {
+    return (
+      <strong className={`status-pill status-${getStatusClassName(offer)}`}>
+        {getDisplayStatus(offer)}
+      </strong>
+    );
+  }
+
+  function renderOfferActions(offer: OfferView) {
+    const actions: ReactNode[] = [];
+
+    if (offer.status === "pending" && offer.role === "seller") {
+      if (offer.canAccept) {
+        actions.push(
+          <button
+            key="accept"
+            type="button"
+            disabled={busyOfferId === offer.id}
+            onClick={() => updateOffer(offer.id, "accept")}
+          >
+            Accept
+          </button>,
+        );
+      }
+      if (offer.canCounter) {
+        actions.push(
+          <button
+            key="counter"
+            type="button"
+            disabled={busyOfferId === offer.id}
+            onClick={() => {
+              setCounterOfferId(counterOfferId === offer.id ? "" : offer.id);
+              setCounterAmount(String(offer.amount || ""));
+            }}
+          >
+            Counter
+          </button>,
+        );
+      }
+      if (offer.canDecline) {
+        actions.push(
+          <button
+            key="decline"
+            type="button"
+            disabled={busyOfferId === offer.id}
+            onClick={() => updateOffer(offer.id, "decline")}
+          >
+            Decline
+          </button>,
+        );
+      }
+      actions.push(<Link key="message" href="/messages">Message</Link>);
+      actions.push(<Link key="view" href={offer.cardHref}>View Card</Link>);
+    } else if (offer.status === "pending" && offer.role === "buyer") {
+      actions.push(<Link key="view" href={offer.cardHref}>View</Link>);
+      if (offer.canWithdraw) {
+        actions.push(
+          <button
+            key="withdraw"
+            type="button"
+            disabled={busyOfferId === offer.id}
+            onClick={() => updateOffer(offer.id, "withdraw")}
+          >
+            Withdraw
+          </button>,
+        );
+      }
+      actions.push(<Link key="message" href="/messages">Message</Link>);
+    } else if (offer.status === "countered") {
+      if (offer.canAcceptCounter) {
+        actions.push(
+          <button
+            key="accept-counter"
+            type="button"
+            disabled={busyOfferId === offer.id}
+            onClick={() => updateOffer(offer.id, "accept_counter")}
+          >
+            Accept Counter
+          </button>,
+        );
+      }
+      if (offer.canDeclineCounter) {
+        actions.push(
+          <button
+            key="decline-counter"
+            type="button"
+            disabled={busyOfferId === offer.id}
+            onClick={() => updateOffer(offer.id, "decline_counter")}
+          >
+            Decline Counter
+          </button>,
+        );
+      }
+      actions.push(<Link key="message" href="/messages">Message</Link>);
+      actions.push(<Link key="view" href={offer.cardHref}>View Card</Link>);
+    } else if (offer.status === "accepted") {
+      if (offer.canCheckout) {
+        actions.push(
+          <button
+            key="checkout"
+            type="button"
+            disabled={busyOfferId === offer.id}
+            onClick={() => startCheckout(offer)}
+          >
+            {busyOfferId === offer.id ? "Opening..." : "Checkout"}
+          </button>,
+        );
+      }
+      if (offer.orderId) {
+        actions.push(<Link key="order" href={offer.orderHref || "/orders"}>View Order</Link>);
+      }
+      actions.push(<Link key="view" href={offer.cardHref}>View Card</Link>);
+    } else if (offer.status === "completed") {
+      actions.push(<Link key="order" href={offer.orderHref || "/orders"}>View Order</Link>);
+      actions.push(<Link key="view" href={offer.cardHref}>View Card</Link>);
+    } else {
+      actions.push(<Link key="view" href={offer.cardHref}>View Card</Link>);
+    }
+
+    return <div className="offer-actions">{actions}</div>;
+  }
+
+  function renderOfferFooter(offer: OfferView) {
+    return (
+      <>
+        {offer.shippingProfileLabel ? (
+          <p className="offer-shipping-note">Shipping: {offer.shippingProfileLabel}</p>
+        ) : null}
+
+        {offer.canCheckout && offer.requiresPweAcknowledgement ? (
+          <label className="pwe-acknowledgement">
+            <input
+              type="checkbox"
+              checked={Boolean(pweAcknowledgements[offer.id])}
+              onChange={(event) =>
+                setPweAcknowledgements((items) => ({
+                  ...items,
+                  [offer.id]: event.target.checked,
+                }))
+              }
+            />
+            <span>I understand this shipment will not include tracking.</span>
+          </label>
+        ) : null}
+
+        {counterOfferId === offer.id ? (
+          <div className="counter-box">
+            <label htmlFor={`counter-${offer.id}`}>Counter amount</label>
+            <input
+              id={`counter-${offer.id}`}
+              type="number"
+              min="1"
+              step="0.01"
+              value={counterAmount}
+              onChange={(event) => setCounterAmount(event.target.value)}
+            />
+            <button
+              type="button"
+              disabled={busyOfferId === offer.id}
+              onClick={() => submitCounter(offer.id)}
+            >
+              Send Counter
+            </button>
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
+  function renderEmptyState() {
+    return (
+      <article className="empty-offers">
+        <div className="empty-offer-mark" aria-hidden="true" />
+        <h2>{emptyCopy.title}</h2>
+        <p>{emptyCopy.body}</p>
+      </article>
+    );
+  }
+
+  function renderGrid() {
+    if (isLoading) {
+      return (
+        <article className="empty-offers">
+          <div className="empty-offer-mark" aria-hidden="true" />
+          <h2>Loading offers</h2>
+          <p>Checking your real marketplace negotiations.</p>
+        </article>
+      );
+    }
+
+    if (visibleOffers.length === 0) {
+      return renderEmptyState();
+    }
+
+    return (
+      <section className="offers-grid" aria-label="Offer negotiations grid">
+        {paginatedOffers.map((offer) => (
+          <article key={offer.id} className="offer-negotiation-card">
+            <div className="offer-card-top">
+              {renderStatusPill(offer)}
+              <span>{offer.role === "seller" ? "Received Offer" : "Sent Offer"}</span>
+            </div>
+            <Link href={offer.cardHref} className="offer-image-link">
+              {renderOfferImage(offer, "grid")}
+            </Link>
+            <div className="offer-card-copy">
+              <h2>{offer.cardTitle}</h2>
+              {getCardMeta(offer) ? <p>{getCardMeta(offer)}</p> : null}
+              {renderCounterpartyLink(offer, getRelationshipLabel(offer))}
+            </div>
+            <div className="offer-metric-grid">
+              <div>
+                <span>Offer Amount</span>
+                <strong>{formatCurrency(offer.amount)}</strong>
+              </div>
+              <div>
+                <span>Minimum Offer</span>
+                <strong>
+                  {Number(offer.minimumOffer || 0) > 0
+                    ? formatCurrency(Number(offer.minimumOffer))
+                    : "Not set"}
+                </strong>
+              </div>
+              <div>
+                <span>Asking Price</span>
+                <strong>
+                  {offer.askingPrice > 0 ? formatCurrency(offer.askingPrice) : "Unavailable"}
+                </strong>
+              </div>
+              <div>
+                <span>Time Remaining</span>
+                <strong>{offer.timeRemaining || "No expiration set"}</strong>
+              </div>
+            </div>
+            <div className="offer-signal-row">
+              <span>{Number(offer.watchCount || 0)} watchers</span>
+              <span>{formatDate(offer.createdAt)}</span>
+              {offer.message ? <span>Includes message</span> : null}
+            </div>
+            {offer.message ? <p className="offer-message">“{offer.message}”</p> : null}
+            {renderOfferActions(offer)}
+            {renderOfferFooter(offer)}
+          </article>
+        ))}
+      </section>
+    );
+  }
+
+  function renderCompact() {
+    if (isLoading) {
+      return (
+        <article className="empty-offers">
+          <div className="empty-offer-mark" aria-hidden="true" />
+          <h2>Loading offers</h2>
+          <p>Checking your real marketplace negotiations.</p>
+        </article>
+      );
+    }
+
+    if (visibleOffers.length === 0) {
+      return renderEmptyState();
+    }
+
+    return (
+      <section className="offers-compact" aria-label="Offer negotiations compact view">
+        <div className="offers-compact-header">
+          <span>Card</span>
+          <span>With</span>
+          <span>Offer</span>
+          <span>Minimum</span>
+          <span>Status</span>
+          <span>Time</span>
+          <span>Updated</span>
+          <span>Actions</span>
+        </div>
+        {paginatedOffers.map((offer) => (
+          <article key={offer.id} className="offers-compact-row">
+            <div className="compact-card-cell">
+              {renderOfferImage(offer, "compact")}
+              <div>
+                <strong>{offer.cardTitle}</strong>
+                <span>{getCardMeta(offer) || offer.player || offer.category || "GRAIL card"}</span>
+              </div>
+            </div>
+            <span>{renderCounterpartyLink(offer)}</span>
+            <strong>{formatCurrency(offer.amount)}</strong>
+            <span>
+              {Number(offer.minimumOffer || 0) > 0
+                ? formatCurrency(Number(offer.minimumOffer))
+                : "Not set"}
+            </span>
+            {renderStatusPill(offer)}
+            <span>{offer.timeRemaining || "No expiration set"}</span>
+            <span>{formatDate(offer.createdAt)}</span>
+            <div>
+              {renderOfferActions(offer)}
+              {renderOfferFooter(offer)}
+            </div>
+          </article>
+        ))}
+      </section>
+    );
+  }
+
+  function renderPagination() {
+    if (isLoading || totalPages <= 1) {
+      return null;
+    }
+
+    return (
+      <div className="offers-pagination">
+        <button
+          type="button"
+          disabled={page <= 1}
+          onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))}
+        >
+          Previous
+        </button>
+        <span>
+          Page {page} of {totalPages}
+        </span>
+        <button
+          type="button"
+          disabled={page >= totalPages}
+          onClick={() => setPage((currentPage) => Math.min(totalPages, currentPage + 1))}
+        >
+          Next
+        </button>
+      </div>
+    );
+  }
 
   return (
     <PageShell
@@ -329,192 +951,108 @@ export default function OffersPage() {
       shellStyle={{ padding: "8px 0 80px" }}
       styles={pageStyles}
     >
-        <section className="offers-hero">
-          <div>
-            <span>Marketplace Offers</span>
-            <h1>Offers</h1>
-            <p>Real buyer and seller negotiations connected to GRAIL checkout.</p>
-          </div>
-          <Link href="/browse">Browse Cards</Link>
-        </section>
+      <section className="offers-hero panel">
+        <div>
+          <span>Marketplace Offers</span>
+          <h1>Offers</h1>
+          <p>Real buyer and seller negotiations connected to GRAIL checkout.</p>
+        </div>
+        <Link href="/browse">Browse Cards</Link>
+      </section>
 
-        <section className="offers-tabs" aria-label="Offer views">
-          {offerTabs.map((tab) => (
+      <section className="offer-summary-row" aria-label="Quick offer summary">
+        {offerTabs.map((tab) => (
+          <article key={tab.id} className="offer-summary-stat">
+            <span>{tab.label}</span>
+            <strong>{tabCounts[tab.id]}</strong>
+          </article>
+        ))}
+      </section>
+
+      <section className="offers-nav panel" aria-label="Offer negotiation views">
+        {offerTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={activeTab === tab.id ? "is-active" : ""}
+            onClick={() => selectTab(tab.id)}
+          >
+            {tab.label}
+            <span>{tabCounts[tab.id]}</span>
+          </button>
+        ))}
+      </section>
+
+      <section className="offers-workspace panel">
+        <div className="offers-toolbar">
+          <label className="offers-search">
+            <span>Search Offers</span>
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(event) => updateSearch(event.target.value)}
+              placeholder="Search player, card, buyer, seller, amount, year, brand..."
+            />
+          </label>
+          <div className="view-toggle" aria-label="Offer view">
             <button
-              key={tab.id}
               type="button"
-              className={activeTab === tab.id ? "active" : ""}
-              onClick={() => setActiveTab(tab.id)}
+              className={viewMode === "grid" ? "is-active" : ""}
+              onClick={() => updateViewMode("grid")}
             >
-              <span>{tab.label}</span>
-              <strong>{tabCounts[tab.id]}</strong>
+              Grid
+            </button>
+            <button
+              type="button"
+              className={viewMode === "compact" ? "is-active" : ""}
+              onClick={() => updateViewMode("compact")}
+            >
+              Compact
+            </button>
+          </div>
+          <label className="offers-sort">
+            <span>Sort</span>
+            <select
+              value={sortMode}
+              onChange={(event) => updateSortMode(event.target.value as OfferSort)}
+            >
+              {offerSortOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="offers-filter-row" aria-label="Offer filters">
+          {offerFilters.map((filter) => (
+            <button
+              key={filter.id}
+              type="button"
+              className={activeFilters.includes(filter.id) ? "is-active" : ""}
+              onClick={() => toggleFilter(filter.id)}
+            >
+              {filter.label}
             </button>
           ))}
-        </section>
+        </div>
 
         {statusMessage ? <p className="offers-message">{statusMessage}</p> : null}
 
-        <section className="offers-panel">
-          {isLoading ? (
-            <article className="empty-offers">
-              <h2>Loading offers...</h2>
-              <p>Checking your real marketplace offer activity.</p>
-            </article>
-          ) : null}
+        <div className="offers-content-heading">
+          <div>
+            <span>{offerTabs.find((tab) => tab.id === activeTab)?.label}</span>
+            <h2>{offerTabs.find((tab) => tab.id === activeTab)?.label} Offers</h2>
+          </div>
+          <p>
+            {visibleOffers.length} {visibleOffers.length === 1 ? "negotiation" : "negotiations"}
+          </p>
+        </div>
 
-          {!isLoading && visibleOffers.length === 0 ? (
-            <article className="empty-offers">
-              <h2>{emptyCopy.title}</h2>
-              <p>{emptyCopy.body}</p>
-            </article>
-          ) : null}
-
-          {!isLoading
-            ? visibleOffers.map((offer) => (
-                <article key={offer.id} className="offer-card">
-                  <div className="offer-main">
-                    <span>{offer.role === "seller" ? "Received Offer" : "Sent Offer"}</span>
-                    <h2>{offer.cardTitle}</h2>
-                    <p>
-                      {offer.role === "seller"
-                        ? `Buyer: ${offer.buyerName}`
-                        : `Seller: ${offer.sellerName}`}
-                    </p>
-                    {offer.message ? <p className="offer-message">“{offer.message}”</p> : null}
-                  </div>
-
-                  <div className="offer-amount">
-                    <span>Offer</span>
-                    <strong>{formatCurrency(offer.amount)}</strong>
-                    <small>
-                      {offer.askingPrice > 0
-                        ? `Ask ${formatCurrency(offer.askingPrice)}`
-                        : "Ask unavailable"}
-                    </small>
-                  </div>
-
-                  <div className="offer-status">
-                    <strong className={`status status-${offer.status}`}>{offer.statusLabel}</strong>
-                    <span>{formatDate(offer.createdAt)}</span>
-                    <span>{offer.timeRemaining}</span>
-                  </div>
-
-                  <div className="offer-actions">
-                    <Link href={offer.cardHref}>View Card</Link>
-                    {offer.canCheckout ? (
-                      <button
-                        type="button"
-                        disabled={busyOfferId === offer.id}
-                        onClick={() => startCheckout(offer)}
-                      >
-                        {busyOfferId === offer.id ? "Opening..." : "Complete Payment"}
-                      </button>
-                    ) : null}
-                    {offer.canAccept ? (
-                      <button
-                        type="button"
-                        disabled={busyOfferId === offer.id}
-                        onClick={() => updateOffer(offer.id, "accept")}
-                      >
-                        Accept
-                      </button>
-                    ) : null}
-                    {offer.canCounter ? (
-                      <button
-                        type="button"
-                        disabled={busyOfferId === offer.id}
-                        onClick={() => {
-                          setCounterOfferId(counterOfferId === offer.id ? "" : offer.id);
-                          setCounterAmount(String(offer.amount || ""));
-                        }}
-                      >
-                        Counter Offer
-                      </button>
-                    ) : null}
-                    {offer.canDecline ? (
-                      <button
-                        type="button"
-                        disabled={busyOfferId === offer.id}
-                        onClick={() => updateOffer(offer.id, "decline")}
-                      >
-                        Decline
-                      </button>
-                    ) : null}
-                    {offer.canWithdraw ? (
-                      <button
-                        type="button"
-                        disabled={busyOfferId === offer.id}
-                        onClick={() => updateOffer(offer.id, "withdraw")}
-                      >
-                        Withdraw
-                      </button>
-                    ) : null}
-                    {offer.canAcceptCounter ? (
-                      <button
-                        type="button"
-                        disabled={busyOfferId === offer.id}
-                        onClick={() => updateOffer(offer.id, "accept_counter")}
-                      >
-                        Accept Counter
-                      </button>
-                    ) : null}
-                    {offer.canDeclineCounter ? (
-                      <button
-                        type="button"
-                        disabled={busyOfferId === offer.id}
-                        onClick={() => updateOffer(offer.id, "decline_counter")}
-                      >
-                        Decline Counter
-                      </button>
-                    ) : null}
-                  </div>
-
-                  {offer.shippingProfileLabel ? (
-                    <p className="offer-shipping-note">
-                      Shipping: {offer.shippingProfileLabel}
-                    </p>
-                  ) : null}
-
-                  {offer.canCheckout && offer.requiresPweAcknowledgement ? (
-                    <label className="pwe-acknowledgement">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(pweAcknowledgements[offer.id])}
-                        onChange={(event) =>
-                          setPweAcknowledgements((items) => ({
-                            ...items,
-                            [offer.id]: event.target.checked,
-                          }))
-                        }
-                      />
-                      <span>I understand this shipment will not include tracking.</span>
-                    </label>
-                  ) : null}
-
-                  {counterOfferId === offer.id ? (
-                    <div className="counter-box">
-                      <label htmlFor={`counter-${offer.id}`}>Counter amount</label>
-                      <input
-                        id={`counter-${offer.id}`}
-                        type="number"
-                        min="1"
-                        step="0.01"
-                        value={counterAmount}
-                        onChange={(event) => setCounterAmount(event.target.value)}
-                      />
-                      <button
-                        type="button"
-                        disabled={busyOfferId === offer.id}
-                        onClick={() => submitCounter(offer.id)}
-                      >
-                        Send Counter
-                      </button>
-                    </div>
-                  ) : null}
-                </article>
-              ))
-            : null}
-        </section>
+        {viewMode === "grid" ? renderGrid() : renderCompact()}
+        {renderPagination()}
+      </section>
     </PageShell>
   );
 }
@@ -523,9 +1061,10 @@ const pageStyles = `
   .offers-page {
     min-height: 100vh;
     background:
-      radial-gradient(circle at 20% 0%, rgba(214, 191, 123, 0.08), transparent 28%),
-      linear-gradient(180deg, #050505 0%, #0a0a0a 48%, #030303 100%);
-    color: #f7f3e8;
+      radial-gradient(circle at 50% -120px, rgba(201,205,211,0.08), transparent 32%),
+      linear-gradient(180deg, #000 0%, #030304 58%, #000 100%);
+    color: #fafafa;
+    font-family: Arial, Helvetica, sans-serif;
   }
 
   .offers-shell {
@@ -534,199 +1073,403 @@ const pageStyles = `
     padding: 8px 0 80px;
   }
 
+  .panel {
+    border: 1px solid #1d1d22;
+    border-radius: 12px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.006)),
+      rgba(5,5,6,0.92);
+    box-shadow: 0 18px 44px rgba(0,0,0,0.28);
+  }
+
   .offers-hero {
+    margin-top: 10px;
+    padding: 18px;
     display: flex;
     justify-content: space-between;
-    gap: 24px;
+    gap: 20px;
     align-items: end;
-    padding: 10px 0 28px;
   }
 
   .offers-hero span,
-  .offer-main span,
-  .offer-amount span,
-  .offers-tabs button span {
-    color: rgba(247, 243, 232, 0.52);
-    font-size: 0.72rem;
-    letter-spacing: 0.22em;
+  .offer-summary-stat span,
+  .offers-search span,
+  .offers-sort span,
+  .offers-content-heading span,
+  .offer-card-top span,
+  .offer-metric-grid span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
   }
 
   .offers-hero h1 {
-    margin: 12px 0 10px;
-    font-size: clamp(3rem, 7vw, 6.8rem);
-    letter-spacing: -0.055em;
-    line-height: 0.9;
+    margin: 8px 0 4px;
+    color: #fff;
+    font-size: 42px;
+    line-height: 46px;
+    font-weight: 900;
+    letter-spacing: -0.04em;
   }
 
-  .offers-hero p {
+  .offers-hero p,
+  .offers-content-heading p,
+  .offer-card-copy p,
+  .offer-card-copy span,
+  .offer-message,
+  .offer-shipping-note,
+  .empty-offers p,
+  .offer-signal-row span {
     margin: 0;
-    color: rgba(247, 243, 232, 0.64);
-    font-size: 1rem;
+    color: #a1a1aa;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 800;
+  }
+
+  .offer-collector-link {
+    color: inherit;
+    font: inherit;
+    text-decoration: none;
+  }
+
+  .offer-collector-link:hover {
+    color: #fff;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .offers-hero a,
   .offer-actions a,
   .offer-actions button,
-  .counter-box button {
-    border: 1px solid rgba(214, 191, 123, 0.38);
-    border-radius: 999px;
-    background: rgba(214, 191, 123, 0.08);
-    color: #f8e8b0;
-    padding: 0.78rem 1rem;
+  .counter-box button,
+  .view-toggle button,
+  .offers-filter-row button,
+  .offers-nav button,
+  .offers-pagination button {
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    color: #fff;
+    min-height: 36px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     text-decoration: none;
-    font-weight: 700;
+    font-size: 12px;
+    font-weight: 900;
     cursor: pointer;
   }
 
-  .offers-tabs {
+  .offers-hero a:hover,
+  .offer-actions a:hover,
+  .offer-actions button:hover:not(:disabled),
+  .counter-box button:hover:not(:disabled),
+  .view-toggle button:hover,
+  .offers-filter-row button:hover,
+  .offers-nav button:hover,
+  .offers-pagination button:hover:not(:disabled) {
+    border-color: rgba(231,222,208,0.62);
+    background: rgba(231,222,208,0.11);
+    box-shadow: 0 0 18px rgba(201,205,211,0.13);
+  }
+
+  .offer-summary-row {
+    margin-top: 14px;
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 10px;
-    margin: 0 0 18px;
   }
 
-  .offers-tabs button {
+  .offer-summary-stat {
+    border: 1px solid rgba(201,205,211,0.12);
+    border-radius: 12px;
+    background: rgba(8,8,10,0.58);
     min-height: 72px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 18px;
-    background: rgba(255, 255, 255, 0.035);
-    color: #f7f3e8;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: space-between;
-    padding: 14px;
-    cursor: pointer;
-  }
-
-  .offers-tabs button.active {
-    border-color: rgba(214, 191, 123, 0.55);
-    background: rgba(214, 191, 123, 0.09);
-    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
-  }
-
-  .offers-tabs strong {
-    font-size: 1.2rem;
-  }
-
-  .offers-message {
-    border: 1px solid rgba(214, 191, 123, 0.25);
-    border-radius: 16px;
-    background: rgba(214, 191, 123, 0.07);
-    color: rgba(247, 243, 232, 0.82);
-    padding: 14px 16px;
-  }
-
-  .offers-panel {
-    display: grid;
-    gap: 14px;
-  }
-
-  .offer-card,
-  .empty-offers {
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 24px;
-    background: rgba(12, 12, 12, 0.86);
-    box-shadow: 0 26px 90px rgba(0, 0, 0, 0.26);
-  }
-
-  .offer-card {
-    display: grid;
-    grid-template-columns: minmax(0, 1.7fr) minmax(150px, 0.6fr) minmax(150px, 0.6fr) minmax(220px, 0.9fr);
-    gap: 20px;
-    align-items: center;
-    padding: 22px;
-  }
-
-  .offer-main h2 {
-    margin: 8px 0;
-    font-size: 1.28rem;
-    letter-spacing: -0.02em;
-  }
-
-  .offer-main p,
-  .offer-status span,
-  .offer-amount small,
-  .empty-offers p,
-  .offer-message {
-    color: rgba(247, 243, 232, 0.6);
-    margin: 0;
-  }
-
-  .offer-message {
-    margin-top: 10px;
-    font-style: italic;
-  }
-
-  .offer-amount strong {
-    display: block;
-    margin: 8px 0 4px;
-    font-size: 1.7rem;
-    letter-spacing: -0.04em;
-  }
-
-  .offer-status {
+    padding: 11px;
     display: grid;
     gap: 6px;
   }
 
-  .status {
-    width: fit-content;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 999px;
-    padding: 0.38rem 0.7rem;
-    color: rgba(247, 243, 232, 0.82);
-    background: rgba(255, 255, 255, 0.04);
+  .offer-summary-stat strong {
+    color: #fff;
+    font-size: 24px;
+    line-height: 28px;
+    font-weight: 900;
   }
 
+  .offers-nav {
+    margin-top: 14px;
+    padding: 10px;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+  }
+
+  .offers-nav button {
+    flex: 0 0 auto;
+    border-color: rgba(201,205,211,0.14);
+    background: rgba(8,8,10,0.72);
+    color: #C9CDD3;
+  }
+
+  .offers-nav button.is-active,
+  .offers-filter-row button.is-active,
+  .view-toggle button.is-active {
+    border-color: rgba(231,222,208,0.48);
+    background: rgba(231,222,208,0.12);
+    color: #fff;
+  }
+
+  .offers-nav button span {
+    margin-left: 8px;
+    border-radius: 999px;
+    background: rgba(201,205,211,0.1);
+    color: #fff;
+    min-width: 22px;
+    padding: 3px 7px;
+    font-size: 10px;
+    line-height: 12px;
+  }
+
+  .offers-workspace {
+    margin-top: 14px;
+    padding: 14px;
+    display: grid;
+    gap: 14px;
+  }
+
+  .offers-toolbar {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) auto minmax(180px, auto);
+    gap: 10px;
+    align-items: end;
+  }
+
+  .offers-search,
+  .offers-sort {
+    display: grid;
+    gap: 7px;
+  }
+
+  .offers-search input,
+  .offers-sort select,
+  .counter-box input {
+    border: 1px solid #202026;
+    border-radius: 10px;
+    background: rgba(8,8,10,0.84);
+    color: #fff;
+    min-height: 40px;
+    padding: 0 11px;
+    font-size: 13px;
+    font-weight: 800;
+    outline: none;
+  }
+
+  .view-toggle,
+  .offers-filter-row,
+  .offer-actions,
+  .offer-signal-row {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+  }
+
+  .offers-filter-row button {
+    min-height: 32px;
+    color: #C9CDD3;
+  }
+
+  .offers-message {
+    margin: 0;
+    border: 1px solid rgba(201,205,211,0.18);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.055);
+    color: #C9CDD3;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 900;
+  }
+
+  .offers-content-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: end;
+  }
+
+  .offers-content-heading h2,
+  .offer-card-copy h2,
+  .empty-offers h2 {
+    margin: 0;
+    color: #fff;
+    font-size: 20px;
+    line-height: 24px;
+    font-weight: 900;
+  }
+
+  .offers-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .offer-negotiation-card {
+    border: 1px solid #202026;
+    border-radius: 12px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.006)),
+      rgba(8,8,10,0.84);
+    padding: 12px;
+    display: grid;
+    gap: 11px;
+    align-content: start;
+  }
+
+  .offer-card-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .offer-image-link {
+    text-decoration: none;
+  }
+
+  .offer-image {
+    border: 1px solid rgba(201,205,211,0.12);
+    border-radius: 12px;
+    background: radial-gradient(circle at 50% 20%, rgba(231,222,208,0.08), transparent 42%), #050506;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+
+  .offer-image-grid {
+    min-height: 226px;
+  }
+
+  .offer-image-compact {
+    width: 54px;
+    height: 72px;
+  }
+
+  .offer-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .offer-image-fallback {
+    width: 42%;
+    aspect-ratio: 0.72;
+    border: 1px solid rgba(231,222,208,0.22);
+    border-radius: 8px;
+    background: rgba(231,222,208,0.055);
+  }
+
+  .offer-card-copy {
+    display: grid;
+    gap: 5px;
+  }
+
+  .offer-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .offer-metric-grid div {
+    border: 1px solid rgba(201,205,211,0.12);
+    border-radius: 10px;
+    background: rgba(201,205,211,0.035);
+    padding: 9px;
+    display: grid;
+    gap: 4px;
+  }
+
+  .offer-metric-grid strong {
+    color: #fff;
+    font-size: 15px;
+    line-height: 19px;
+    font-weight: 900;
+  }
+
+  .status-pill {
+    border: 1px solid rgba(201,205,211,0.28);
+    border-radius: 999px;
+    background: rgba(201,205,211,0.08);
+    color: #C9CDD3;
+    width: fit-content;
+    padding: 5px 9px;
+    font-size: 10px;
+    line-height: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .status-received,
   .status-accepted,
   .status-completed {
-    border-color: rgba(214, 191, 123, 0.42);
-    color: #f8e8b0;
-    background: rgba(214, 191, 123, 0.08);
+    color: #86efac;
+    background: rgba(52,211,153,0.08);
+    border-color: rgba(52,211,153,0.24);
   }
 
+  .status-sent,
   .status-countered {
-    border-color: rgba(229, 229, 229, 0.24);
-    color: #f4f4f5;
+    color: #E7DED0;
+    background: rgba(231,222,208,0.07);
+    border-color: rgba(231,222,208,0.24);
+  }
+
+  .status-declined,
+  .status-withdrawn,
+  .status-expired {
+    color: #fb7185;
+    background: rgba(244,63,94,0.08);
+    border-color: rgba(244,63,94,0.24);
   }
 
   .offer-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: flex-end;
+    justify-content: flex-start;
   }
 
   .offer-actions button:disabled,
-  .counter-box button:disabled {
+  .counter-box button:disabled,
+  .offers-pagination button:disabled {
     opacity: 0.55;
     cursor: wait;
   }
 
   .offer-shipping-note,
-  .pwe-acknowledgement {
+  .pwe-acknowledgement,
+  .counter-box {
     grid-column: 1 / -1;
   }
 
-  .offer-shipping-note {
-    margin: -6px 0 0;
-    color: rgba(247, 243, 232, 0.62);
-    font-size: 0.82rem;
-    font-weight: 800;
+  .offer-message {
+    border-left: 2px solid rgba(231,222,208,0.22);
+    padding-left: 10px;
+    font-style: italic;
   }
 
   .pwe-acknowledgement {
-    border: 1px solid rgba(214, 191, 123, 0.22);
-    border-radius: 14px;
-    background: rgba(214, 191, 123, 0.06);
-    padding: 12px;
+    border: 1px solid rgba(231,222,208,0.22);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    padding: 10px;
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    color: #f8e8b0;
-    font-size: 0.82rem;
+    color: #E7DED0;
+    font-size: 12px;
     font-weight: 900;
   }
 
@@ -735,60 +1478,156 @@ const pageStyles = `
   }
 
   .counter-box {
-    grid-column: 1 / -1;
+    border-top: 1px solid rgba(201,205,211,0.1);
+    padding-top: 12px;
     display: flex;
-    flex-wrap: wrap;
     align-items: end;
-    gap: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding-top: 18px;
+    gap: 9px;
+    flex-wrap: wrap;
   }
 
   .counter-box label {
     width: 100%;
-    color: rgba(247, 243, 232, 0.56);
-    font-size: 0.78rem;
-    letter-spacing: 0.16em;
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
   }
 
   .counter-box input {
-    min-width: 180px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 14px;
-    background: rgba(0, 0, 0, 0.5);
-    color: #f7f3e8;
-    padding: 0.85rem 1rem;
+    width: 190px;
+  }
+
+  .offers-compact {
+    display: grid;
+    gap: 8px;
+  }
+
+  .offers-compact-header,
+  .offers-compact-row {
+    display: grid;
+    gap: 10px;
+    align-items: center;
+    grid-template-columns: minmax(260px, 1.35fr) 120px 90px 100px 105px 120px 92px minmax(190px, auto);
+  }
+
+  .offers-compact-header {
+    border-bottom: 1px solid rgba(201,205,211,0.1);
+    padding: 0 10px 8px;
+    color: #85858f;
+    font-size: 10px;
+    line-height: 13px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .offers-compact-row {
+    border: 1px solid #202026;
+    border-radius: 10px;
+    background: rgba(8,8,10,0.76);
+    padding: 10px;
+  }
+
+  .compact-card-cell {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+  }
+
+  .offers-compact-row strong,
+  .compact-card-cell strong {
+    color: #fff;
+    font-size: 13px;
+    line-height: 17px;
+    font-weight: 900;
+  }
+
+  .offers-compact-row span,
+  .compact-card-cell span {
+    color: #C9CDD3;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 800;
   }
 
   .empty-offers {
-    padding: 42px;
+    border: 1px dashed rgba(201,205,211,0.2);
+    border-radius: 12px;
+    background: rgba(8,8,10,0.45);
+    min-height: 220px;
+    padding: 26px;
+    display: grid;
+    place-items: center;
     text-align: center;
+    align-content: center;
+    gap: 10px;
   }
 
-  .empty-offers h2 {
-    margin: 0 0 10px;
-    font-size: 1.8rem;
-    letter-spacing: -0.03em;
+  .empty-offer-mark {
+    width: 48px;
+    height: 48px;
+    border: 1px solid rgba(231,222,208,0.22);
+    border-radius: 50%;
+    background:
+      linear-gradient(135deg, transparent 47%, rgba(231,222,208,0.2) 48%, rgba(231,222,208,0.2) 52%, transparent 53%),
+      rgba(231,222,208,0.055);
   }
 
-  @media (max-width: 920px) {
-    .offers-hero {
-      align-items: flex-start;
-      flex-direction: column;
-      padding-top: 10px;
+  .offers-pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .offers-pagination span {
+    color: #C9CDD3;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  @media (max-width: 1100px) {
+    .offers-shell {
+      width: calc(100vw - 32px);
     }
 
-    .offers-tabs {
+    .offer-summary-row,
+    .offers-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .offer-card {
+    .offers-toolbar {
       grid-template-columns: 1fr;
     }
 
-    .offer-actions {
-      justify-content: flex-start;
+    .offers-compact-header {
+      display: none;
+    }
+
+    .offers-compact-row {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .offers-hero {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .offer-summary-row,
+    .offers-grid,
+    .offer-metric-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .offers-content-heading {
+      align-items: flex-start;
+      flex-direction: column;
     }
   }
 `;

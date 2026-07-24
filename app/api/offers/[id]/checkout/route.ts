@@ -142,7 +142,7 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Listing not found." }, { status: 404 });
   }
 
-  if (listing.status !== "active") {
+  if (!["active", "collection"].includes(listing.status?.toLowerCase() || "")) {
     return NextResponse.json(
       { error: "This listing is no longer available for offer payment." },
       { status: 400 },

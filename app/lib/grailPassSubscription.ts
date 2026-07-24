@@ -18,7 +18,7 @@ import {
   type GrailPassPlan,
   type GrailPassPlanType,
 } from "./grailPassPlans";
-import { addCredit } from "./wallet";
+import { getConfiguredSiteUrl, siteConfig, trimTrailingSlash } from "./siteConfig";
 
 export type GrailPassSubscriptionRow = {
   id: string;
@@ -84,6 +84,13 @@ type StripeInvoiceRecord = Stripe.Invoice & {
   hosted_invoice_url?: string | null;
 };
 
+export class GrailPassDatabaseSetupError extends Error {
+  constructor(message = "GRAIL Pass database setup is incomplete.") {
+    super(message);
+    this.name = "GrailPassDatabaseSetupError";
+  }
+}
+
 function getRequiredEnv(name: string) {
   const value = process.env[name];
 
@@ -118,6 +125,20 @@ export function getBearerToken(request: Request) {
     : "";
 }
 
+export function hasSessionCookie(request: Request) {
+  const cookieHeader = request.headers.get("cookie") || "";
+
+  return /\bsb-[^=]+-auth-token=/.test(cookieHeader) ||
+    cookieHeader.includes("supabase-auth-token");
+}
+
+export function getGrailPassAuthDiagnostics(request: Request) {
+  return {
+    authHeaderPresent: Boolean(getBearerToken(request)),
+    sessionCookiePresent: hasSessionCookie(request),
+  };
+}
+
 export async function getAuthenticatedUser(request: Request) {
   const token = getBearerToken(request);
 
@@ -138,6 +159,27 @@ export async function getAuthenticatedUser(request: Request) {
   return { user, error: error?.message || null };
 }
 
+function normalizeConfiguredUrl(value: string) {
+  return trimTrailingSlash(value.startsWith("http") ? value : `https://${value}`);
+}
+
+function canonicalizeProductionUrl(value: string) {
+  try {
+    const url = new URL(value);
+
+    if (
+      process.env.NODE_ENV === "production" &&
+      (url.hostname === "grailcollects.com" || url.hostname.endsWith(".vercel.app"))
+    ) {
+      return siteConfig.productionUrl;
+    }
+  } catch {
+    return siteConfig.productionUrl;
+  }
+
+  return trimTrailingSlash(value);
+}
+
 export function getAppBaseUrl(request?: Request) {
   const configured =
     process.env.NEXT_PUBLIC_APP_URL ||
@@ -145,8 +187,16 @@ export function getAppBaseUrl(request?: Request) {
     process.env.SITE_URL ||
     process.env.VERCEL_URL;
 
+  if (process.env.NODE_ENV === "production") {
+    const configuredUrl = configured
+      ? normalizeConfiguredUrl(configured)
+      : getConfiguredSiteUrl();
+
+    return canonicalizeProductionUrl(configuredUrl);
+  }
+
   if (configured) {
-    return configured.startsWith("http") ? configured : `https://${configured}`;
+    return normalizeConfiguredUrl(configured);
   }
 
   if (request) {
@@ -154,6 +204,99 @@ export function getAppBaseUrl(request?: Request) {
   }
 
   return "http://localhost:3000";
+}
+
+export function getGrailPassCanonicalHost(request?: Request) {
+  try {
+    return new URL(getAppBaseUrl(request)).host;
+  } catch {
+    return "unknown";
+  }
+}
+
+export function logGrailPassDiagnostic(
+  event: string,
+  request: Request,
+  details: Record<string, unknown> = {},
+) {
+  console.info("GRAIL Pass diagnostic:", {
+    event,
+    ...getGrailPassAuthDiagnostics(request),
+    canonicalHost: getGrailPassCanonicalHost(request),
+    ...details,
+  });
+}
+
+export function isMissingGrailPassSchemaError(error: unknown) {
+  const record = error as {
+    code?: string;
+    message?: string;
+    details?: string | null;
+    hint?: string | null;
+  };
+  const combined = [
+    record?.code || "",
+    record?.message || "",
+    record?.details || "",
+    record?.hint || "",
+  ].join(" ");
+
+  return (
+    record?.code === "PGRST205" ||
+    combined.includes("grail_pass_subscriptions") ||
+    combined.includes("grail_pass_webhook_events")
+  ) && (
+    combined.includes("Could not find the table") ||
+    combined.includes("schema cache") ||
+    combined.includes("relation") ||
+    record?.code === "PGRST205"
+  );
+}
+
+export function getGrailPassErrorResponse(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+
+  if (error instanceof GrailPassDatabaseSetupError || isMissingGrailPassSchemaError(error)) {
+    return {
+      error: "GRAIL Pass database setup is incomplete.",
+      status: 503,
+      failureBranch: "database_setup_missing",
+    };
+  }
+
+  if (message.includes("STRIPE_SECRET_KEY")) {
+    return {
+      error: "GRAIL Pass billing is not configured.",
+      status: 503,
+      failureBranch: "stripe_configuration_missing",
+    };
+  }
+
+  if (
+    message.includes("STRIPE_GRAIL_PASS") ||
+    message.includes("lookup key") ||
+    message.includes("configured GRAIL Pass plan")
+  ) {
+    return {
+      error: "GRAIL Pass plan configuration is incomplete.",
+      status: 503,
+      failureBranch: "plan_configuration_missing",
+    };
+  }
+
+  if (error instanceof Stripe.errors.StripeError) {
+    return {
+      error: "Stripe could not complete the GRAIL Pass request.",
+      status: 502,
+      failureBranch: "stripe_api_failure",
+    };
+  }
+
+  return {
+    error: "GRAIL Pass request could not be completed.",
+    status: 500,
+    failureBranch: "unknown_failure",
+  };
 }
 
 function toIsoFromUnix(value?: number | null) {
@@ -321,8 +464,13 @@ export async function getStoredGrailPassSubscription(
     console.error("GRAIL Pass subscription fetch error:", {
       error,
       errorMessage: error.message,
+      errorCode: error.code || null,
       userId,
     });
+    if (isMissingGrailPassSchemaError(error)) {
+      throw new GrailPassDatabaseSetupError();
+    }
+
     throw new Error("GRAIL Pass subscription state is temporarily unavailable.");
   }
 
@@ -455,9 +603,14 @@ export async function syncGrailPassSubscriptionFromStripe({
     console.error("GRAIL Pass subscription sync error:", {
       error,
       errorMessage: error.message,
+      errorCode: error.code || null,
       userId: resolvedUserId,
       stripeSubscriptionId: subscription.id,
     });
+    if (isMissingGrailPassSchemaError(error)) {
+      throw new GrailPassDatabaseSetupError();
+    }
+
     throw new Error("GRAIL Pass subscription could not be synchronized.");
   }
 
@@ -620,21 +773,11 @@ export async function listGrailPassBillingHistory({
 }
 
 export function getGrailPassMonthlyCreditAmount() {
-  const configured = Number(
-    process.env.GRAIL_PASS_MONTHLY_CREDIT_AMOUNT ||
-      process.env.GRAIL_PASS_MONTHLY_CREDIT_DOLLARS ||
-      0,
-  );
-
-  return Number.isFinite(configured) && configured > 0
-    ? Math.round(configured * 100) / 100
-    : 0;
+  return 0;
 }
 
 export async function grantGrailPassMonthlyCreditForInvoice({
-  supabase,
   subscription,
-  invoice,
 }: {
   supabase: ServiceSupabaseClient;
   subscription: Stripe.Subscription;
@@ -644,38 +787,9 @@ export async function grantGrailPassMonthlyCreditForInvoice({
     return { granted: false, reason: "Subscription is not active." };
   }
 
-  const amount = getGrailPassMonthlyCreditAmount();
-
-  if (amount <= 0) {
-    return { granted: false, reason: "Monthly GRAIL Credit is unavailable." };
-  }
-
-  const userId = subscription.metadata?.grailUserId;
-
-  if (!userId) {
-    return { granted: false, reason: "Subscription is missing user metadata." };
-  }
-
-  const created = invoice?.created || getSubscriptionTimestamp(subscription, "current_period_start");
-  const periodKey = created
-    ? new Date(created * 1000).toISOString().slice(0, 7)
-    : new Date().toISOString().slice(0, 7);
-  const idempotencyKey = `grail-pass-monthly-credit:${subscription.id}:${periodKey}`;
-
-  const result = await addCredit(supabase, {
-    userId,
-    amount,
-    type: "promotion",
-    title: "Monthly GRAIL Credit",
-    description: "GRAIL Pass monthly credit deposit.",
-    referenceType: "grail_pass_subscription",
-    referenceId: subscription.id,
-    idempotencyKey,
-  });
-
   return {
-    granted: !result.alreadyApplied,
-    reason: result.alreadyApplied ? "Monthly credit was already recorded." : "Monthly credit recorded.",
+    granted: false,
+    reason: "Automatic monthly GRAIL Credit is disabled.",
   };
 }
 

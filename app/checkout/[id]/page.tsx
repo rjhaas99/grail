@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
 import Header from "../../components/Header";
+import { getPublicCollectorHref } from "../../lib/publicCollectorLinks";
 import {
   getShippingProfile,
   type ShippingProfileId,
@@ -105,13 +106,7 @@ function getCondition(listing: SupabaseCheckoutListing) {
 }
 
 function getSellerHref(profile: ProfileRow | null, sellerId: string | null) {
-  const username = profile?.username?.replace(/^@/, "").trim();
-
-  if (username) {
-    return `/collections/${encodeURIComponent(username)}`;
-  }
-
-  return `/collections/${sellerId || "vault-runner"}`;
+  return getPublicCollectorHref(profile, sellerId || "vault-runner");
 }
 
 function getListingFrontImage(listing: SupabaseCheckoutListing) {
@@ -500,7 +495,6 @@ export default function CheckoutPage() {
         <section className="page-heading">
           <div>
             <span>Checkout</span>
-            <h1>Checkout for &quot;{card.title}&quot;</h1>
             <p>Review your card purchase before placing your order.</p>
           </div>
           <Link href={`/cards/${card.id}`}>Back to Card</Link>
@@ -728,14 +722,6 @@ const pageStyles = `
     font-weight: 900;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-  }
-
-  .page-heading h1 {
-    margin: 8px 0 0;
-    color: #fff;
-    font-size: 42px;
-    line-height: 46px;
-    font-weight: 900;
   }
 
   .page-heading p,

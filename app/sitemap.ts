@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { MetadataRoute } from "next";
+import { getPublicCollectorSlug } from "./lib/publicCollectorLinks";
 import { siteConfig } from "./lib/siteConfig";
 
 type SitemapListingRow = {
@@ -41,8 +42,7 @@ function route(path: string, options: Partial<MetadataRoute.Sitemap[number]> = {
 }
 
 function publicCollectionSlug(profile: SitemapProfileRow) {
-  const username = profile.username?.replace(/^@/, "").trim();
-  return encodeURIComponent(username || profile.id);
+  return getPublicCollectorSlug(profile, profile.id);
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
@@ -89,18 +89,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       }),
     );
 
-    const profiles = ((profileData || []) as SitemapProfileRow[]).flatMap((profile) => [
-      route(`/sellers/${profile.id}`, {
-        lastModified: profile.updated_at || profile.created_at || new Date(),
-        priority: 0.6,
-        changeFrequency: "weekly",
-      }),
+    const profiles = ((profileData || []) as SitemapProfileRow[]).map((profile) =>
       route(`/collections/${publicCollectionSlug(profile)}`, {
         lastModified: profile.updated_at || profile.created_at || new Date(),
         priority: 0.62,
         changeFrequency: "weekly",
       }),
-    ]);
+    );
 
     return [...staticRoutes, ...listings, ...profiles];
   } catch (error) {

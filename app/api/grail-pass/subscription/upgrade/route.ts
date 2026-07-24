@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import {
   createServiceSupabaseClient,
   getAuthenticatedUser,
+  getGrailPassErrorResponse,
   getOrCreateGrailPassPrice,
   getStoredGrailPassSubscription,
+  logGrailPassDiagnostic,
   syncGrailPassSubscriptionFromStripe,
 } from "../../../../lib/grailPassSubscription";
 import {
@@ -19,9 +21,14 @@ type UpgradeBody = {
 };
 
 export async function POST(request: Request) {
+  logGrailPassDiagnostic("subscription_upgrade.route_entered", request);
   const { user, error } = await getAuthenticatedUser(request);
 
   if (!user) {
+    logGrailPassDiagnostic("subscription_upgrade.auth_failed", request, {
+      authenticatedUserFound: false,
+      failureBranch: "not_authenticated",
+    });
     return NextResponse.json(
       { error: error || "Sign in to upgrade GRAIL Pass." },
       { status: 401 },
@@ -37,6 +44,11 @@ export async function POST(request: Request) {
   }
 
   if (!isGrailPassPlanType(body.plan) || body.plan !== "annual") {
+    logGrailPassDiagnostic("subscription_upgrade.plan_invalid", request, {
+      authenticatedUserFound: true,
+      selectedPlan: body.plan || null,
+      failureBranch: "invalid_upgrade_plan",
+    });
     return NextResponse.json(
       { error: "GRAIL Pass can currently be upgraded to the Annual plan." },
       { status: 400 },
@@ -44,6 +56,10 @@ export async function POST(request: Request) {
   }
 
   try {
+    logGrailPassDiagnostic("subscription_upgrade.authenticated", request, {
+      authenticatedUserFound: true,
+      selectedPlan: body.plan,
+    });
     const supabase = createServiceSupabaseClient();
     const row = await getStoredGrailPassSubscription(supabase, user.id);
 
@@ -111,11 +127,31 @@ export async function POST(request: Request) {
       currentPeriodEnd: synced.current_period_end,
     });
   } catch (upgradeError) {
-    console.error("GRAIL Pass upgrade error:", upgradeError);
+    const mappedError = getGrailPassErrorResponse(upgradeError);
+    const stripeError = upgradeError as { type?: string; message?: string };
+
+    console.error("GRAIL Pass upgrade error:", {
+      error: upgradeError,
+      failureBranch: mappedError.failureBranch,
+      stripeErrorType: stripeError.type || null,
+      stripeErrorMessage: stripeError.message || null,
+    });
+    logGrailPassDiagnostic("subscription_upgrade.failed", request, {
+      authenticatedUserFound: true,
+      selectedPlan: body.plan,
+      failureBranch: mappedError.failureBranch,
+      stripeErrorType: stripeError.type || null,
+      stripeErrorMessage: stripeError.message || null,
+    });
 
     return NextResponse.json(
-      { error: "GRAIL Pass could not be upgraded." },
-      { status: 500 },
+      {
+        error:
+          mappedError.failureBranch === "unknown_failure"
+            ? "GRAIL Pass could not be upgraded."
+            : mappedError.error,
+      },
+      { status: mappedError.failureBranch === "unknown_failure" ? 500 : mappedError.status },
     );
   }
 }

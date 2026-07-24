@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
+import { getPublicCollectorHref } from "../lib/publicCollectorLinks";
 
 type ProfileRow = {
   id: string;
@@ -12,10 +13,7 @@ type ProfileRow = {
 };
 
 function getCollectionHref(userId: string, username?: string | null) {
-  const cleanUsername = username?.replace(/^@/, "").trim();
-  const slug = cleanUsername ? encodeURIComponent(cleanUsername) : userId;
-
-  return `/collections/${slug}`;
+  return getPublicCollectorHref({ id: userId, username }, userId);
 }
 
 export default function MyCollectionPage() {

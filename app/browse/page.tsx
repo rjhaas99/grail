@@ -12,6 +12,12 @@ import {
   type MockListing,
   getListingTag,
 } from "../lib/mockData";
+import { fetchListingWatchCounts } from "../lib/clientWatchCounts";
+import {
+  resolveMarketplacePresentationState,
+  type MarketplacePresentationState,
+} from "../lib/marketplacePresentationState";
+import { getPublicCollectorSlug } from "../lib/publicCollectorLinks";
 
 type BrowseListing = MockListing & {
   imageUrl?: string | null;
@@ -28,6 +34,7 @@ type BrowseListing = MockListing & {
   auctionBidCount?: number | null;
   auctionReserveMetAt?: string | null;
   reserveFeeStatus?: string | null;
+  marketplaceState?: MarketplacePresentationState;
   source: "supabase" | "mock";
 };
 
@@ -83,6 +90,7 @@ type SupabaseListingRow = {
   grade: string | null;
   condition: string | null;
   price: number | null;
+  minimum_offer_amount?: number | null;
   status: string | null;
   created_at: string | null;
   is_collection_card?: boolean | null;
@@ -152,6 +160,7 @@ const categoryFilters = [
   "Slabs",
   "Raw Cards",
   "Grail Cards",
+  "Offer Only",
 ];
 
 const priceFilters = [
@@ -408,13 +417,7 @@ function getImageUrl(listing: SupabaseListingRow) {
 }
 
 function getSellerSlug(profile: ProfileRow | undefined, sellerId: string | null) {
-  const username = profile?.username?.replace(/^@/, "").trim();
-
-  if (username) {
-    return encodeURIComponent(username);
-  }
-
-  return sellerId || "vault-runner";
+  return getPublicCollectorSlug(profile, sellerId || "vault-runner");
 }
 
 function getCategory(listing: SupabaseListingRow) {
@@ -508,6 +511,7 @@ function mapSupabaseListing(
   index: number,
   totalCount: number,
   profilesById: Map<string, ProfileRow>,
+  watchCountsByListingId: Map<string, number> = new Map(),
 ): BrowseListing {
   const profile = listing.seller_id
     ? profilesById.get(listing.seller_id)
@@ -521,16 +525,14 @@ function mapSupabaseListing(
       .join(" ") ||
     "Untitled Card";
   const price = Number(listing.price || 0);
-  const status = listing.status?.toLowerCase() || "";
-  const isAuction = listing.sale_format === "auction";
+  const marketplaceState = resolveMarketplacePresentationState(listing);
+  const isAuction = marketplaceState === "active_auction";
+  const isCollectionOnly = marketplaceState === "collection_offer_only";
   const auctionCurrentBid = Number(listing.auction_current_bid || 0);
   const auctionStartingBid = Number(listing.auction_starting_bid || 0);
   const auctionDisplayPrice = auctionCurrentBid || auctionStartingBid;
-  const isCollectionOnly =
-    status !== "active" &&
-    (status === "collection" ||
-      Boolean(listing.is_collection_card) ||
-      Boolean(listing.is_public_collection));
+  const watchCount = watchCountsByListingId.get(listing.id) || 0;
+  const minimumOfferAmount = Number(listing.minimum_offer_amount || 0);
   const displayPrice = isAuction ? auctionDisplayPrice : isCollectionOnly ? 0 : price;
   const savedMarketValue = getSavedMarketValue(listing);
   const sellerName = profile?.full_name || profile?.username || "GRAIL Seller";
@@ -538,6 +540,15 @@ function mapSupabaseListing(
   const isGraded = Boolean(listing.grader && listing.grade) ||
     listing.card_type?.toLowerCase() === "graded";
   const isRaw = !isGraded;
+  const tag = isAuction
+    ? "Auction"
+    : getListingTag({
+        conditionDisplay: condition,
+        condition,
+        marketValue: savedMarketValue,
+        watchCount,
+        isCollectionOnly,
+      });
   const accent = realListingAccents[index % realListingAccents.length];
   const route = `/cards/${listing.id}`;
 
@@ -564,7 +575,7 @@ function mapSupabaseListing(
         ? `Current Bid ${formatCurrency(auctionCurrentBid)}`
         : `Starting Bid ${formatCurrency(auctionStartingBid)}`
       : isCollectionOnly
-      ? "Open to Offers"
+      ? "Offer Only"
       : price
         ? formatCurrency(price)
         : "Price not listed",
@@ -573,19 +584,19 @@ function mapSupabaseListing(
     sportsCardsProEstimatedValue: listing.sportscardspro_estimated_value || null,
     sportsCardsProSourceUrl: listing.sportscardspro_source_url || null,
     valueBadge: getListingValueBadge(displayPrice, savedMarketValue),
-    minimumOffer: displayPrice ? Math.round(displayPrice * 0.85) : 0,
-    minOffer: displayPrice ? Math.round(displayPrice * 0.85) : 0,
-    watchCount: 0,
+    minimumOffer: minimumOfferAmount || (displayPrice ? Math.round(displayPrice * 0.85) : 0),
+    minOffer: minimumOfferAmount || (displayPrice ? Math.round(displayPrice * 0.85) : 0),
+    watchCount,
     views: 0,
     viewCount: 0,
     listedOrder: totalCount - index,
     listedDate: formatListedDate(listing.created_at),
-    tags: [isAuction ? "Auction" : isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw"],
-    tag: isAuction ? "Auction" : isCollectionOnly ? "Collection" : isGraded ? "Graded" : "Raw",
+    tags: [tag],
+    tag,
     isGraded,
     isRaw,
-    isHot: false,
-    isGrail: false,
+    isHot: watchCount >= 15,
+    isGrail: tag === "Grail",
     isCollectionOnly,
     listingStatus: listing.status,
     accent,
@@ -593,6 +604,7 @@ function mapSupabaseListing(
     imageUrl: getImageUrl(listing),
     createdAt: listing.created_at,
     saleFormat: isAuction ? "auction" : "fixed",
+    marketplaceState,
     auctionStatus: listing.auction_status,
     auctionEndsAt: listing.auction_ends_at,
     auctionStartingBid,
@@ -729,6 +741,7 @@ function matchesCategoryFilter(listing: BrowseListing, filter: string) {
   if (filter === "Slabs") return listing.isGraded;
   if (filter === "Raw Cards") return listing.isRaw;
   if (filter === "Grail Cards") return listing.isGrail;
+  if (filter === "Offer Only") return Boolean(listing.isCollectionOnly);
 
   return true;
 }
@@ -1142,6 +1155,7 @@ function BrowseContent() {
               grade,
               condition,
               price,
+              minimum_offer_amount,
               status,
               created_at,
               is_collection_card,
@@ -1163,16 +1177,28 @@ function BrowseContent() {
               )
             `,
           )
-          .eq("status", "active")
+          .or("status.eq.active,status.eq.collection,is_collection_card.eq.true,is_public_collection.eq.true")
           .order("created_at", { ascending: false });
 
         if (error) {
           throw error;
         }
 
-        const rows = ((data || []) as SupabaseListingRow[]).filter(
-          (listing) => listing.status?.toLowerCase() === "active",
-        );
+        const rows = ((data || []) as SupabaseListingRow[]).filter((listing) => {
+          const status = listing.status?.toLowerCase() || "";
+          const isUnavailable = ["deleted", "inactive", "sold"].includes(status);
+          const marketplaceState = resolveMarketplacePresentationState(listing);
+
+          return (
+            !isUnavailable &&
+            marketplaceState !== "sold" &&
+            marketplaceState !== "auction_pending_settlement" &&
+            (status === "active" ||
+              status === "collection" ||
+              Boolean(listing.is_collection_card) ||
+              Boolean(listing.is_public_collection))
+          );
+        });
 
         const sellerIds = Array.from(
           new Set(
@@ -1202,8 +1228,28 @@ function BrowseContent() {
           return;
         }
 
+        let watchCountsByListingId = new Map<string, number>();
+
+        try {
+          watchCountsByListingId = await fetchListingWatchCounts(
+            rows.map((listing) => listing.id),
+          );
+        } catch (watchError) {
+          console.warn("Browse watch counts unavailable:", watchError);
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
         const liveListings = rows.map((listing, index) =>
-          mapSupabaseListing(listing, index, rows.length, profilesById),
+          mapSupabaseListing(
+            listing,
+            index,
+            rows.length,
+            profilesById,
+            watchCountsByListingId,
+          ),
         );
         const pricedListings = rows.filter(
           (listing) => listing.price !== null && Number(listing.price) > 0,
@@ -1312,9 +1358,7 @@ function BrowseContent() {
     () =>
       listings
         .filter((listing) => {
-          const tag = getListingTag(listing);
-
-          if (sortMode === "hot" && tag !== "Hot") {
+          if (sortMode === "hot" && listing.watchCount < 15) {
             return false;
           }
 
@@ -1385,11 +1429,7 @@ function BrowseContent() {
           const secondHasValue = secondValueDifference !== null;
 
           if (sortMode === "hot") {
-            return (
-              second.watchCount +
-              second.views * 0.1 -
-              (first.watchCount + first.views * 0.1)
-            );
+            return second.watchCount - first.watchCount;
           }
 
           if (sortMode === "best-value") {
@@ -1446,14 +1486,32 @@ function BrowseContent() {
           }
 
           if (sortMode === "most-bids") {
+            const firstIsAuction = first.saleFormat === "auction";
+            const secondIsAuction = second.saleFormat === "auction";
+
+            if (firstIsAuction && !secondIsAuction) return -1;
+            if (!firstIsAuction && secondIsAuction) return 1;
+
             return Number(second.auctionBidCount || 0) - Number(first.auctionBidCount || 0);
           }
 
           if (sortMode === "lowest-current-bid") {
+            const firstIsAuction = first.saleFormat === "auction";
+            const secondIsAuction = second.saleFormat === "auction";
+
+            if (firstIsAuction && !secondIsAuction) return -1;
+            if (!firstIsAuction && secondIsAuction) return 1;
+
             return first.price - second.price;
           }
 
           if (sortMode === "highest-current-bid") {
+            const firstIsAuction = first.saleFormat === "auction";
+            const secondIsAuction = second.saleFormat === "auction";
+
+            if (firstIsAuction && !secondIsAuction) return -1;
+            if (!firstIsAuction && secondIsAuction) return 1;
+
             return second.price - first.price;
           }
 
@@ -2371,6 +2429,7 @@ function BrowseContent() {
               "art title"
               "art meta"
               "art seller"
+              "art signals"
               "art footer";
             gap: 6px 14px;
             align-items: start;
@@ -2669,6 +2728,18 @@ function BrowseContent() {
             color: #E7DED0;
           }
 
+          .badge-for-sale {
+            border-color: rgba(244,244,245,0.34);
+            background: rgba(244,244,245,0.065);
+            color: #f4f4f5;
+          }
+
+          .badge-offer-only {
+            border-color: rgba(212,175,55,0.42);
+            background: rgba(212,175,55,0.075);
+            color: #E7DED0;
+          }
+
           .value-badge {
             min-height: 22px;
             border: 1px solid rgba(201,205,211,0.26);
@@ -2758,6 +2829,15 @@ function BrowseContent() {
             font-size: 12px;
             line-height: 15px;
             font-weight: 800;
+          }
+
+          .listing-public-signals {
+            grid-area: signals;
+            margin: -2px 0 0;
+            color: #918B84;
+            font-size: 11px;
+            line-height: 15px;
+            font-weight: 900;
           }
 
           .seller-link {
@@ -3421,8 +3501,20 @@ function BrowseContent() {
                   const tag = getListingTag(listing);
                   const isOwnerListing =
                     Boolean(currentUserId) && listing.sellerId === currentUserId;
-                  const isCollectionOnly = tag === "Collection" || listing.isCollectionOnly;
-                  const isAuction = listing.saleFormat === "auction";
+                  const marketplaceState: MarketplacePresentationState =
+                    listing.marketplaceState ||
+                    (listing.saleFormat === "auction"
+                      ? "active_auction"
+                      : listing.isCollectionOnly || tag === "Collection"
+                        ? "collection_offer_only"
+                        : tag === "Sold"
+                          ? "sold"
+                          : "for_sale");
+                  const isCollectionOnly =
+                    marketplaceState === "collection_offer_only" ||
+                    tag === "Collection" ||
+                    Boolean(listing.isCollectionOnly);
+                  const isAuction = marketplaceState === "active_auction";
                   const canUseBuyerActions = !isOwnerListing;
 
                   return (
@@ -3430,6 +3522,13 @@ function BrowseContent() {
                       <div className="listing-badge-row">
                         <span className={`badge badge-${tag.toLowerCase()}`}>
                           {tag}
+                        </span>
+                        <span
+                          className={`badge badge-${
+                            isCollectionOnly ? "offer-only" : "for-sale"
+                          }`}
+                        >
+                          {isCollectionOnly ? "Offer Only" : "For Sale"}
                         </span>
                         {listing.valueBadge ? (
                           <span
@@ -3478,17 +3577,48 @@ function BrowseContent() {
                           {listing.seller}
                         </Link>
                       </p>
+                      <p className="listing-public-signals">
+                        {listing.watchCount} ❤️ · {listing.listedDate}
+                      </p>
 
                       <div className="listing-footer">
-                        <strong className="listing-price">
-                          {listing.priceDisplay}
-                        </strong>
+                        {!isCollectionOnly ? (
+                          <strong className="listing-price">
+                            {listing.priceDisplay}
+                          </strong>
+                        ) : null}
                         <div className="listing-actions">
                           {isOwnerListing ? (
                             <p className="owner-note">This is your listing.</p>
                           ) : canUseBuyerActions ? (
                             <div className="action-circles">
-                              {!isCollectionOnly && !isAuction ? (
+                              {isCollectionOnly ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="action-button"
+                                    aria-label={`Make offer on ${listing.title}`}
+                                    title="Make Offer"
+                                    onClick={() => openOfferModal(listing)}
+                                  >
+                                    <span className="action-icon" aria-hidden="true">
+                                      $
+                                    </span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="action-button"
+                                    aria-label={`Message ${listing.seller}`}
+                                    title="Message"
+                                    onClick={() => openMessageModal(listing)}
+                                  >
+                                    <span
+                                      className="action-icon message-icon"
+                                      aria-hidden="true"
+                                    />
+                                  </button>
+                                </>
+                              ) : !isAuction ? (
                                 <Link
                                   href={`/checkout/${listing.id}`}
                                   className="action-button"
@@ -3501,37 +3631,43 @@ function BrowseContent() {
                                   />
                                 </Link>
                               ) : null}
-                              <button
-                                type="button"
-                                className="action-button"
-                                aria-label={`Message ${listing.seller}`}
-                                title="Message"
-                                onClick={() => openMessageModal(listing)}
-                              >
-                                <span
-                                  className="action-icon message-icon"
-                                  aria-hidden="true"
-                                />
-                              </button>
-                              {!isAuction ? (
-                                <button
-                                  type="button"
-                                  className="action-button"
-                                  aria-label={`Make offer on ${listing.title}`}
-                                  title="Make Offer"
-                                  onClick={() => openOfferModal(listing)}
-                                >
-                                  <span className="action-icon" aria-hidden="true">
-                                    $
-                                  </span>
-                                </button>
+                              {!isCollectionOnly ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="action-button"
+                                    aria-label={`Message ${listing.seller}`}
+                                    title="Message"
+                                    onClick={() => openMessageModal(listing)}
+                                  >
+                                    <span
+                                      className="action-icon message-icon"
+                                      aria-hidden="true"
+                                    />
+                                  </button>
+                                  {!isAuction ? (
+                                    <button
+                                      type="button"
+                                      className="action-button"
+                                      aria-label={`Make offer on ${listing.title}`}
+                                      title="Make Offer"
+                                      onClick={() => openOfferModal(listing)}
+                                    >
+                                      <span className="action-icon" aria-hidden="true">
+                                        $
+                                      </span>
+                                    </button>
+                                  ) : null}
+                                </>
                               ) : null}
                             </div>
                           ) : null}
 
-                          <Link className="view-card" href={listing.href}>
+                          {!isCollectionOnly ? (
+                            <Link className="view-card" href={listing.href}>
                             View Card
-                          </Link>
+                            </Link>
+                          ) : null}
                         </div>
                       </div>
                     </article>

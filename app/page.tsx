@@ -5,6 +5,8 @@ import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import Header from "./components/Header";
+import HeroShowcaseSlab from "./components/HeroShowcaseSlab";
+import { getPublicCollectorSlug } from "./lib/publicCollectorLinks";
 import { supabase } from "../lib/supabase";
 
 type HeroCardData = {
@@ -163,64 +165,75 @@ const trustCards = [
 ];
 
 const carouselSlots = {
+  left: {
+    x: -252,
+    translateX: -48,
+    translateY: 98,
+    scale: 0.84,
+    opacity: 0.92,
+    zIndex: 20,
+    rotateY: 8,
+    width: 235,
+    height: 280,
+  },
   center: {
     x: 0,
-    y: -58,
+    translateX: 0,
+    translateY: -20,
     scale: 1,
     opacity: 1,
-    zIndex: 5,
-    blur: 0,
-    shade: 0,
+    zIndex: 30,
+    rotateY: 0,
+    width: 295,
+    height: 353,
   },
-  frontRight: {
-    x: 224,
-    y: -56,
-    scale: 0.5,
-    opacity: 0.24,
-    zIndex: 4,
-    blur: 0.3,
-    shade: 0,
-  },
-  backRight: {
-    x: 304,
-    y: -62,
-    scale: 0.34,
-    opacity: 0.12,
-    zIndex: 2,
-    blur: 1,
-    shade: 0,
-  },
-  backLeft: {
-    x: -304,
-    y: -62,
-    scale: 0.34,
-    opacity: 0.12,
-    zIndex: 2,
-    blur: 1,
-    shade: 0,
-  },
-  frontLeft: {
-    x: -224,
-    y: -56,
-    scale: 0.5,
-    opacity: 0.24,
-    zIndex: 4,
-    blur: 0.3,
-    shade: 0,
+  right: {
+    x: 252,
+    translateX: 48,
+    translateY: 98,
+    scale: 0.84,
+    opacity: 0.92,
+    zIndex: 20,
+    rotateY: -8,
+    width: 235,
+    height: 280,
   },
 };
 
 type CarouselVariant = "center" | "side" | "back";
 
-function getCarouselSlot(index: number, activeIndex: number, totalCards: number) {
-  const relativeIndex = (index - activeIndex + totalCards) % totalCards;
+type HeroVisibleCard = {
+  card: HeroCardData;
+  slot: (typeof carouselSlots)[keyof typeof carouselSlots];
+  slotName: keyof typeof carouselSlots;
+  variant: CarouselVariant;
+};
 
-  if (relativeIndex === 0) return carouselSlots.center;
-  if (relativeIndex === 1) return carouselSlots.frontRight;
-  if (relativeIndex === 2) return carouselSlots.backRight;
-  if (relativeIndex === 3) return carouselSlots.backLeft;
+function getVisibleHeroCards(cards: HeroCardData[], activeIndex: number): HeroVisibleCard[] {
+  if (cards.length === 0) return [];
 
-  return carouselSlots.frontLeft;
+  const activeCard = cards[activeIndex] || cards[0];
+
+  return [
+    {
+      card: cards[(activeIndex - 1 + cards.length) % cards.length],
+      slot: carouselSlots.left,
+      slotName: "left",
+      variant: "side",
+    },
+    {
+      card: activeCard,
+      slot: carouselSlots.center,
+      slotName: "center",
+      variant: "center",
+    },
+    {
+      card: cards[(activeIndex + 1) % cards.length],
+      slot: carouselSlots.right,
+      slotName: "right",
+      variant: "side",
+    },
+  ];
 }
 
 function CuratorArtwork({
@@ -231,50 +244,17 @@ function CuratorArtwork({
   variant: CarouselVariant;
 }) {
   const isCenter = variant === "center";
-  const isBack = variant === "back";
-  const artWidth = isCenter ? "238px" : isBack ? "138px" : "162px";
-  const artHeight = isCenter ? "178px" : isBack ? "104px" : "122px";
-
-  if (card.imageUrl) {
-    return (
-      <div
-        style={{
-          width: artWidth,
-          height: artHeight,
-          position: "relative",
-        }}
-      >
-        <Image
-          src={card.imageUrl}
-          alt={card.title}
-          fill
-          unoptimized
-          sizes={isCenter ? "238px" : "162px"}
-          style={{ objectFit: "contain" }}
-        />
-      </div>
-    );
-  }
+  const artWidth = isCenter ? "295px" : "235px";
+  const artHeight = isCenter ? "353px" : "280px";
 
   return (
-    <div
-      style={{
-        width: artWidth,
-        height: artHeight,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "rgba(231,222,208,0.62)",
-        fontSize: isCenter ? "11px" : "9px",
-        lineHeight: isCenter ? "15px" : "12px",
-        fontWeight: 900,
-        letterSpacing: "0.14em",
-        textAlign: "center",
-        textTransform: "uppercase",
-      }}
-    >
-      Photo pending
-    </div>
+    <HeroShowcaseSlab
+      imageUrl={card.imageUrl}
+      title={card.title}
+      width={artWidth}
+      height={artHeight}
+      prominence={isCenter ? "center" : "side"}
+    />
   );
 }
 
@@ -286,142 +266,57 @@ function CuratorCollectible({
   variant: CarouselVariant;
 }) {
   const isCenter = variant === "center";
-  const isBack = variant === "back";
+  const collectibleWidth = isCenter ? "295px" : "235px";
+  const collectibleHeight = isCenter ? "353px" : "280px";
 
   return (
     <div
+      className={`hero-v4-collectible hero-v4-collectible-${variant}`}
       style={{
-        width: isCenter ? "254px" : isBack ? "148px" : "174px",
-        height: isCenter ? "194px" : isBack ? "116px" : "136px",
-        position: "relative",
+        width: collectibleWidth,
+        height: collectibleHeight,
+        position: "absolute",
+        left: "50%",
+        top: 0,
+        transform: "translateX(-50%)",
         display: "grid",
         placeItems: "center",
       }}
     >
-      <span
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          left: "50%",
-          bottom: isCenter ? "7px" : "4px",
-          width: isCenter ? "218px" : isBack ? "82px" : "108px",
-          height: isCenter ? "22px" : "12px",
-          borderRadius: "50%",
-          transform: "translateX(-50%)",
-          background:
-            "radial-gradient(ellipse, rgba(231,222,208,0.13), rgba(201,205,211,0.035) 46%, transparent 74%)",
-          filter: isCenter ? "blur(5px)" : "blur(4px)",
-          opacity: isCenter ? 0.76 : 0.22,
-        }}
-      />
-      <div style={{ position: "relative", zIndex: 2 }}>
+      <div className="hero-v4-artwork-wrap" style={{ position: "relative", zIndex: 2 }}>
         <CuratorArtwork card={card} variant={variant} />
       </div>
     </div>
   );
 }
 
-function CuratorAmbient() {
-  return (
-    <>
-      <span
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          left: "50%",
-          top: "74px",
-          width: "430px",
-          height: "190px",
-          borderRadius: "50%",
-          transform: "translateX(-50%)",
-          background:
-            "radial-gradient(ellipse, rgba(255,255,255,0.08), rgba(231,222,208,0.028) 42%, transparent 74%)",
-          filter: "blur(10px)",
-          opacity: 0.68,
-        }}
-      />
-      <span
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          left: "50%",
-          top: "189px",
-          width: "520px",
-          height: "36px",
-          borderRadius: "50%",
-          transform: "translateX(-50%)",
-          background:
-            "radial-gradient(ellipse, rgba(201,205,211,0.08), rgba(231,222,208,0.025) 46%, transparent 74%)",
-          filter: "blur(6px)",
-          opacity: 0.7,
-        }}
-      />
-      <span
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          left: "108px",
-          right: "108px",
-          top: "205px",
-          height: "1px",
-          background:
-            "linear-gradient(90deg, transparent, rgba(231,222,208,0.18), transparent)",
-          opacity: 0.4,
-        }}
-      />
-    </>
-  );
-}
+function HeroCardCaption({ card, variant }: { card: HeroCardData; variant: CarouselVariant }) {
+  const isCenter = variant === "center";
 
-function CuratorFeaturedLabel() {
   return (
-    <p
-      style={{
-        position: "absolute",
-        left: "50%",
-        top: "0",
-        zIndex: 6,
-        transform: "translateX(-50%)",
-        margin: 0,
-        color: "rgba(231,222,208,0.62)",
-        fontSize: "10px",
-        lineHeight: "13px",
-        fontWeight: 900,
-        letterSpacing: "0.28em",
-        textTransform: "uppercase",
-        whiteSpace: "nowrap",
-      }}
-    >
-      Featured Today
-    </p>
-  );
-}
-
-function CuratorDetails({ card }: { card: HeroCardData }) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: "50%",
-        bottom: "0",
-        zIndex: 6,
-        width: "520px",
-        transform: "translateX(-50%)",
-        textAlign: "center",
-        display: "grid",
-        justifyItems: "center",
-        pointerEvents: "none",
-      }}
-    >
+    <div className={`hero-v4-card-caption hero-v4-card-caption-${variant}`}>
+      <p
+        style={{
+          margin: 0,
+          color: "#D4AF37",
+          fontSize: "14px",
+          lineHeight: "17px",
+          fontWeight: 900,
+          letterSpacing: ".24em",
+          textTransform: "uppercase",
+        }}
+      >
+        FEATURED CARD
+      </p>
       <h2
         style={{
-          maxWidth: "456px",
-          margin: 0,
-          color: "#fff",
-          fontSize: "25px",
-          lineHeight: "30px",
-          fontWeight: 900,
-          letterSpacing: "0",
+          maxWidth: isCenter ? "295px" : "235px",
+          margin: "0",
+          color: "rgba(255,255,255,0.95)",
+          fontSize: "18px",
+          lineHeight: "22px",
+          fontWeight: 600,
+          letterSpacing: "-0.01em",
           display: "-webkit-box",
           overflow: "hidden",
           WebkitBoxOrient: "vertical",
@@ -432,55 +327,38 @@ function CuratorDetails({ card }: { card: HeroCardData }) {
       </h2>
       <p
         style={{
-          maxWidth: "360px",
-          margin: "4px 0 0",
-          color: "rgba(201,205,211,0.66)",
-          fontSize: "11px",
-          lineHeight: "14px",
-          fontWeight: 800,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {card.subtitle}
-      </p>
-      <p
-        style={{
-          margin: "7px 0 0",
-          color: "#E7DED0",
+          margin: 0,
+          color: "rgba(231,222,208,0.94)",
           fontSize: "22px",
-          lineHeight: "24px",
-          fontWeight: 900,
+          lineHeight: "26px",
+          fontWeight: 700,
         }}
       >
         {card.price}
       </p>
-      <Link
-        href={card.href}
+      <span
+        className="hero-v4-view-listing"
+        aria-hidden="true"
         style={{
-          height: "35px",
-          minWidth: "120px",
-          marginTop: "10px",
+          height: "32px",
+          minWidth: "116px",
           borderRadius: "999px",
-          border: "1px solid rgba(231,222,208,0.28)",
-          background: "rgba(231,222,208,0.96)",
+          border: "1px solid rgba(231,222,208,0.50)",
+          background: "rgba(231,222,208,0.92)",
           color: "#111",
-          textDecoration: "none",
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
           padding: "0 15px",
-          fontSize: "12px",
-          lineHeight: "15px",
+          fontSize: "11px",
+          lineHeight: "13px",
           fontWeight: 900,
-          boxShadow:
-            "0 14px 30px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.38)",
-          pointerEvents: "auto",
+          letterSpacing: "0.04em",
+          boxShadow: "0 16px 28px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.36)",
         }}
       >
         View Listing
-      </Link>
+      </span>
     </div>
   );
 }
@@ -830,9 +708,7 @@ function getInitials(name: string) {
 }
 
 function getProfileSlug(profile: ProfileRow | undefined, sellerId: string) {
-  const username = profile?.username?.replace(/^@/, "").trim();
-
-  return username ? encodeURIComponent(username) : sellerId;
+  return getPublicCollectorSlug(profile, sellerId);
 }
 
 function getListingImage(listing: HomeListingRow) {
@@ -1309,7 +1185,10 @@ export default function Home() {
   const activeCarouselIndex = featuredCards.length
     ? activeIndex % featuredCards.length
     : 0;
-  const activeHeroCard = featuredCards[activeCarouselIndex] || null;
+  const visibleHeroCards = useMemo(
+    () => getVisibleHeroCards(featuredCards, activeCarouselIndex),
+    [activeCarouselIndex, featuredCards],
+  );
 
   const showPreviousCard = () => {
     if (featuredCards.length <= 1) {
@@ -1335,10 +1214,11 @@ export default function Home() {
 
   return (
     <main
+      className="homepage-page"
       style={{
         minHeight: "100vh",
-        minWidth: "1280px",
-        overflowX: "auto",
+        minWidth: 0,
+        overflowX: "hidden",
         background:
           "radial-gradient(circle at 59% 120px, rgba(255,255,255,0.06), transparent 28%), linear-gradient(180deg,#000 0%,#030303 58%,#000 100%)",
         color: "#fafafa",
@@ -1355,20 +1235,226 @@ export default function Home() {
             border-color: rgba(231, 222, 208, 0.42) !important;
             box-shadow: 0 0 28px rgba(201, 205, 211, 0.08);
           }
+          .homepage-hero-v4 {
+            --hero-v4-composition-shift: 108px;
+            isolation: isolate;
+            width: min(1500px, calc(100vw - 48px));
+            max-width: 1500px;
+            margin-left: 50%;
+            transform: translateX(-50%);
+            background-image: url("/images/homepage-hero-background-v3.jpg");
+            background-size: cover;
+            background-position: center center;
+            background-repeat: no-repeat;
+            background-attachment: local;
+          }
+          .homepage-hero-v4::before {
+            content: "";
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 380px;
+            z-index: 1;
+            pointer-events: none;
+            background: linear-gradient(
+              90deg,
+              rgba(7,7,7,.92) 0%,
+              rgba(7,7,7,.82) 18%,
+              rgba(7,7,7,.55) 36%,
+              rgba(7,7,7,.12) 52%,
+              transparent 65%
+            );
+          }
+          .hero-v4-copy {
+            position: absolute;
+            left: clamp(46px, 5.2vw, 82px);
+            top: 50%;
+            width: 380px;
+            transform: translateY(-50%);
+            z-index: 3;
+          }
+          .hero-v4-stage {
+            position: absolute;
+            inset: 0;
+            z-index: 2;
+            height: 100%;
+            min-width: 0;
+            overflow: hidden;
+            perspective: 1200px;
+            transform-style: preserve-3d;
+          }
+          .hero-v4-card-link {
+            position: absolute;
+            left: calc(54% + var(--hero-v4-composition-shift) + var(--hero-v4-x));
+            top: 58px;
+            height: calc(100% - 58px);
+            width: var(--hero-v4-width);
+            color: inherit;
+            text-decoration: none;
+            opacity: var(--hero-v4-opacity);
+            z-index: var(--hero-v4-z);
+            transform:
+              translateX(-50%)
+              translateX(var(--hero-v4-translate-x))
+              translateY(var(--hero-v4-translate-y))
+              rotateY(var(--hero-v4-rotate-y))
+              scale(var(--hero-v4-scale));
+            transform-origin: center top;
+            transform-style: preserve-3d;
+            transition:
+              left 720ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              transform 720ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              opacity 560ms ease;
+          }
+          .hero-v4-card-display {
+            position: relative;
+            display: grid;
+            justify-items: center;
+            align-items: end;
+            gap: 0;
+            height: 100%;
+            width: var(--hero-v4-width);
+            transform-style: preserve-3d;
+          }
+          .hero-v4-artwork-wrap {
+            position: relative;
+            transform-style: preserve-3d;
+          }
+          .hero-v4-card-caption {
+            position: absolute;
+            left: 50%;
+            top: var(--hero-v4-height);
+            transform: translateX(-50%);
+            z-index: 3;
+            width: var(--hero-v4-width);
+            text-align: center;
+            display: grid;
+            gap: 5px;
+            justify-items: center;
+            text-shadow: 0 2px 18px rgba(0,0,0,0.92);
+          }
+          .hero-v4-view-listing {
+            transition: border-color 180ms ease, background 180ms ease;
+          }
+          .hero-v4-card-link:focus-visible .hero-v4-view-listing {
+            border-color: rgba(231,222,208,0.58);
+            outline: 2px solid rgba(231,222,208,0.38);
+            outline-offset: 3px;
+          }
+          @media (max-width: 1600px) and (min-width: 1321px) {
+            .hero-v4-card-link {
+              left: calc(54% + var(--hero-v4-composition-shift) + var(--hero-v4-wide-x));
+              transform:
+                translateX(-50%)
+                translateX(var(--hero-v4-wide-translate-x))
+                translateY(var(--hero-v4-wide-translate-y))
+                rotateY(var(--hero-v4-rotate-y))
+                scale(var(--hero-v4-wide-scale));
+            }
+          }
+          @media (max-width: 1320px) and (min-width: 981px) {
+            .hero-v4-card-link {
+              left: calc(56% + var(--hero-v4-composition-shift) + var(--hero-v4-compact-x));
+              transform:
+                translateX(-50%)
+                translateX(var(--hero-v4-compact-translate-x))
+                translateY(var(--hero-v4-compact-translate-y))
+                rotateY(var(--hero-v4-rotate-y))
+                scale(var(--hero-v4-compact-scale));
+            }
+          }
+          @media (max-width: 980px) {
+            .homepage-hero-v4 {
+              --hero-v4-composition-shift: 44px;
+              height: 500px !important;
+            }
+            .hero-v4-copy {
+              left: 34px;
+              width: 340px;
+            }
+            .hero-v4-copy h1 {
+              font-size: 48px !important;
+              line-height: 52px !important;
+            }
+            .hero-v4-copy p {
+              width: auto !important;
+            }
+            .hero-v4-card-link {
+              left: calc(66% + var(--hero-v4-composition-shift) + var(--hero-v4-tablet-x));
+              top: 56px;
+              height: calc(100% - 56px);
+              transform:
+                translateX(-50%)
+                translateX(var(--hero-v4-tablet-translate-x))
+                translateY(var(--hero-v4-tablet-translate-y))
+                rotateY(var(--hero-v4-rotate-y))
+                scale(var(--hero-v4-tablet-scale));
+            }
+          }
+          @media (max-width: 680px) {
+            .homepage-page {
+              overflow-x: hidden;
+            }
+            .homepage-hero-v4 {
+              --hero-v4-composition-shift: 18px;
+              height: 520px !important;
+              border-radius: 0 !important;
+            }
+            .hero-v4-copy {
+              left: 20px;
+              top: 112px;
+              width: 172px;
+            }
+            .hero-v4-copy h1 {
+              font-size: 30px !important;
+              line-height: 34px !important;
+            }
+            .hero-v4-copy p {
+              font-size: 12px !important;
+              line-height: 18px !important;
+              width: auto !important;
+            }
+            .hero-v4-copy > div {
+              flex-wrap: wrap;
+              gap: 10px !important;
+            }
+            .hero-v4-copy a {
+              min-width: 0 !important;
+              width: 100% !important;
+              height: 40px !important;
+              font-size: 12px !important;
+            }
+            .hero-v4-card-link {
+              left: calc(72% + var(--hero-v4-composition-shift) + var(--hero-v4-mobile-x));
+              top: 188px;
+              height: calc(100% - 188px);
+              transform:
+                translateX(-50%)
+                translateX(var(--hero-v4-mobile-translate-x))
+                translateY(var(--hero-v4-mobile-translate-y))
+                rotateY(var(--hero-v4-rotate-y))
+                scale(var(--hero-v4-mobile-scale));
+            }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .hero-v4-card-link {
+              transition: none !important;
+            }
+          }
         `}
       </style>
 
-      <div style={{ width: "1240px", margin: "0 auto", padding: "8px 0 34px" }}>
+      <div
+        className="homepage-shell"
+        style={{ width: "min(1240px, calc(100vw - 32px))", margin: "0 auto", padding: "8px 0 34px" }}
+      >
         <Header />
 
         <section
+          className="homepage-hero-v4"
           style={{
-            height: "386px",
+            height: "520px",
             marginTop: "10px",
-            border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: "10px",
-            background:
-              "radial-gradient(circle at 62% 45%, rgba(255,255,255,0.15), transparent 22%), radial-gradient(circle at 76% 50%, rgba(201,205,211,0.06), transparent 28%), linear-gradient(90deg,#020202 0%,#080808 52%,#020202 100%)",
+            backgroundColor: "#030303",
             position: "relative",
             overflow: "hidden",
           }}
@@ -1382,15 +1468,15 @@ export default function Home() {
               left: "17px",
               top: "50%",
               transform: "translateY(-50%)",
-              width: "34px",
-              height: "34px",
+              width: "38px",
+              height: "38px",
               borderRadius: "999px",
-              border: "1px solid #26262d",
-              background: "rgba(5,5,6,0.78)",
-              color: "#d4d4d8",
+              border: "1px solid rgba(231,222,208,0.30)",
+              background: "rgba(5,5,6,0.64)",
+              color: "#E7DED0",
               fontSize: "18px",
               lineHeight: "28px",
-              zIndex: 6,
+              zIndex: 8,
               cursor: featuredCards.length > 1 ? "pointer" : "default",
               opacity: featuredCards.length > 1 ? 1 : 0.45,
             }}
@@ -1406,15 +1492,15 @@ export default function Home() {
               right: "17px",
               top: "50%",
               transform: "translateY(-50%)",
-              width: "34px",
-              height: "34px",
+              width: "38px",
+              height: "38px",
               borderRadius: "999px",
-              border: "1px solid #26262d",
-              background: "rgba(5,5,6,0.78)",
-              color: "#d4d4d8",
+              border: "1px solid rgba(231,222,208,0.30)",
+              background: "rgba(5,5,6,0.64)",
+              color: "#E7DED0",
               fontSize: "18px",
               lineHeight: "28px",
-              zIndex: 6,
+              zIndex: 8,
               cursor: featuredCards.length > 1 ? "pointer" : "default",
               opacity: featuredCards.length > 1 ? 1 : 0.45,
             }}
@@ -1423,19 +1509,15 @@ export default function Home() {
           </button>
 
           <div
+            className="homepage-hero-canvas-layers"
             style={{
-              position: "relative",
+              position: "absolute",
+              inset: 0,
               zIndex: 2,
-              height: "100%",
-              display: "grid",
-              gridTemplateColumns: "370px 1fr",
-              alignItems: "center",
-              gap: "34px",
-              padding: "0 72px",
               boxSizing: "border-box",
             }}
           >
-            <div>
+            <div className="hero-v4-copy">
               <p
                 style={{
                   margin: "0 0 14px",
@@ -1520,16 +1602,15 @@ export default function Home() {
             </div>
 
             <div
+              className="hero-v4-stage"
               style={{
-                height: "330px",
-                position: "relative",
-                overflow: "visible",
+                height: "100%",
+                position: "absolute",
+                inset: 0,
+                overflow: "hidden",
                 isolation: "isolate",
               }}
             >
-              <CuratorAmbient />
-              {activeHeroCard ? <CuratorFeaturedLabel /> : null}
-
               {isLoadingHomeData && featuredCards.length === 0 ? (
                 <article
                   style={{
@@ -1607,43 +1688,50 @@ export default function Home() {
                 </article>
               ) : null}
 
-              {featuredCards.map((card, index) => {
-                const slot = getCarouselSlot(index, activeCarouselIndex, featuredCards.length);
-                const isActive = index === activeCarouselIndex;
-                const cardVariant: CarouselVariant = isActive
-                  ? "center"
-                  : slot.zIndex === 2
-                    ? "back"
-                    : "side";
-
+              {visibleHeroCards.map(({ card, slot, slotName, variant }) => {
                 return (
                   <Link
-                    key={card.href}
+                    key={`${slotName}-${card.href}`}
+                    className={`hero-v4-card-link hero-v4-card-link-${slotName}`}
                     href={card.href}
                     aria-label={`View ${card.title}`}
-                    style={{
-                      position: "absolute",
-                      left: `calc(50% + ${slot.x}px)`,
-                      top: `calc(50% + ${slot.y}px)`,
-                      transform: `translate(-50%, -50%) scale(${slot.scale})`,
-                      transformOrigin: "center",
-                      opacity: slot.opacity,
-                      zIndex: slot.zIndex,
-                      filter: slot.blur ? `blur(${slot.blur}px)` : "none",
-                      transition:
-                        "left 680ms cubic-bezier(0.2, 0.8, 0.2, 1), top 680ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 680ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 560ms ease, filter 680ms ease",
-                      color: "inherit",
-                      textDecoration: "none",
-                    }}
+                    style={
+                      {
+                        "--hero-v4-x": `${slot.x}px`,
+                        "--hero-v4-translate-x": `${slot.translateX}px`,
+                        "--hero-v4-translate-y": `${slot.translateY}px`,
+                        "--hero-v4-rotate-y": `${slot.rotateY}deg`,
+                        "--hero-v4-scale": `${slot.scale}`,
+                        "--hero-v4-opacity": `${slot.opacity}`,
+                        "--hero-v4-z": `${slot.zIndex}`,
+                        "--hero-v4-width": `${slot.width}px`,
+                        "--hero-v4-height": `${slot.height}px`,
+                        "--hero-v4-wide-x": `${slot.x * 0.78}px`,
+                        "--hero-v4-wide-translate-x": `${slot.translateX * 0.78}px`,
+                        "--hero-v4-wide-translate-y": `${slot.translateY * 0.78}px`,
+                        "--hero-v4-wide-scale": `${slot.scale * 0.78}`,
+                        "--hero-v4-compact-x": `${slot.x * 0.72}px`,
+                        "--hero-v4-compact-translate-x": `${slot.translateX * 0.72}px`,
+                        "--hero-v4-compact-translate-y": `${slot.translateY * 0.72}px`,
+                        "--hero-v4-compact-scale": `${slot.scale * 0.72}`,
+                        "--hero-v4-tablet-x": `${slot.x * 0.48}px`,
+                        "--hero-v4-tablet-translate-x": `${slot.translateX * 0.48}px`,
+                        "--hero-v4-tablet-translate-y": `${slot.translateY}px`,
+                        "--hero-v4-tablet-scale": `${slot.scale * 0.48}`,
+                        "--hero-v4-mobile-x": `${slot.x * 0.28}px`,
+                        "--hero-v4-mobile-translate-x": `${slot.translateX * 0.28}px`,
+                        "--hero-v4-mobile-translate-y": `${slot.translateY * 0.48}px`,
+                        "--hero-v4-mobile-scale": `${slot.scale * 0.28}`,
+                      } as CSSProperties
+                    }
                   >
-                    <CuratorCollectible card={card} variant={cardVariant} />
+                    <div className={`hero-v4-card-display hero-v4-card-display-${variant}`}>
+                      <CuratorCollectible card={card} variant={variant} />
+                      <HeroCardCaption card={card} variant={variant} />
+                    </div>
                   </Link>
                 );
               })}
-
-              {activeHeroCard ? (
-                <CuratorDetails card={activeHeroCard} />
-              ) : null}
             </div>
           </div>
         </section>

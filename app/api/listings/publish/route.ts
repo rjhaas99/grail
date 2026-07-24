@@ -35,6 +35,9 @@ const allowedListingFieldKeys = [
   "cert_number",
   "condition",
   "price",
+  "minimum_offer_amount",
+  "offers_enabled",
+  "offer_acceptance",
   "sale_format",
   "auction_status",
   "auction_duration_days",
@@ -119,6 +122,8 @@ function buildPayloadSummary({
     price: fields.price ?? null,
     auctionStartingBid: fields.auction_starting_bid ?? null,
     shippingProfileId: fields.shipping_profile_id ?? null,
+    minimumOfferAmount: fields.minimum_offer_amount ?? null,
+    offerAcceptance: fields.offer_acceptance ?? null,
     psaState: fields.psa_verified ? "verified" : "not_verified",
     frontImagePresent,
     backImagePresent,
@@ -141,7 +146,9 @@ async function validatePublishPayload({
   const saleFormat = getString(fields.sale_format) || "fixed";
   const cardType = getString(fields.card_type);
   const price = getNumber(fields.price);
+  const minimumOfferAmount = getNumber(fields.minimum_offer_amount);
   const startingBid = getNumber(fields.auction_starting_bid);
+  const offerAcceptance = getString(fields.offer_acceptance) || "manual";
 
   if (!["active", "collection", "pending_reserve_fee"].includes(status)) {
     return {
@@ -212,6 +219,25 @@ async function validatePublishPayload({
       field: "price",
       validationFailure: "invalid_price",
       message: "Price must be greater than $0.",
+    };
+  }
+
+  if (isCollectionCard && minimumOfferAmount <= 0) {
+    return {
+      field: "minimum_offer_amount",
+      validationFailure: "required_field",
+      message: "Minimum offer is required for collection-only cards.",
+    };
+  }
+
+  if (
+    fields.offer_acceptance &&
+    !["manual", "auto_accept_at_minimum"].includes(offerAcceptance)
+  ) {
+    return {
+      field: "offer_acceptance",
+      validationFailure: "invalid_offer_acceptance",
+      message: "Offer acceptance setting is invalid.",
     };
   }
 

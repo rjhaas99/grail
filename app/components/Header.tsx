@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabase";
+import CollectorLevelBadge from "./CollectorLevelBadge";
 import type { GrailPassMembership } from "../lib/grailPass";
 import { calculateProgression, type ProgressionSummary } from "../lib/progression";
 
@@ -700,25 +701,7 @@ export default function Header() {
               >
                 {accountName}
               </span>
-              <span
-                title={`Level ${progression.level} ${progression.title}`}
-                style={{
-                  border: `1px solid ${progression.border}`,
-                  borderRadius: "999px",
-                  background: "rgba(231,222,208,0.055)",
-                  color: progression.accent,
-                  minWidth: "26px",
-                  height: "20px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "10px",
-                  fontWeight: 900,
-                  flexShrink: 0,
-                }}
-              >
-                L{progression.level}
-              </span>
+              <CollectorLevelBadge level={progression.level} rank={progression.title} size={24} />
               {notificationUnreadCount > 0 ? (
                 <span
                   aria-label={`${notificationUnreadCount} unread notifications`}
@@ -771,17 +754,31 @@ export default function Header() {
                   >
                     {accountName}
                   </p>
-                  <p
+                  <div
                     style={{
-                      margin: "3px 0 0",
-                      color: "#8d949d",
-                      fontSize: "12px",
-                      lineHeight: "15px",
-                      fontWeight: 700,
+                      marginTop: "7px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
                     }}
                   >
-                    Level {progression.level} {progression.title}
-                  </p>
+                    <CollectorLevelBadge
+                      level={progression.level}
+                      rank={progression.title}
+                      size={34}
+                    />
+                    <p
+                      style={{
+                        margin: 0,
+                        color: "#8d949d",
+                        fontSize: "12px",
+                        lineHeight: "15px",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Level {progression.level} {progression.title}
+                    </p>
+                  </div>
                   <div
                     style={{
                       marginTop: "9px",

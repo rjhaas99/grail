@@ -3,7 +3,9 @@ import Stripe from "stripe";
 import {
   createServiceSupabaseClient,
   getAuthenticatedUser,
+  getGrailPassErrorResponse,
   grantGrailPassMonthlyCreditForInvoice,
+  logGrailPassDiagnostic,
   syncGrailPassSubscriptionFromStripe,
 } from "../../../../lib/grailPassSubscription";
 import { createStripeClient } from "../../../../lib/stripeCustomers";
@@ -15,9 +17,14 @@ type SyncBody = {
 };
 
 export async function POST(request: Request) {
+  logGrailPassDiagnostic("subscription_sync.route_entered", request);
   const { user, error } = await getAuthenticatedUser(request);
 
   if (!user) {
+    logGrailPassDiagnostic("subscription_sync.auth_failed", request, {
+      authenticatedUserFound: false,
+      failureBranch: "not_authenticated",
+    });
     return NextResponse.json(
       { error: error || "Sign in to synchronize GRAIL Pass." },
       { status: 401 },
@@ -35,10 +42,17 @@ export async function POST(request: Request) {
   const sessionId = body.sessionId?.trim();
 
   if (!sessionId) {
+    logGrailPassDiagnostic("subscription_sync.session_missing", request, {
+      authenticatedUserFound: true,
+      failureBranch: "missing_checkout_session",
+    });
     return NextResponse.json({ error: "Checkout session is required." }, { status: 400 });
   }
 
   try {
+    logGrailPassDiagnostic("subscription_sync.authenticated", request, {
+      authenticatedUserFound: true,
+    });
     const stripe = createStripeClient();
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["subscription", "subscription.latest_invoice"],
@@ -97,11 +111,30 @@ export async function POST(request: Request) {
       plan: row.plan,
     });
   } catch (syncError) {
-    console.error("GRAIL Pass checkout sync error:", syncError);
+    const mappedError = getGrailPassErrorResponse(syncError);
+    const stripeError = syncError as { type?: string; message?: string };
+
+    console.error("GRAIL Pass checkout sync error:", {
+      error: syncError,
+      failureBranch: mappedError.failureBranch,
+      stripeErrorType: stripeError.type || null,
+      stripeErrorMessage: stripeError.message || null,
+    });
+    logGrailPassDiagnostic("subscription_sync.failed", request, {
+      authenticatedUserFound: true,
+      failureBranch: mappedError.failureBranch,
+      stripeErrorType: stripeError.type || null,
+      stripeErrorMessage: stripeError.message || null,
+    });
 
     return NextResponse.json(
-      { error: "GRAIL Pass checkout could not be synchronized." },
-      { status: 500 },
+      {
+        error:
+          mappedError.failureBranch === "unknown_failure"
+            ? "GRAIL Pass checkout could not be synchronized."
+            : mappedError.error,
+      },
+      { status: mappedError.failureBranch === "unknown_failure" ? 500 : mappedError.status },
     );
   }
 }

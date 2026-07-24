@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="elite-title elite-desc">
+  <title id="elite-title">ELITE Collector Level Badge</title>
+  <desc id="elite-desc">GRAIL ELITE collector rank medallion, levels 26–30.</desc>
+  <defs>
+    <radialGradient id="metalBody" cx="34%" cy="22%" r="76%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="17%" stop-color="#E1C16D"/>
+      <stop offset="44%" stop-color="#2F3C3D"/>
+      <stop offset="68%" stop-color="#111316"/>
+      <stop offset="100%" stop-color="#E7E8EA"/>
+    </radialGradient>
+    <radialGradient id="enamel" cx="35%" cy="22%" r="72%">
+      <stop offset="0%" stop-color="#08A7B8"/>
+      <stop offset="38%" stop-color="#077982"/>
+      <stop offset="100%" stop-color="#063A42"/>
+    </radialGradient>
+    <linearGradient id="brightMetal" x1="24%" y1="8%" x2="78%" y2="92%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="18%" stop-color="#D9DDE1"/>
+      <stop offset="48%" stop-color="#6F747B"/>
+      <stop offset="72%" stop-color="#F6F7F8"/>
+      <stop offset="100%" stop-color="#23272C"/>
+    </linearGradient>
+    <linearGradient id="goldFacet" x1="20%" y1="8%" x2="82%" y2="94%">
+      <stop offset="0%" stop-color="#FFF7BE"/>
+      <stop offset="25%" stop-color="#F0C35A"/>
+      <stop offset="52%" stop-color="#9C6612"/>
+      <stop offset="78%" stop-color="#FFE28C"/>
+      <stop offset="100%" stop-color="#5E3A08"/>
+    </linearGradient>
+    <radialGradient id="darkFacet" cx="35%" cy="18%" r="72%">
+      <stop offset="0%" stop-color="#5E636A"/>
+      <stop offset="46%" stop-color="#17191D"/>
+      <stop offset="100%" stop-color="#050506"/>
+    </radialGradient>
+    <filter id="shadow" x="-18%" y="-18%" width="136%" height="136%">
+      <feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#000000" flood-opacity="0.52"/>
+      <feDropShadow dx="0" dy="1" stdDeviation="1.4" flood-color="#FFFFFF" flood-opacity="0.18"/>
+    </filter>
+    <filter id="innerGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#shadow)">
+    <polygon points="128.00,16.00 139.31,27.64 152.92,18.81 161.36,32.67 176.59,27.09 181.74,42.48 197.83,40.43 199.42,56.58 215.57,58.17 213.52,74.26 228.91,79.41 223.33,94.64 237.19,103.08 228.36,116.69 240.00,128.00 228.36,139.31 237.19,152.92 223.33,161.36 228.91,176.59 213.52,181.74 215.57,197.83 199.42,199.42 197.83,215.57 181.74,213.52 176.59,228.91 161.36,223.33 152.92,237.19 139.31,228.36 128.00,240.00 116.69,228.36 103.08,237.19 94.64,223.33 79.41,228.91 74.26,213.52 58.17,215.57 56.58,199.42 40.43,197.83 42.48,181.74 27.09,176.59 32.67,161.36 18.81,152.92 27.64,139.31 16.00,128.00 27.64,116.69 18.81,103.08 32.67,94.64 27.09,79.41 42.48,74.26 40.43,58.17 56.58,56.58 58.17,40.43 74.26,42.48 79.41,27.09 94.64,32.67 103.08,18.81 116.69,27.64" fill="url(#metalBody)" stroke="#0A0B0D" stroke-width="3"/>
+    <polygon points="128.00,27.00 142.70,35.16 159.21,31.94 170.68,44.25 187.37,46.29 194.47,61.53 209.71,68.63 211.75,85.32 224.06,96.79 220.84,113.30 229.00,128.00 220.84,142.70 224.06,159.21 211.75,170.68 209.71,187.37 194.47,194.47 187.37,209.71 170.68,211.75 159.21,224.06 142.70,220.84 128.00,229.00 113.30,220.84 96.79,224.06 85.32,211.75 68.63,209.71 61.53,194.47 46.29,187.37 44.25,170.68 31.94,159.21 35.16,142.70 27.00,128.00 35.16,113.30 31.94,96.79 44.25,85.32 46.29,68.63 61.53,61.53 68.63,46.29 85.32,44.25 96.79,31.94 113.30,35.16" fill="#111316" opacity="0.52"/>
+    <circle cx="128" cy="128" r="91" fill="url(#metalBody)" stroke="#F8F9FA" stroke-opacity="0.44" stroke-width="3"/>
+    <circle cx="128" cy="128" r="81" fill="#050506" stroke="#1E2227" stroke-width="4"/>
+    <circle cx="128" cy="128" r="73" fill="url(#enamel)" stroke="url(#brightMetal)" stroke-width="5"/>
+    <circle cx="128" cy="128" r="58" fill="none" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="2"/>
+    <circle cx="128" cy="128" r="48" fill="none" stroke="#000000" stroke-opacity="0.30" stroke-width="2"/>
+    <path d="M57 104 C79 43 170 42 199 103" fill="none" stroke="#FFFFFF" stroke-opacity="0.30" stroke-width="8" stroke-linecap="round"/>
+    <path d="M59 177 C88 216 164 220 197 176" fill="none" stroke="#000000" stroke-opacity="0.36" stroke-width="9" stroke-linecap="round"/>
+    <g filter="url(#innerGlow)">
+      
+        <path d="M41 139 L84 95 L114 150 L128 171 L142 150 L172 95 L215 139 L181 158 L155 137 L128 196 L101 137 L75 158 Z" fill="url(#goldFacet)" stroke="#4E3308" stroke-width="4"/>
+        <path d="M76 116 L104 139 L88 147 L57 135 Z M180 116 L152 139 L168 147 L199 135 Z" fill="#FFF0B1" opacity="0.36"/>
+        <path d="M85 155 L128 112 L171 155 L156 169 L128 143 L100 169 Z" fill="url(#goldFacet)" stroke="#4E3308" stroke-width="4"/>
+        <path d="M102 119 L128 92 L154 119 L141 133 L128 119 L115 133 Z" fill="url(#goldFacet)" stroke="#4E3308" stroke-width="3"/>
+      
+    </g>
+    <polygon points="128.00,11.00 132.24,20.76 142.00,25.00 132.24,29.24 128.00,39.00 123.76,29.24 114.00,25.00 123.76,20.76" fill="url(#brightMetal)" stroke="#0A0B0D" stroke-width="2"/>
+    <polygon points="128.00,217.00 132.24,226.76 142.00,231.00 132.24,235.24 128.00,245.00 123.76,235.24 114.00,231.00 123.76,226.76" fill="url(#brightMetal)" stroke="#0A0B0D" stroke-width="2"/>
+    <polygon points="25.00,114.00 29.24,123.76 39.00,128.00 29.24,132.24 25.00,142.00 20.76,132.24 11.00,128.00 20.76,123.76" fill="url(#brightMetal)" stroke="#0A0B0D" stroke-width="2"/>
+    <polygon points="231.00,114.00 235.24,123.76 245.00,128.00 235.24,132.24 231.00,142.00 226.76,132.24 217.00,128.00 226.76,123.76" fill="url(#brightMetal)" stroke="#0A0B0D" stroke-width="2"/>
+  </g>
+</svg>

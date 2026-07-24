@@ -7,6 +7,7 @@ import { supabase } from "../../lib/supabase";
 import Header from "../components/Header";
 import {
   formatSavedCurrency,
+  type SavedCollectionItem,
   type SavedListingItem,
 } from "../lib/savedItems";
 
@@ -15,7 +16,13 @@ type SavedItemsResponse = {
   error?: string;
 };
 
+type SavedCollectionsResponse = {
+  items?: SavedCollectionItem[];
+  error?: string;
+};
+
 type WatchFilter = "All" | "Active" | "Auctions" | "Sold" | "Below Market";
+type WatchSection = "cards" | "collections";
 
 const filters: WatchFilter[] = ["All", "Active", "Auctions", "Sold", "Below Market"];
 
@@ -80,6 +87,7 @@ function CardArtwork({ item }: { item: SavedListingItem }) {
           height={196}
           className="card-image"
           sizes="140px"
+          unoptimized
         />
       ) : (
         <div className="card-art" aria-hidden="true">
@@ -93,10 +101,13 @@ function CardArtwork({ item }: { item: SavedListingItem }) {
 
 export default function WatchedCardsPage() {
   const [items, setItems] = useState<SavedListingItem[]>([]);
+  const [collectionItems, setCollectionItems] = useState<SavedCollectionItem[]>([]);
+  const [activeSection, setActiveSection] = useState<WatchSection>("cards");
   const [activeFilter, setActiveFilter] = useState<WatchFilter>("All");
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [removingListingId, setRemovingListingId] = useState("");
+  const [removingCollectionOwnerId, setRemovingCollectionOwnerId] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -112,6 +123,7 @@ export default function WatchedCardsPage() {
       if (!session?.access_token) {
         if (isMounted) {
           setItems([]);
+          setCollectionItems([]);
           setNotice("Sign in to view your saved marketplace cards.");
           setIsLoading(false);
         }
@@ -119,20 +131,34 @@ export default function WatchedCardsPage() {
       }
 
       try {
-        const response = await fetch("/api/saved-items?itemType=listing", {
-          cache: "no-store",
-          headers: {
-            authorization: `Bearer ${session.access_token}`,
-          },
-        });
-        const payload = (await response.json()) as SavedItemsResponse;
+        const [listingResponse, collectionResponse] = await Promise.all([
+          fetch("/api/saved-items?itemType=listing", {
+            cache: "no-store",
+            headers: {
+              authorization: `Bearer ${session.access_token}`,
+            },
+          }),
+          fetch("/api/saved-items?itemType=collection", {
+            cache: "no-store",
+            headers: {
+              authorization: `Bearer ${session.access_token}`,
+            },
+          }),
+        ]);
+        const listingPayload = (await listingResponse.json()) as SavedItemsResponse;
+        const collectionPayload = (await collectionResponse.json()) as SavedCollectionsResponse;
 
-        if (!response.ok) {
-          throw new Error(payload.error || "Watched cards could not be loaded.");
+        if (!listingResponse.ok) {
+          throw new Error(listingPayload.error || "Watched cards could not be loaded.");
+        }
+
+        if (!collectionResponse.ok) {
+          throw new Error(collectionPayload.error || "Followed collections could not be loaded.");
         }
 
         if (isMounted) {
-          setItems(payload.items || []);
+          setItems(listingPayload.items || []);
+          setCollectionItems(collectionPayload.items || []);
           setNotice("");
         }
       } catch (error) {
@@ -140,6 +166,7 @@ export default function WatchedCardsPage() {
 
         if (isMounted) {
           setItems([]);
+          setCollectionItems([]);
           setNotice(error instanceof Error ? error.message : "Watched cards could not be loaded.");
         }
       } finally {
@@ -167,14 +194,6 @@ export default function WatchedCardsPage() {
     () => items.filter((item) => getFilterMatch(item, activeFilter)),
     [activeFilter, items],
   );
-  const pricedItems = items.filter((item) => item.marketValue > 0 || item.price > 0);
-  const avgMarketValue =
-    pricedItems.length === 0
-      ? 0
-      : Math.round(
-          pricedItems.reduce((sum, item) => sum + (item.marketValue || item.price), 0) /
-            pricedItems.length,
-        );
   const belowMarketCount = items.filter(isBelowMarket).length;
   const activeAuctionCount = items.filter((item) => item.status === "Auction Live" || item.status === "Auction Ending Soon").length;
 
@@ -216,6 +235,54 @@ export default function WatchedCardsPage() {
     }
   }
 
+  async function removeFollowedCollection(item: SavedCollectionItem) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setNotice("Sign in to remove followed collections.");
+      return;
+    }
+
+    setRemovingCollectionOwnerId(item.collectionOwnerId);
+    setNotice("");
+
+    try {
+      const response = await fetch(
+        `/api/saved-items?itemType=collection&collectionOwnerId=${encodeURIComponent(
+          item.collectionOwnerId,
+        )}`,
+        {
+          method: "DELETE",
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+          },
+        },
+      );
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Collection follow could not be removed.");
+      }
+
+      setCollectionItems((current) =>
+        current.filter(
+          (savedItem) => savedItem.collectionOwnerId !== item.collectionOwnerId,
+        ),
+      );
+    } catch (error) {
+      console.error("Followed collection remove error:", error);
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Collection follow could not be removed.",
+      );
+    } finally {
+      setRemovingCollectionOwnerId("");
+    }
+  }
+
   return (
     <main className="watched-page">
       <style>{pageStyles}</style>
@@ -225,28 +292,47 @@ export default function WatchedCardsPage() {
         <section className="page-heading">
           <span>Saved Marketplace</span>
           <h1>Watched Cards</h1>
-          <p>Track real listings you have saved, including active cards, auction status, and sold items.</p>
+          <p>Track real listings and followed collections from one marketplace watchlist.</p>
+        </section>
+
+        <section className="watch-section-tabs panel" aria-label="Watchlist sections">
+          <button
+            type="button"
+            className={activeSection === "cards" ? "active" : ""}
+            onClick={() => setActiveSection("cards")}
+          >
+            Watched Cards
+          </button>
+          <button
+            type="button"
+            className={activeSection === "collections" ? "active" : ""}
+            onClick={() => setActiveSection("collections")}
+          >
+            Followed Collections
+          </button>
         </section>
 
         <section className="stats-grid">
           <div className="panel stat-card"><span>Watched Cards</span><strong>{items.length}</strong></div>
-          <div className="panel stat-card"><span>Avg Market Value</span><strong>{formatSavedCurrency(avgMarketValue)}</strong></div>
+          <div className="panel stat-card"><span>Followed Collections</span><strong>{collectionItems.length}</strong></div>
           <div className="panel stat-card"><span>Below Market</span><strong>{belowMarketCount}</strong></div>
           <div className="panel stat-card"><span>Live Auctions</span><strong>{activeAuctionCount}</strong></div>
         </section>
 
-        <section className="toolbar panel" aria-label="Watched card filters">
-          {filters.map((filter) => (
-            <button
-              key={filter}
-              type="button"
-              className={activeFilter === filter ? "active" : ""}
-              onClick={() => setActiveFilter(filter)}
-            >
-              {filter}
-            </button>
-          ))}
-        </section>
+        {activeSection === "cards" ? (
+          <section className="toolbar panel" aria-label="Watched card filters">
+            {filters.map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                className={activeFilter === filter ? "active" : ""}
+                onClick={() => setActiveFilter(filter)}
+              >
+                {filter}
+              </button>
+            ))}
+          </section>
+        ) : null}
 
         {notice ? <p className="notice">{notice}</p> : null}
 
@@ -255,6 +341,44 @@ export default function WatchedCardsPage() {
             <h2>Loading watched cards.</h2>
             <p>Checking your saved marketplace cards.</p>
           </section>
+        ) : activeSection === "collections" ? (
+          collectionItems.length > 0 ? (
+            <section className="collection-watch-grid">
+              {collectionItems.map((item) => (
+                <article key={item.id} className="collection-watch-card panel">
+                  <div>
+                    <span>Followed Collection</span>
+                    <h2>{item.collectionTitle}</h2>
+                    <p>{item.collectorName}</p>
+                  </div>
+                  <div className="metric-grid collection-metrics">
+                    <span>Cards <strong>{item.cardCount}</strong></span>
+                    <span>Value <strong>{formatSavedCurrency(item.collectionValue)}</strong></span>
+                    <span>Latest <strong>{formatDate(item.latestAddedAt)}</strong></span>
+                    <span>Followed <strong>{formatDate(item.savedAt)}</strong></span>
+                  </div>
+                  <div className="card-actions">
+                    <Link href={item.route}>View Collection</Link>
+                    <button
+                      type="button"
+                      onClick={() => removeFollowedCollection(item)}
+                      disabled={removingCollectionOwnerId === item.collectionOwnerId}
+                    >
+                      {removingCollectionOwnerId === item.collectionOwnerId
+                        ? "Removing..."
+                        : "Remove Follow"}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </section>
+          ) : (
+            <section className="empty-state panel">
+              <h2>No followed collections yet.</h2>
+              <p>Follow public collections to track collector showcases alongside watched cards.</p>
+              <Link href="/browse">Browse Cards</Link>
+            </section>
+          )
         ) : visibleItems.length > 0 ? (
           <section className="watch-grid">
             {visibleItems.map((item) => (
@@ -274,7 +398,12 @@ export default function WatchedCardsPage() {
                     <span>Market <strong>{item.marketValue ? formatSavedCurrency(item.marketValue) : "Pending"}</strong></span>
                     <span>Watching <strong>{item.watchCount}</strong></span>
                     <span>Saved <strong>{formatDate(item.savedAt)}</strong></span>
-                    <span>Seller <strong>{item.sellerName}</strong></span>
+                    <span>
+                      Seller{" "}
+                      <strong>
+                        <Link href={item.sellerHref}>{item.sellerName}</Link>
+                      </strong>
+                    </span>
                     <span>
                       {item.isAuction ? "Auction" : "Listing"}
                       <strong>{item.isAuction ? formatTimeRemaining(item.auctionEndsAt) : item.status}</strong>
@@ -346,7 +475,30 @@ const pageStyles = `
     line-height: 18px;
     font-weight: 800;
   }
-  .stats-grid { margin-top: 18px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .watch-section-tabs {
+    margin-top: 18px;
+    padding: 10px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .watch-section-tabs button {
+    min-height: 38px;
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    color: #fff;
+    padding: 0 14px;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+  .watch-section-tabs button.active,
+  .watch-section-tabs button:hover {
+    border-color: rgba(212,175,55,0.62);
+    background: rgba(212,175,55,0.10);
+  }
+  .stats-grid { margin-top: 12px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
   .stat-card { padding: 14px; }
   .stat-card strong { display: block; margin-top: 8px; color: #fff; font-size: 24px; line-height: 28px; font-weight: 900; }
   .toolbar { margin-top: 16px; padding: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
@@ -382,7 +534,17 @@ const pageStyles = `
     background: rgba(231,222,208,0.11);
   }
   .watch-grid { margin-top: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .collection-watch-grid { margin-top: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
   .watch-card { padding: 14px; display: grid; grid-template-columns: 150px 1fr; gap: 14px; }
+  .collection-watch-card { padding: 16px; display: grid; gap: 14px; }
+  .collection-watch-card > div:first-child > span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
   .art-link { color: inherit; text-decoration: none; display: block; }
   .art-shell {
     width: 140px;
@@ -428,6 +590,8 @@ const pageStyles = `
   .metric-grid { margin: 12px 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .metric-grid span { color: #85858f; font-size: 11px; line-height: 15px; font-weight: 800; }
   .metric-grid strong { display: block; margin-top: 4px; color: #fff; font-size: 13px; line-height: 16px; overflow-wrap: anywhere; }
+  .metric-grid strong a { color: inherit; text-decoration: none; }
+  .metric-grid strong a:hover { text-decoration: underline; text-underline-offset: 3px; }
   .card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .empty-state {
     margin-top: 16px;
@@ -441,7 +605,7 @@ const pageStyles = `
   .empty-state a { margin-top: 10px; }
   @media (max-width: 1100px) {
     .watched-shell { width: calc(100vw - 32px); }
-    .stats-grid, .watch-grid, .watch-card, .metric-grid { grid-template-columns: 1fr; }
+    .stats-grid, .watch-grid, .collection-watch-grid, .watch-card, .metric-grid { grid-template-columns: 1fr; }
     .art-shell { width: 100%; height: 220px; }
   }
 `;

@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import {
   createServiceSupabaseClient,
   getAuthenticatedUser,
+  getGrailPassErrorResponse,
   getStoredGrailPassSubscription,
+  logGrailPassDiagnostic,
   syncGrailPassSubscriptionFromStripe,
 } from "../../../../lib/grailPassSubscription";
 import { isGrailPassSubscriptionEntitled } from "../../../../lib/grailPassPlans";
@@ -11,9 +13,14 @@ import { createStripeClient } from "../../../../lib/stripeCustomers";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  logGrailPassDiagnostic("subscription_cancel.route_entered", request);
   const { user, error } = await getAuthenticatedUser(request);
 
   if (!user) {
+    logGrailPassDiagnostic("subscription_cancel.auth_failed", request, {
+      authenticatedUserFound: false,
+      failureBranch: "not_authenticated",
+    });
     return NextResponse.json(
       { error: error || "Sign in to cancel GRAIL Pass." },
       { status: 401 },
@@ -21,6 +28,9 @@ export async function POST(request: Request) {
   }
 
   try {
+    logGrailPassDiagnostic("subscription_cancel.authenticated", request, {
+      authenticatedUserFound: true,
+    });
     const supabase = createServiceSupabaseClient();
     const row = await getStoredGrailPassSubscription(supabase, user.id);
 
@@ -58,11 +68,30 @@ export async function POST(request: Request) {
       currentPeriodEnd: synced.current_period_end,
     });
   } catch (cancelError) {
-    console.error("GRAIL Pass cancellation error:", cancelError);
+    const mappedError = getGrailPassErrorResponse(cancelError);
+    const stripeError = cancelError as { type?: string; message?: string };
+
+    console.error("GRAIL Pass cancellation error:", {
+      error: cancelError,
+      failureBranch: mappedError.failureBranch,
+      stripeErrorType: stripeError.type || null,
+      stripeErrorMessage: stripeError.message || null,
+    });
+    logGrailPassDiagnostic("subscription_cancel.failed", request, {
+      authenticatedUserFound: true,
+      failureBranch: mappedError.failureBranch,
+      stripeErrorType: stripeError.type || null,
+      stripeErrorMessage: stripeError.message || null,
+    });
 
     return NextResponse.json(
-      { error: "GRAIL Pass auto-renew could not be canceled." },
-      { status: 500 },
+      {
+        error:
+          mappedError.failureBranch === "unknown_failure"
+            ? "GRAIL Pass auto-renew could not be canceled."
+            : mappedError.error,
+      },
+      { status: mappedError.failureBranch === "unknown_failure" ? 500 : mappedError.status },
     );
   }
 }

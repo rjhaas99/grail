@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import CollectorLevelBadge from "../components/CollectorLevelBadge";
 import Header from "../components/Header";
 import { supabase } from "../../lib/supabase";
 import { buildMockSellerListings, mockSellers } from "../lib/mockData";
 import type { MockSeller } from "../lib/mockData";
+import { getPublicCollectorSlug } from "../lib/publicCollectorLinks";
 
 type CollectionSeller = MockSeller & {
   searchText?: string;
@@ -47,8 +49,7 @@ function getInitials(name: string) {
 }
 
 function getProfileSlug(profile: ProfileRow) {
-  const username = profile.username?.replace(/^@/, "").trim();
-  return username ? encodeURIComponent(username) : profile.id;
+  return getPublicCollectorSlug(profile, profile.id);
 }
 
 export default function CollectionsPage() {
@@ -253,7 +254,10 @@ export default function CollectionsPage() {
                     <span className="avatar">{seller.initials}</span>
                     <div>
                       <h2>{seller.name}</h2>
-                      <p>{seller.level} · {seller.rewardsBadge}</p>
+                      <p className="collection-rank-line">
+                        <CollectorLevelBadge rank={seller.level} size="xs" />
+                        {seller.level} · {seller.rewardsBadge}
+                      </p>
                     </div>
                   </div>
                   <p>{seller.bio}</p>
@@ -319,6 +323,7 @@ const pageStyles = `
   .seller-row { display: grid; grid-template-columns: 54px 1fr; gap: 12px; align-items: center; }
   .avatar { width: 50px; height: 50px; border: 1px solid rgba(201,205,211,0.26); border-radius: 999px; background: linear-gradient(135deg, #1f2937, #050506); color: #E7DED0; display: flex; align-items: center; justify-content: center; font-weight: 900; }
   h2 { margin: 0; color: #fff; font-size: 20px; line-height: 24px; font-weight: 900; }
+  .collection-rank-line { display: inline-flex; align-items: center; gap: 6px; }
   .metric-grid { margin: 14px 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .metric-grid span { border: 1px solid #202026; border-radius: 10px; background: rgba(8,8,10,0.76); padding: 9px; color: #85858f; font-size: 11px; font-weight: 800; }
   .metric-grid strong { display: block; margin-top: 5px; color: #fff; font-size: 14px; }

@@ -9,6 +9,7 @@ import {
   listGrailPassBillingHistory,
 } from "../../lib/grailPassSubscription";
 import { noGrailPassMembership } from "../../lib/grailPass";
+import { getGrailPassRewardBoostConfig } from "../../lib/grailPassRewards";
 import { getRewardEngineSnapshot } from "../../lib/rewardsEngine";
 import {
   createStripeClient,
@@ -855,6 +856,7 @@ async function loadGrailPassBilling({
     billingHistory,
     actions: getSubscriptionManageableState(row),
     monthlyCreditAmount: getGrailPassMonthlyCreditAmount(),
+    rewardBoost: getGrailPassRewardBoostConfig(),
   };
 }
 
@@ -976,6 +978,7 @@ export async function GET(request: Request) {
           canUpgrade: false,
         },
         monthlyCreditAmount: 0,
+        rewardBoost: getGrailPassRewardBoostConfig(),
       },
     ),
     resolveSection(

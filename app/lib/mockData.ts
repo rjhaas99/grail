@@ -727,9 +727,7 @@ export function getListingTag(listing: {
     return "Grail";
   }
 
-  const viewCount = listing.views ?? listing.viewCount ?? 0;
-
-  if (listing.isHot || listing.watchCount >= 150 || viewCount >= 900) {
+  if (listing.isHot || listing.watchCount >= 15) {
     return "Hot";
   }
 
@@ -774,7 +772,7 @@ export const mockListings: MockListing[] = listingSeeds.map((seed) => {
       seed.conditionDisplay.toLowerCase() === "mint" ||
       seed.conditionDisplay.toLowerCase().includes("near mint")
     ),
-    isHot: seed.watchCount >= 150 || seed.views >= 900,
+    isHot: seed.watchCount >= 15,
     cardDetailRoute: `/cards/${seed.id}`,
     sellerCollectionRoute: seller.route,
   };
@@ -1193,8 +1191,8 @@ export const sellerRewardLevels = Array.from({ length: 10 }, (_, index) => {
       level < 4
         ? "Trust badge progress and basic seller insights."
         : level < 8
-          ? "Better Browse placement, Featured Seller eligibility, and deeper seller insights."
-          : "Highest visibility boosts, stronger trust badge, and early access to seller tools.",
+          ? "Stronger trust recognition, seller insights, and early access to seller tools."
+          : "Highest trust recognition, seller insights, and early access to seller tools.",
   };
 });
 

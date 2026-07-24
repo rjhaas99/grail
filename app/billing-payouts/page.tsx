@@ -137,6 +137,12 @@ type MoneyCenterData = {
       canUpgrade: boolean;
     };
     monthlyCreditAmount: number;
+    rewardBoost?: {
+      configured: boolean;
+      enabled: boolean;
+      buyerBonusPercent: number | null;
+      sellerBonusPercent: number | null;
+    };
   };
   transactions: {
     status: SectionStatus;
@@ -324,6 +330,14 @@ function getGrailPassPlanLabel(subscription: GrailPassSubscription) {
   }
 
   return subscription.plan === "annual" ? "Annual GRAIL Pass" : "Monthly GRAIL Pass";
+}
+
+function formatPercent(value?: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "Configuration pending";
+  }
+
+  return `${Math.round(value * 100) / 100}%`;
 }
 
 function SectionState({
@@ -813,15 +827,26 @@ export default function BillingPayoutsPage() {
                   }
                 />
                 <InfoCard
-                  label="Monthly GRAIL Credit"
+                  label="Buyer Reward Bonus"
                   value={
                     isLoading
                       ? "Loading..."
-                      : data?.grailPass.monthlyCreditAmount
-                        ? formatCurrency(data.grailPass.monthlyCreditAmount)
-                        : "Unavailable"
+                      : data?.grailPass.rewardBoost?.configured && data.grailPass.rewardBoost.enabled
+                        ? formatPercent(data.grailPass.rewardBoost.buyerBonusPercent)
+                        : "Configuration pending"
                   }
-                  detail="Deposits are recorded in GRAIL Wallet when configured."
+                  detail="Applied through the existing Rewards Engine when membership is active."
+                />
+                <InfoCard
+                  label="Seller Reward Bonus"
+                  value={
+                    isLoading
+                      ? "Loading..."
+                      : data?.grailPass.rewardBoost?.configured && data.grailPass.rewardBoost.enabled
+                        ? formatPercent(data.grailPass.rewardBoost.sellerBonusPercent)
+                        : "Configuration pending"
+                  }
+                  detail="Adds reward earnings only. Seller fee progression remains rank-based."
                 />
               </div>
               {!isLoading && (data?.grailPass.billingHistory.length || 0) > 0 ? (

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import CollectorLevelBadge from "../components/CollectorLevelBadge";
 import PageShell from "../components/PageShell";
 import RequireAuth from "../components/RequireAuth";
 import {
@@ -346,13 +347,11 @@ export default function RewardsPage() {
             </div>
 
             <aside className="hero-status-card" aria-label="Current rewards status">
-              <div
-                className="hero-badge"
-                style={{ borderColor: progression.border, color: progression.accent }}
-                aria-hidden="true"
-              >
-                {progression.icon}
-              </div>
+              <CollectorLevelBadge
+                level={progression.level}
+                rank={progression.title}
+                size="lg"
+              />
               <span>Level {progression.level}</span>
               <h2>{progression.title}</h2>
               <p>{progression.tagline}</p>
@@ -438,13 +437,7 @@ export default function RewardsPage() {
                     className={`rank-card ${statusLabel.toLowerCase()}`}
                     style={{ borderColor: isCurrentRank ? rank.border : undefined }}
                   >
-                    <div
-                      className="rank-icon"
-                      style={{ borderColor: rank.border, color: rank.accent }}
-                      aria-hidden="true"
-                    >
-                      {rank.icon}
-                    </div>
+                    <CollectorLevelBadge level={rank.startLevel} rank={rank.title} size="md" />
                     <div>
                       <span>Levels {rank.startLevel}-{rank.endLevel}</span>
                       <h3>{rank.title}</h3>
@@ -790,22 +783,6 @@ const pageStyles = `
     justify-content: center;
   }
 
-  .hero-badge {
-    width: 88px;
-    height: 88px;
-    border: 1px solid rgba(201,205,211,0.34);
-    border-radius: 20px;
-    background:
-      radial-gradient(circle at 50% 15%, rgba(255,255,255,0.16), transparent 42%),
-      linear-gradient(145deg, rgba(231,222,208,0.11), rgba(8,8,10,0.92));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 28px;
-    line-height: 32px;
-    font-weight: 900;
-  }
-
   .hero-status-card > span,
   .progress-metric span,
   .economy-grid span,
@@ -961,19 +938,6 @@ const pageStyles = `
       radial-gradient(circle at 80% 10%, rgba(231,222,208,0.10), transparent 34%),
       rgba(8,8,10,0.88);
     box-shadow: 0 0 30px rgba(201,205,211,0.09);
-  }
-
-  .rank-icon {
-    width: 48px;
-    height: 48px;
-    border: 1px solid rgba(201,205,211,0.34);
-    border-radius: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(231,222,208,0.05);
-    font-size: 14px;
-    font-weight: 900;
   }
 
   .rank-card span {

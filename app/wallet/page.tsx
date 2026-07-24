@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import CollectorMomentLayer from "../components/CollectorMomentLayer";
+import CollectorLevelBadge from "../components/CollectorLevelBadge";
 import GrailPassPresenceCard from "../components/GrailPassPresenceCard";
 import PageShell from "../components/PageShell";
 import { buildRewardCollectorMoment } from "../lib/collectorMomentAdapters";
@@ -103,7 +104,12 @@ type RewardsResponse = {
 
 type GrailPassResponse = {
   membership?: GrailPassMembership;
-  monthlyCreditAmount?: number;
+  rewardBoost?: {
+    configured: boolean;
+    enabled: boolean;
+    buyerBonusPercent: number | null;
+    sellerBonusPercent: number | null;
+  };
 };
 
 const emptyWallet: WalletSummary = {
@@ -314,7 +320,8 @@ export default function WalletPage() {
   const [marketplaceRewards, setMarketplaceRewards] = useState<RewardsMarketplace | null>(null);
   const [walletRewardsMessage, setWalletRewardsMessage] = useState("");
   const [grailPass, setGrailPass] = useState<GrailPassMembership | null>(null);
-  const [monthlyPassCredit, setMonthlyPassCredit] = useState(0);
+  const [grailPassRewardBoost, setGrailPassRewardBoost] =
+    useState<GrailPassResponse["rewardBoost"]>(undefined);
 
   const rewardHistory = useMemo(() => ledger.filter((entry) => entry.amount > 0), [ledger]);
   const recentActivity = useMemo(() => ledger.slice(0, 5), [ledger]);
@@ -353,7 +360,7 @@ export default function WalletPage() {
           setMarketplaceRewards(null);
           setWalletRewardsMessage("");
           setGrailPass(null);
-          setMonthlyPassCredit(0);
+          setGrailPassRewardBoost(undefined);
           setStatus("Sign in to view your GRAIL Wallet.");
           setIsLoading(false);
         }
@@ -413,7 +420,7 @@ export default function WalletPage() {
         setMarketplaceRewards(rewardsPayload.marketplace || null);
         setWalletRewardsMessage(rewardsPayload.walletRewardsMessage || "");
         setGrailPass(grailPassPayload.membership || null);
-        setMonthlyPassCredit(grailPassPayload.monthlyCreditAmount || 0);
+        setGrailPassRewardBoost(grailPassPayload.rewardBoost);
         setStatus("");
       } catch (error) {
         console.error("Wallet page load error:", error);
@@ -427,7 +434,7 @@ export default function WalletPage() {
           setMarketplaceRewards(null);
           setWalletRewardsMessage("");
           setGrailPass(null);
-          setMonthlyPassCredit(0);
+          setGrailPassRewardBoost(undefined);
           setStatus(error instanceof Error ? error.message : "GRAIL Wallet could not be loaded.");
         }
       } finally {
@@ -537,15 +544,15 @@ export default function WalletPage() {
                   eyebrow={grailPass?.status && grailPass.status !== "none" ? "GRAIL Pass Active" : "Wallet Preview"}
                   title={
                     grailPass?.status && grailPass.status !== "none"
-                      ? `${grailPass.displayName} wallet benefits.`
-                      : "GRAIL Pass wallet benefits."
+                      ? `${grailPass.displayName} reward boost.`
+                      : "GRAIL Pass reward boost."
                   }
                   description={
-                    monthlyPassCredit > 0
-                      ? `Monthly GRAIL Credit deposits are configured at ${formatCurrency(monthlyPassCredit)} and appear in wallet activity.`
-                      : "Future Pass wallet benefits remain disabled until monthly GRAIL Credit is configured."
+                    grailPassRewardBoost?.configured && grailPassRewardBoost.enabled
+                      ? `Pass rewards add ${formatPercent(grailPassRewardBoost.buyerBonusPercent)} buyer and ${formatPercent(grailPassRewardBoost.sellerBonusPercent)} seller reward bonuses when membership is active.`
+                      : "Pass reward bonuses are configuration-driven and appear through normal reward activity when enabled."
                   }
-                  perkKeys={["wallet_multiplier", "monthly_credit"]}
+                  perkKeys={["reward_boost"]}
                 />
               </aside>
             </section>
@@ -580,12 +587,11 @@ export default function WalletPage() {
                     <span>Current Tier</span>
                     <h2>{rewardTier?.rankName || "Configuration Pending"}</h2>
                   </div>
-                  <div
-                    className="progression-badge"
-                    style={{ borderColor: progression.border, color: progression.accent }}
-                  >
-                    {progression.icon}
-                  </div>
+                  <CollectorLevelBadge
+                    level={progression.level}
+                    rank={progression.title}
+                    size="md"
+                  />
                 </div>
                 <p>
                   Level {progression.level} {progression.title} ·{" "}
@@ -1028,21 +1034,6 @@ const pageStyles = `
     line-height: 14px;
     font-style: normal;
     font-weight: 800;
-  }
-  .progression-badge {
-    width: 54px;
-    height: 54px;
-    border: 1px solid rgba(201,205,211,0.34);
-    border-radius: 14px;
-    background:
-      radial-gradient(circle at 50% 15%, rgba(255,255,255,0.16), transparent 42%),
-      linear-gradient(145deg, rgba(231,222,208,0.11), rgba(8,8,10,0.92));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    line-height: 22px;
-    font-weight: 900;
   }
   .tier-reward-grid {
     margin-top: 14px;

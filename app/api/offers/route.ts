@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
+import { resolveMarketplacePresentationState } from "../../lib/marketplacePresentationState";
 import { createNotification } from "../../lib/notificationEngine";
+import { getPublicCollectorHref } from "../../lib/publicCollectorLinks";
 import { getShippingProfile } from "../../lib/shippingProfiles";
+import { getWatchCountsByListingId } from "../../lib/watchCounts";
 import {
   createServiceSupabaseClient,
   getCurrentUser,
@@ -24,11 +27,32 @@ type OfferRow = {
 type ListingRow = {
   id: string;
   title: string | null;
+  sport?: string | null;
+  player?: string | null;
+  player_name?: string | null;
+  year?: string | null;
+  brand?: string | null;
+  card_number?: string | null;
+  card_type?: string | null;
+  grader?: string | null;
+  grade?: string | null;
+  condition?: string | null;
   price: number | null;
+  minimum_offer_amount?: number | null;
+  offers_enabled?: boolean | null;
+  offer_acceptance?: string | null;
   status: string | null;
   sale_format?: string | null;
+  auction_status?: string | null;
+  auction_ends_at?: string | null;
+  is_collection_card?: boolean | null;
+  is_public_collection?: boolean | null;
   seller_id: string | null;
   shipping_profile_id?: string | null;
+  listing_images?: Array<{
+    image_url: string | null;
+    image_type: string | null;
+  }> | null;
 };
 
 type ProfileRow = {
@@ -43,6 +67,37 @@ type OrderRow = {
   buyer_id: string | null;
   seller_id: string | null;
 };
+
+const offerListingSelect = `
+  id,
+  title,
+  sport,
+  player,
+  player_name,
+  year,
+  brand,
+  card_number,
+  card_type,
+  grader,
+  grade,
+  condition,
+  price,
+  minimum_offer_amount,
+  offers_enabled,
+  offer_acceptance,
+  status,
+  sale_format,
+  auction_status,
+  auction_ends_at,
+  is_collection_card,
+  is_public_collection,
+  seller_id,
+  shipping_profile_id,
+  listing_images (
+    image_url,
+    image_type
+  )
+`;
 
 function normalizeAmount(value: unknown) {
   const amount = Number(value);
@@ -69,6 +124,14 @@ function normalizeStatus(value?: string | null): OfferStatus {
 
 function getProfileName(profile: ProfileRow | undefined, fallback: string) {
   return profile?.full_name || profile?.username || fallback;
+}
+
+function getListingImageUrl(listing?: ListingRow | null) {
+  return (
+    listing?.listing_images?.find((image) => image.image_type === "front")?.image_url ||
+    listing?.listing_images?.find((image) => Boolean(image.image_url))?.image_url ||
+    null
+  );
 }
 
 function formatCurrency(value: number) {
@@ -195,6 +258,7 @@ function toOfferView({
   buyer,
   seller,
   completedOrder,
+  watchCount = 0,
 }: {
   offer: OfferRow;
   currentUserId: string;
@@ -202,6 +266,7 @@ function toOfferView({
   buyer?: ProfileRow;
   seller?: ProfileRow;
   completedOrder?: OrderRow;
+  watchCount?: number;
 }) {
   const rawStatus = normalizeStatus(offer.status);
   const status = completedOrder ? "completed" : rawStatus;
@@ -219,8 +284,25 @@ function toOfferView({
     sellerId: offer.seller_id,
     buyerName: getProfileName(buyer, offer.buyer_id === currentUserId ? "You" : "Collector"),
     sellerName: getProfileName(seller, offer.seller_id === currentUserId ? "You" : "Seller"),
+    buyerHref: getPublicCollectorHref(buyer, offer.buyer_id),
+    sellerHref: getPublicCollectorHref(seller, offer.seller_id),
     amount,
     askingPrice: Number(listing?.price || 0),
+    minimumOffer: Number(listing?.minimum_offer_amount || 0),
+    imageUrl: getListingImageUrl(listing),
+    player: listing?.player || listing?.player_name || "",
+    year: listing?.year || "",
+    brand: listing?.brand || "",
+    cardNumber: listing?.card_number || "",
+    category: listing?.sport || "",
+    cardType: listing?.card_type || "",
+    grader: listing?.grader || "",
+    grade: listing?.grade || "",
+    condition: listing?.condition || "",
+    watchCount,
+    isHot: watchCount >= 15,
+    isGraded: Boolean(listing?.grader || listing?.grade),
+    isRaw: !listing?.grader && !listing?.grade,
     message: offer.message,
     status,
     statusLabel:
@@ -247,6 +329,8 @@ function toOfferView({
     canAcceptCounter: role === "buyer" && status === "countered",
     canDeclineCounter: role === "buyer" && status === "countered",
     canCheckout: role === "buyer" && status === "accepted",
+    orderId: completedOrder?.id || null,
+    orderHref: completedOrder?.id ? `/orders?order=${completedOrder.id}` : "/orders",
     shippingProfileId: shippingProfile.id,
     shippingProfileLabel: shippingProfile.label,
     requiresPweAcknowledgement:
@@ -291,11 +375,12 @@ export async function GET(request: Request) {
   const listingsById = new Map<string, ListingRow>();
   const profilesById = new Map<string, ProfileRow>();
   const completedOrdersByOfferKey = new Map<string, OrderRow>();
+  const watchCountsByListingId = new Map<string, number>();
 
   if (listingIds.length > 0) {
     const { data: listingData, error: listingError } = await supabase
       .from("listings")
-      .select("id, title, price, status, sale_format, seller_id, shipping_profile_id")
+      .select(offerListingSelect)
       .in("id", listingIds);
 
     if (listingError) {
@@ -304,6 +389,16 @@ export async function GET(request: Request) {
       ((listingData || []) as ListingRow[]).forEach((listing) => {
         listingsById.set(listing.id, listing);
       });
+    }
+
+    try {
+      const watchCounts = await getWatchCountsByListingId(supabase, listingIds);
+
+      watchCounts.forEach((count, listingId) => {
+        watchCountsByListingId.set(listingId, count);
+      });
+    } catch (watchError) {
+      console.error("Offers watch count fetch error:", watchError);
     }
 
     const { data: orderData, error: orderError } = await supabase
@@ -352,6 +447,9 @@ export async function GET(request: Request) {
       buyer: offer.buyer_id ? profilesById.get(offer.buyer_id) : undefined,
       seller: offer.seller_id ? profilesById.get(offer.seller_id) : undefined,
       completedOrder,
+      watchCount: offer.listing_id
+        ? watchCountsByListingId.get(offer.listing_id) || 0
+        : 0,
     });
   });
 
@@ -385,7 +483,7 @@ export async function POST(request: Request) {
   const supabase = createServiceSupabaseClient();
   const { data: listingData, error: listingError } = await supabase
     .from("listings")
-    .select("id, title, price, status, sale_format, seller_id, shipping_profile_id")
+    .select(offerListingSelect)
     .eq("id", listingId)
     .maybeSingle();
 
@@ -396,11 +494,23 @@ export async function POST(request: Request) {
 
   const listing = listingData as ListingRow | null;
 
-  if (!listing || listing.status !== "active") {
+  const listingStatus = listing?.status?.toLowerCase() || "";
+  const marketplaceState = listing
+    ? resolveMarketplacePresentationState(listing)
+    : "collection_offer_only";
+
+  if (!listing || !["active", "collection"].includes(listingStatus)) {
     return NextResponse.json({ error: "This listing is not accepting offers." }, { status: 404 });
   }
 
-  if (listing.sale_format === "auction") {
+  if (listing.offers_enabled === false) {
+    return NextResponse.json({ error: "This listing is not accepting offers." }, { status: 400 });
+  }
+
+  if (
+    marketplaceState === "active_auction" ||
+    marketplaceState === "auction_pending_settlement"
+  ) {
     return NextResponse.json({ error: "Auctions use bidding, not offers." }, { status: 400 });
   }
 
@@ -412,12 +522,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "You cannot make an offer on your own listing." }, { status: 403 });
   }
 
-  if (listing.price && amount >= Number(listing.price)) {
+  if (
+    marketplaceState === "for_sale" &&
+    listing.price &&
+    amount >= Number(listing.price)
+  ) {
     return NextResponse.json(
       { error: "Your offer must be lower than the asking price. Use Buy Now to pay full price." },
       { status: 400 },
     );
   }
+
+  const minimumOfferAmount = Number(listing.minimum_offer_amount || 0);
+
+  if (minimumOfferAmount > 0 && amount < minimumOfferAmount) {
+    return NextResponse.json(
+      { error: "Offer is below the seller's minimum." },
+      { status: 400 },
+    );
+  }
+
+  const shouldAutoAccept =
+    listing.offer_acceptance === "auto_accept_at_minimum" &&
+    minimumOfferAmount > 0 &&
+    amount >= minimumOfferAmount;
 
   const { data: insertedOffer, error: insertError } = await supabase
     .from("offers")
@@ -427,7 +555,7 @@ export async function POST(request: Request) {
       seller_id: listing.seller_id,
       amount,
       message: message || null,
-      status: "pending",
+      status: shouldAutoAccept ? "accepted" : "pending",
     })
     .select("id, listing_id, buyer_id, seller_id, amount, message, status, created_at")
     .single();
@@ -447,7 +575,7 @@ export async function POST(request: Request) {
     listing,
     buyerId: user.id,
     sellerId: listing.seller_id,
-    action: "created",
+    action: shouldAutoAccept ? "accepted" : "created",
     amount,
   });
 
@@ -500,7 +628,7 @@ export async function PATCH(request: Request) {
   const currentStatus = normalizeStatus(offer.status);
   const { data: listingData, error: listingError } = await supabase
     .from("listings")
-    .select("id, title, price, status, sale_format, seller_id, shipping_profile_id")
+    .select(offerListingSelect)
     .eq("id", offer.listing_id || "")
     .maybeSingle();
 

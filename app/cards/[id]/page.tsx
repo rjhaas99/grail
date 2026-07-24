@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
+import CollectorLevelBadge from "../../components/CollectorLevelBadge";
 import Header from "../../components/Header";
 import {
   type MockConversation,
@@ -12,6 +13,11 @@ import {
   getMockListingById,
   getMockSellerBySlug,
 } from "../../lib/mockData";
+import {
+  resolveMarketplacePresentationState,
+  type MarketplacePresentationState,
+} from "../../lib/marketplacePresentationState";
+import { getPublicCollectorSlug } from "../../lib/publicCollectorLinks";
 
 const photoViews = [
   "Front",
@@ -65,6 +71,7 @@ type MockCard = MockListing & {
   auctionWinnerId?: string | null;
   auctionPaymentDueAt?: string | null;
   reserveFeeStatus?: string | null;
+  marketplaceState?: MarketplacePresentationState;
 };
 
 type ListingImageRow = {
@@ -87,6 +94,9 @@ type SupabaseListingRow = {
   cert_number: string | null;
   condition: string | null;
   price: number | null;
+  minimum_offer_amount?: number | null;
+  offers_enabled?: boolean | null;
+  offer_acceptance?: string | null;
   status: string | null;
   collection_note?: string | null;
   is_collection_card?: boolean | null;
@@ -134,6 +144,9 @@ type CardDetailResponse = {
   listing?: SupabaseListingRow;
   profile?: ProfileRow | null;
   order?: SupabaseOrderRow | null;
+  publicSignals?: {
+    watchCount?: number | null;
+  };
   error?: string;
 };
 type SavedItemStatusResponse = {
@@ -375,13 +388,7 @@ function getConditionDisplay(listing: SupabaseListingRow) {
 }
 
 function getSellerSlug(profile: ProfileRow | null, sellerId: string | null) {
-  const username = profile?.username?.replace(/^@/, "").trim();
-
-  if (username) {
-    return encodeURIComponent(username);
-  }
-
-  return sellerId || "vault-runner";
+  return getPublicCollectorSlug(profile, sellerId || "vault-runner");
 }
 
 function getPhotoView(imageType: string | null): PhotoView {
@@ -419,26 +426,23 @@ function mapSupabaseCard(
   listing: SupabaseListingRow,
   profile: ProfileRow | null,
   order: SupabaseOrderRow | null = null,
+  publicSignals?: CardDetailResponse["publicSignals"],
 ): { card: MockCard; seller: DetailSeller } {
   const category = getCategory(listing);
   const condition = getConditionDisplay(listing);
   const price = Number(listing.price || 0);
-  const status = listing.status?.toLowerCase() || "";
-  const isAuction = listing.sale_format === "auction";
-  const isSold = isAuction
-    ? status === "sold" && listing.auction_status === "paid"
-    : status === "sold";
+  const marketplaceState = resolveMarketplacePresentationState(listing);
+  const isAuction =
+    marketplaceState === "active_auction" ||
+    marketplaceState === "auction_pending_settlement";
+  const isSold = marketplaceState === "sold";
   const soldPrice = isSold
     ? Number(order?.card_price || order?.total_amount || listing.price || 0)
     : 0;
-  const isCollectionOnly =
-    !isSold &&
-    status !== "active" &&
-    (status === "collection" ||
-      Boolean(listing.is_collection_card) ||
-      Boolean(listing.is_public_collection));
+  const isCollectionOnly = marketplaceState === "collection_offer_only";
   const displayPrice = isCollectionOnly ? 0 : isSold ? soldPrice : price;
-  const offerBasis = price;
+  const minimumOfferAmount = Number(listing.minimum_offer_amount || 0);
+  const offerBasis = minimumOfferAmount || price;
   const sportsCardsProEstimatedValue = listing.sportscardspro_estimated_value
     ? Number(listing.sportscardspro_estimated_value)
     : 0;
@@ -504,7 +508,7 @@ function mapSupabaseCard(
           ? `Current Bid ${formatCurrencyWithCents(auctionCurrentBid)}`
           : `Starting Bid ${formatCurrencyWithCents(auctionStartingBid)}`
         : isCollectionOnly
-        ? "Open to Offers"
+        ? "Offer Only"
         : price
           ? formatCurrency(price)
           : "Price not listed",
@@ -512,7 +516,7 @@ function mapSupabaseCard(
       marketValue: estimatedMarketValue,
       minimumOffer: offerBasis ? Math.round(offerBasis * 0.85) : 0,
       minOffer: offerBasis ? Math.round(offerBasis * 0.85) : 0,
-      watchCount: 0,
+      watchCount: Number(publicSignals?.watchCount || 0),
       views: 0,
       viewCount: 0,
       listedOrder: 0,
@@ -557,6 +561,7 @@ function mapSupabaseCard(
       sportsCardsProSourceUrl: listing.sportscardspro_source_url,
       sportsCardsProFetchedAt: listing.sportscardspro_fetched_at,
       saleFormat: isAuction ? "auction" : "fixed",
+      marketplaceState,
       auctionStatus: listing.auction_status,
       auctionStartsAt: listing.auction_starts_at,
       auctionEndsAt: listing.auction_ends_at,
@@ -753,6 +758,19 @@ export default function CardDetailPage() {
   const [ownerActionStatus, setOwnerActionStatus] = useState("");
   const [auctionClockMs, setAuctionClockMs] = useState(() => new Date().getTime());
   const card = mockCard ?? realCard;
+  const marketplaceState: MarketplacePresentationState = card?.marketplaceState
+    ? card.marketplaceState
+    : mockCard
+      ? mockCard.tag === "Sold"
+        ? "sold"
+        : mockCard.tag === "Auction"
+          ? "active_auction"
+          : mockCard.isCollectionOnly || mockCard.tag === "Collection"
+            ? "collection_offer_only"
+            : "for_sale"
+      : card
+        ? resolveMarketplacePresentationState(card)
+        : "collection_offer_only";
   const availablePhotoViews: PhotoView[] = card?.imageUrls
     ? photoViews.filter((view) => Boolean(card.imageUrls?.[view]))
     : [...photoViews];
@@ -834,6 +852,7 @@ export default function CardDetailPage() {
           data: { session },
         } = await supabase.auth.getSession();
         const response = await fetch(`/api/cards/${encodeURIComponent(cardId)}`, {
+          cache: "no-store",
           headers: session?.access_token
             ? { authorization: `Bearer ${session.access_token}` }
             : undefined,
@@ -876,6 +895,7 @@ export default function CardDetailPage() {
           listing,
           payload.profile || null,
           payload.order || null,
+          payload.publicSignals,
         );
 
         if (isMounted) {
@@ -986,6 +1006,7 @@ export default function CardDetailPage() {
         }
 
         const payload = (await response.json()) as {
+          status?: string | null;
           auctionStatus?: string | null;
           endsAt?: string | null;
           currentBid?: number;
@@ -1011,11 +1032,25 @@ export default function CardDetailPage() {
 
           const currentBid = Number(payload.currentBid || 0);
           const displayBid = currentBid || Number(current.auctionStartingBid || 0);
+          const nextAuctionStatus = payload.auctionStatus ?? current.auctionStatus;
+          const nextListingStatus = payload.status ?? current.listingStatus;
+          const nextAuctionEndsAt = payload.endsAt ?? current.auctionEndsAt;
+          const nextMarketplaceState = resolveMarketplacePresentationState({
+            ...current,
+            status: nextListingStatus,
+            auctionStatus: nextAuctionStatus,
+            auctionEndsAt: nextAuctionEndsAt,
+          });
+          const nextIsAuction =
+            nextMarketplaceState === "active_auction" ||
+            nextMarketplaceState === "auction_pending_settlement";
+          const nextIsCollectionOnly = nextMarketplaceState === "collection_offer_only";
 
           return {
             ...current,
-            auctionStatus: payload.auctionStatus ?? current.auctionStatus,
-            auctionEndsAt: payload.endsAt ?? current.auctionEndsAt,
+            listingStatus: nextListingStatus,
+            auctionStatus: nextAuctionStatus,
+            auctionEndsAt: nextAuctionEndsAt,
             auctionCurrentBid: currentBid,
             auctionBidCount: payload.bidCount ?? current.auctionBidCount,
             auctionReserveMetAt:
@@ -1025,11 +1060,30 @@ export default function CardDetailPage() {
             auctionWinnerId: payload.winnerId ?? current.auctionWinnerId,
             auctionPaymentDueAt:
               payload.paymentDueAt ?? current.auctionPaymentDueAt,
-            price: displayBid,
-            askingPrice: displayBid,
-            priceDisplay: currentBid
-              ? `Current Bid ${formatCurrencyWithCents(currentBid)}`
-              : `Starting Bid ${formatCurrencyWithCents(current.auctionStartingBid || 0)}`,
+            marketplaceState: nextMarketplaceState,
+            saleFormat: nextIsAuction ? "auction" : "fixed",
+            isCollectionOnly: nextIsCollectionOnly,
+            tag: nextIsAuction ? "Auction" : nextIsCollectionOnly ? "Collection" : current.tag,
+            tags: [
+              nextIsAuction
+                ? "Auction"
+                : nextIsCollectionOnly
+                  ? "Collection"
+                  : current.tag,
+            ],
+            price: nextIsAuction ? displayBid : nextIsCollectionOnly ? 0 : current.price,
+            askingPrice: nextIsAuction
+              ? displayBid
+              : nextIsCollectionOnly
+                ? 0
+                : current.askingPrice,
+            priceDisplay: nextIsAuction
+              ? currentBid
+                ? `Current Bid ${formatCurrencyWithCents(currentBid)}`
+                : `Starting Bid ${formatCurrencyWithCents(current.auctionStartingBid || 0)}`
+              : nextIsCollectionOnly
+                ? "Offer Only"
+                : current.priceDisplay,
           };
         });
       } catch (error) {
@@ -1083,19 +1137,32 @@ export default function CardDetailPage() {
 
     setIsUpdatingWatch(true);
     setWatchMessage("");
+    const wasWatching = isWatching;
+    const nextIsWatching = !wasWatching;
+    const watchCountDelta = nextIsWatching ? 1 : -1;
+
+    setIsWatching(nextIsWatching);
+    setRealCard((current) =>
+      current && current.id === card.id
+        ? {
+            ...current,
+            watchCount: Math.max(0, Number(current.watchCount || 0) + watchCountDelta),
+          }
+        : current,
+    );
 
     try {
       const response = await fetch(
-        isWatching
+        wasWatching
           ? `/api/saved-items?listingId=${encodeURIComponent(card.id)}`
           : "/api/saved-items",
         {
-          method: isWatching ? "DELETE" : "POST",
+          method: wasWatching ? "DELETE" : "POST",
           headers: {
             authorization: `Bearer ${session.access_token}`,
-            ...(isWatching ? {} : { "content-type": "application/json" }),
+            ...(wasWatching ? {} : { "content-type": "application/json" }),
           },
-          body: isWatching
+          body: wasWatching
             ? undefined
             : JSON.stringify({
                 itemType: "listing",
@@ -1109,10 +1176,21 @@ export default function CardDetailPage() {
         throw new Error(payload.error || "Watchlist could not be updated.");
       }
 
-      setIsWatching(!isWatching);
-      setWatchMessage(isWatching ? "Removed from watched cards." : "Saved to watched cards.");
+      setWatchMessage(wasWatching ? "Removed from watched cards." : "Saved to watched cards.");
     } catch (error) {
       console.error("Card detail watchlist update error:", error);
+      setIsWatching(wasWatching);
+      setRealCard((current) =>
+        current && current.id === card.id
+          ? {
+              ...current,
+              watchCount: Math.max(
+                0,
+                Number(current.watchCount || 0) - watchCountDelta,
+              ),
+            }
+          : current,
+      );
       setWatchMessage(error instanceof Error ? error.message : "Watchlist could not be updated.");
     } finally {
       setIsUpdatingWatch(false);
@@ -1624,11 +1702,14 @@ export default function CardDetailPage() {
   const marketDifference = getMarketDifference(card);
   const isOwnerListing = Boolean(currentUserId) && card.sellerId === currentUserId;
   const isCollectionOnly = Boolean(
-    card.isCollectionOnly ||
+    marketplaceState === "collection_offer_only" ||
+      card.isCollectionOnly ||
       card.tag === "Collection" ||
       card.listingStatus?.toLowerCase() === "collection",
   );
-  const isAuction = card.saleFormat === "auction";
+  const isAuction =
+    marketplaceState === "active_auction" ||
+    marketplaceState === "auction_pending_settlement";
   const auctionCurrentBid = Number(card.auctionCurrentBid || 0);
   const auctionStartingBid = Number(card.auctionStartingBid || 0);
   const auctionDisplayPrice = auctionCurrentBid || auctionStartingBid;
@@ -1649,11 +1730,10 @@ export default function CardDetailPage() {
   const isAuctionWinner =
     Boolean(currentUserId) && card.auctionWinnerId === currentUserId;
   const listingStatusLower = card.listingStatus?.toLowerCase() || "";
-  const isPaidAuctionSale =
-    isAuction && listingStatusLower === "sold" && card.auctionStatus === "paid";
-  const isSold = isAuction
-    ? isPaidAuctionSale
-    : card.tag === "Sold" || listingStatusLower === "sold";
+  const isSold =
+    marketplaceState === "sold" ||
+    card.tag === "Sold" ||
+    listingStatusLower === "sold";
   const soldPrice = card.soldPrice || card.askingPrice || card.price;
   const soldPriceDisplay = soldPrice > 0
     ? `Sold · ${formatCurrency(soldPrice)}`
@@ -1712,7 +1792,7 @@ export default function CardDetailPage() {
       ? `Current Bid ${formatCurrencyWithCents(auctionCurrentBid)}`
       : `Starting Bid ${formatCurrencyWithCents(auctionStartingBid)}`
     : isCollectionOnly
-    ? "Open to Offers"
+    ? "Offer Only"
     : formatCurrency(card.askingPrice);
   const minimumOfferDisplay = card.minOffer > 0
     ? formatCurrency(card.minOffer)
@@ -1815,9 +1895,8 @@ export default function CardDetailPage() {
                           : salePriceDisplay
                   }
                 />
-                <DetailRow label="Watch Count" value={String(card.watchCount)} />
-                <DetailRow label="View Count" value={String(card.viewCount)} />
-                <DetailRow label="Listed Date" value={card.listedDate} />
+                <DetailRow label="Saved By" value={`${card.watchCount} ❤️`} />
+                <DetailRow label="Listed" value={card.listedDate} />
                 <DetailRow label="Listing Tag" value={card.tag} />
               </div>
             </section>
@@ -2046,7 +2125,14 @@ export default function CardDetailPage() {
                 <span className="seller-avatar">{(seller?.name ?? card.sellerName).slice(0, 1)}</span>
                 <div>
                   <h2>{(seller?.name ?? card.sellerName)}</h2>
-                  <p>{(seller?.level ?? card.sellerLevel)}</p>
+                  <p className="seller-rank-line">
+                    <CollectorLevelBadge
+                      rank={seller?.level ?? card.sellerLevel}
+                      size="xs"
+                      hideWhenUnavailable
+                    />
+                    {(seller?.level ?? card.sellerLevel)}
+                  </p>
                 </div>
               </div>
 
@@ -3611,6 +3697,12 @@ const pageStyles = `
     font-size: 10px;
     font-weight: 900;
     display: inline-flex;
+  }
+
+  .seller-rank-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
   }
 
   .seller-link {

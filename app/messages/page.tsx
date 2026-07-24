@@ -1,18 +1,27 @@
 "use client";
 
-import Link from "next/link";
 import Image from "next/image";
-import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { FormEvent, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabase";
+import CollectorLevelBadge from "../components/CollectorLevelBadge";
 import Header from "../components/Header";
+import { hasCollectorLevelBadge } from "../lib/collectorLevelBadges";
 import type { MockConversation } from "../lib/mockData";
+import { getPublicCollectorHref } from "../lib/publicCollectorLinks";
 
 type ConversationMessage = MockConversation["messages"][number] & {
   listingId?: string | null;
   listingTitle?: string | null;
   listingImageUrl?: string | null;
   listingHref?: string | null;
+  listingStatus?: string | null;
+  saleFormat?: string | null;
+  isCollectionCard?: boolean;
+  isPublicCollection?: boolean;
+  price?: number;
+  createdAt?: string | null;
 };
 
 type Conversation = Omit<MockConversation, "messages"> & {
@@ -20,8 +29,17 @@ type Conversation = Omit<MockConversation, "messages"> & {
   source?: "mock" | "supabase";
   buyerId?: string | null;
   sellerId?: string | null;
+  collectorHref?: string;
   listingId?: string | null;
   listingImageUrl?: string | null;
+  listingStatus?: string | null;
+  saleFormat?: string | null;
+  isCollectionCard?: boolean;
+  isPublicCollection?: boolean;
+  player?: string;
+  year?: string;
+  brand?: string;
+  cardNumber?: string;
 };
 
 type MessageRow = {
@@ -38,6 +56,15 @@ type ListingRow = {
   title: string | null;
   price: number | null;
   seller_id: string | null;
+  status?: string | null;
+  sale_format?: string | null;
+  is_collection_card?: boolean | null;
+  is_public_collection?: boolean | null;
+  player?: string | null;
+  player_name?: string | null;
+  year?: string | null;
+  brand?: string | null;
+  card_number?: string | null;
   listing_images?: Array<{
     image_url: string | null;
     image_type: string | null;
@@ -50,8 +77,41 @@ type ProfileRow = {
   username: string | null;
 };
 
+type ConversationTab =
+  | "all"
+  | "unread"
+  | "offers"
+  | "orders"
+  | "collection"
+  | "for_sale"
+  | "archived";
+type MessageViewMode = "comfortable" | "compact";
+
 const initialConversations: Conversation[] = [];
 const mockConversationStorageKey = "grail-mock-conversations";
+const messageViewStorageKey = "grail-messages-view";
+const pinnedConversationStorageKey = "grail-pinned-conversations";
+const archivedConversationStorageKey = "grail-archived-conversations";
+
+const conversationTabs: Array<{ id: ConversationTab; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "unread", label: "Unread" },
+  { id: "offers", label: "Offers" },
+  { id: "orders", label: "Orders" },
+  { id: "collection", label: "Collection Cards" },
+  { id: "for_sale", label: "For Sale Cards" },
+  { id: "archived", label: "Archived" },
+];
+
+const quickReplies = [
+  "Thanks!",
+  "Still available.",
+  "I'll counter.",
+  "Tracking uploaded.",
+  "Offer accepted.",
+  "Offer declined.",
+  "Shipping tomorrow.",
+];
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -96,6 +156,43 @@ function getListingFrontImage(listing?: ListingRow | null) {
     listing?.listing_images?.find((image) => Boolean(image.image_url))?.image_url ||
     null
   );
+}
+
+function getInitials(value: string) {
+  const words = value.trim().split(/\s+/).filter(Boolean);
+
+  if (words.length === 0) {
+    return "GC";
+  }
+
+  return words
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase())
+    .join("");
+}
+
+function readIdList(storageKey: string) {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const value = window.localStorage.getItem(storageKey);
+
+    return value ? (JSON.parse(value) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function getMessageViewPreference(): MessageViewMode {
+  if (typeof window === "undefined") {
+    return "comfortable";
+  }
+
+  return window.localStorage.getItem(messageViewStorageKey) === "compact"
+    ? "compact"
+    : "comfortable";
 }
 
 function getErrorMessage(error: unknown) {
@@ -171,26 +268,176 @@ function CardArtwork({ accent }: { accent: string }) {
   );
 }
 
+function getCardStatus(conversation: Conversation) {
+  const status = conversation.listingStatus?.toLowerCase() || "";
+
+  if (conversation.saleFormat === "auction") {
+    return "Auction";
+  }
+
+  if (status === "sold") {
+    return "Sold";
+  }
+
+  if (
+    conversation.isCollectionCard ||
+    conversation.isPublicCollection ||
+    status === "collection"
+  ) {
+    return "Offer Only";
+  }
+
+  if (status === "active" || conversation.price > 0) {
+    return "For Sale";
+  }
+
+  return "Collection";
+}
+
+function getMessageCardStatus(message: ConversationMessage, conversation: Conversation) {
+  const status = message.listingStatus?.toLowerCase() || "";
+
+  if (message.saleFormat === "auction") {
+    return "Auction";
+  }
+
+  if (status === "sold") {
+    return "Sold";
+  }
+
+  if (
+    message.isCollectionCard ||
+    message.isPublicCollection ||
+    status === "collection"
+  ) {
+    return "Offer Only";
+  }
+
+  if (status === "active" || Number(message.price || 0) > 0) {
+    return "For Sale";
+  }
+
+  return getCardStatus(conversation);
+}
+
+function isOfferConversation(conversation: Conversation) {
+  const text = `${conversation.lastSnippet} ${conversation.snippet} ${conversation.messages
+    .map((message) => message.body)
+    .join(" ")}`.toLowerCase();
+
+  return Boolean(
+    conversation.offer ||
+      conversation.currentOffer ||
+      text.includes("offer") ||
+      text.includes("counter"),
+  );
+}
+
+function isOrderConversation(conversation: Conversation) {
+  const text = `${conversation.lastSnippet} ${conversation.snippet} ${conversation.messages
+    .map((message) => message.body)
+    .join(" ")}`.toLowerCase();
+
+  return (
+    getCardStatus(conversation) === "Sold" ||
+    text.includes("order") ||
+    text.includes("tracking") ||
+    text.includes("shipping") ||
+    text.includes("ship") ||
+    text.includes("label") ||
+    text.includes("delivered")
+  );
+}
+
+function isCollectionConversation(conversation: Conversation) {
+  return ["Offer Only", "Collection"].includes(getCardStatus(conversation));
+}
+
+function isForSaleConversation(conversation: Conversation) {
+  return getCardStatus(conversation) === "For Sale";
+}
+
+function getConversationStatus(conversation: Conversation, archivedIds: string[]) {
+  if (archivedIds.includes(conversation.id)) {
+    return "Archived";
+  }
+
+  if (conversation.unread) {
+    return "Unread";
+  }
+
+  if (conversation.offer?.status) {
+    return `Offer ${conversation.offer.status}`;
+  }
+
+  if (isOfferConversation(conversation)) {
+    return conversation.currentOffer ? "Offer Pending" : "Offer";
+  }
+
+  if (isOrderConversation(conversation)) {
+    return getCardStatus(conversation) === "Sold" ? "Completed" : "Order Active";
+  }
+
+  return "Read";
+}
+
+function getCollectorRoute(conversation: Conversation) {
+  return (
+    conversation.collectorHref ||
+    getPublicCollectorHref({ id: conversation.sellerId || conversation.id })
+  );
+}
+
+function getMessageGroupLabel(message: ConversationMessage) {
+  if (!message.createdAt) {
+    return message.time?.includes("AM") || message.time?.includes("PM") ? "Today" : "Recent";
+  }
+
+  const messageDate = new Date(message.createdAt);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (messageDate.toDateString() === today.toDateString()) {
+    return "Today";
+  }
+
+  if (messageDate.toDateString() === yesterday.toDateString()) {
+    return "Yesterday";
+  }
+
+  const daysAgo = Math.floor(
+    (today.getTime() - messageDate.getTime()) / (1000 * 60 * 60 * 24),
+  );
+
+  if (daysAgo > 1 && daysAgo < 8) {
+    return "Last Week";
+  }
+
+  return messageDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function MessagesFallback() {
   return (
     <main className="messages-page">
       <style>{pageStyles}</style>
       <div className="messages-shell">
         <Header />
-        <section className="page-heading">
-          <span>Messages</span>
-          <h1>Messages</h1>
-          <p>Loading messages...</p>
-        </section>
-        <section className="messages-layout">
-          <div className="conversation-list panel">
-            <p className="empty-copy">Loading messages...</p>
+        <section className="messages-hero panel">
+          <div>
+            <span>Messages</span>
+            <h1>Messages</h1>
+            <p>Loading conversations...</p>
           </div>
-          <div className="thread-panel panel">
-            <div className="empty-thread">
-              <h2>Loading messages...</h2>
-              <p>Preparing your conversations.</p>
-            </div>
+        </section>
+        <section className="messages-workspace panel">
+          <div className="empty-state">
+            <h2>Loading messages</h2>
+            <p>Preparing your conversations.</p>
           </div>
         </section>
       </div>
@@ -223,6 +470,10 @@ function MessagesContent() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(true);
   const [usesRealMessages, setUsesRealMessages] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [activeTab, setActiveTab] = useState<ConversationTab>("all");
+  const [viewMode, setViewMode] = useState<MessageViewMode>(() => getMessageViewPreference());
+  const [pinnedIds, setPinnedIds] = useState<string[]>(() => readIdList(pinnedConversationStorageKey));
+  const [archivedIds, setArchivedIds] = useState<string[]>(() => readIdList(archivedConversationStorageKey));
 
   useEffect(() => {
     let isMounted = true;
@@ -328,6 +579,15 @@ function MessagesContent() {
                 title,
                 price,
                 seller_id,
+                status,
+                sale_format,
+                is_collection_card,
+                is_public_collection,
+                player,
+                player_name,
+                year,
+                brand,
+                card_number,
                 listing_images (
                   image_url,
                   image_type
@@ -453,7 +713,20 @@ function MessagesContent() {
               source: "supabase" as const,
               buyerId: userId,
               sellerId: group.otherUserId,
+              collectorHref: getPublicCollectorHref(otherProfile, group.otherUserId),
               listingId: latestListing?.id || group.listingId,
+              listingStatus: latestListing?.status || listing?.status || null,
+              saleFormat: latestListing?.sale_format || listing?.sale_format || null,
+              isCollectionCard: Boolean(
+                latestListing?.is_collection_card || listing?.is_collection_card,
+              ),
+              isPublicCollection: Boolean(
+                latestListing?.is_public_collection || listing?.is_public_collection,
+              ),
+              player: latestListing?.player || latestListing?.player_name || listing?.player || listing?.player_name || "",
+              year: latestListing?.year || listing?.year || "",
+              brand: latestListing?.brand || listing?.brand || "",
+              cardNumber: latestListing?.card_number || listing?.card_number || "",
               participantName,
               participantRole,
               person: participantName,
@@ -476,6 +749,7 @@ function MessagesContent() {
                 sender: message.sender_id === userId ? "buyer" as const : "seller" as const,
                 body: message.body || "",
                 time: formatTimestamp(message.created_at),
+                createdAt: message.created_at,
                 listingId: message.listing_id,
                 listingTitle: message.listing_id
                   ? listingsById.get(message.listing_id)?.title || "GRAIL Card"
@@ -484,6 +758,27 @@ function MessagesContent() {
                   ? getListingFrontImage(listingsById.get(message.listing_id))
                   : null,
                 listingHref: message.listing_id ? `/cards/${message.listing_id}` : null,
+                listingStatus: message.listing_id
+                  ? listingsById.get(message.listing_id)?.status || null
+                  : null,
+                saleFormat: message.listing_id
+                  ? listingsById.get(message.listing_id)?.sale_format || null
+                  : null,
+                isCollectionCard: Boolean(
+                  message.listing_id
+                    ? listingsById.get(message.listing_id)?.is_collection_card
+                    : false,
+                ),
+                isPublicCollection: Boolean(
+                  message.listing_id
+                    ? listingsById.get(message.listing_id)?.is_public_collection
+                    : false,
+                ),
+                price: Number(
+                  message.listing_id
+                    ? listingsById.get(message.listing_id)?.price || 0
+                    : 0,
+                ),
               })),
             };
           })
@@ -554,9 +849,92 @@ function MessagesContent() {
     requestedUserId,
   ]);
 
+  useEffect(() => {
+    window.localStorage.setItem(messageViewStorageKey, viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
+    window.localStorage.setItem(pinnedConversationStorageKey, JSON.stringify(pinnedIds));
+  }, [pinnedIds]);
+
+  useEffect(() => {
+    window.localStorage.setItem(archivedConversationStorageKey, JSON.stringify(archivedIds));
+  }, [archivedIds]);
+
+  const getTabMatch = useCallback(
+    (conversation: Conversation, tab: ConversationTab) => {
+      const isArchived = archivedIds.includes(conversation.id);
+
+      if (tab === "archived") {
+        return isArchived;
+      }
+
+      if (isArchived) {
+        return false;
+      }
+
+      if (tab === "all") return true;
+      if (tab === "unread") return Boolean(conversation.unread);
+      if (tab === "offers") return isOfferConversation(conversation);
+      if (tab === "orders") return isOrderConversation(conversation);
+      if (tab === "collection") return isCollectionConversation(conversation);
+      if (tab === "for_sale") return isForSaleConversation(conversation);
+
+      return true;
+    },
+    [archivedIds],
+  );
+
+  const tabCounts = useMemo(() => {
+    return conversationTabs.reduce<Record<ConversationTab, number>>(
+      (counts, tab) => {
+        counts[tab.id] = conversations.filter((conversation) =>
+          getTabMatch(conversation, tab.id),
+        ).length;
+        return counts;
+      },
+      {
+        all: 0,
+        unread: 0,
+        offers: 0,
+        orders: 0,
+        collection: 0,
+        for_sale: 0,
+        archived: 0,
+      },
+    );
+  }, [conversations, getTabMatch]);
+
+  const summaryStats = useMemo(
+    () => [
+      { label: "Unread", value: conversations.filter((conversation) => conversation.unread).length },
+      {
+        label: "Buyer Conversations",
+        value: conversations.filter((conversation) => conversation.participantRole === "Buyer").length,
+      },
+      {
+        label: "Seller Conversations",
+        value: conversations.filter((conversation) => conversation.participantRole === "Seller").length,
+      },
+      { label: "Offer Conversations", value: conversations.filter(isOfferConversation).length },
+      { label: "Order Conversations", value: conversations.filter(isOrderConversation).length },
+    ],
+    [conversations],
+  );
+
   const filteredConversations = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    const sortedConversations = [...conversations].sort((first, second) => {
+    const tabbedConversations = conversations.filter((conversation) =>
+      getTabMatch(conversation, activeTab),
+    );
+    const sortedConversations = [...tabbedConversations].sort((first, second) => {
+      const firstPinned = pinnedIds.includes(first.id);
+      const secondPinned = pinnedIds.includes(second.id);
+
+      if (firstPinned !== secondPinned) {
+        return firstPinned ? -1 : 1;
+      }
+
       if (first.unread !== second.unread) {
         return first.unread ? -1 : 1;
       }
@@ -571,18 +949,28 @@ function MessagesContent() {
     return sortedConversations.filter((conversation) =>
       [
         conversation.person,
+        conversation.participantName,
+        conversation.participantRole,
         conversation.cardTitle,
+        conversation.player,
+        conversation.year,
+        conversation.brand,
+        conversation.cardNumber,
         conversation.lastSnippet,
+        conversation.currentOffer,
+        conversation.price,
+        conversation.messages.map((message) => message.body).join(" "),
+        conversation.listingId,
       ]
         .join(" ")
         .toLowerCase()
         .includes(query),
     );
-  }, [conversations, searchQuery]);
+  }, [activeTab, conversations, getTabMatch, pinnedIds, searchQuery]);
 
   const activeConversation =
-    conversations.find((conversation) => conversation.id === activeId) ||
-    conversations[0] ||
+    filteredConversations.find((conversation) => conversation.id === activeId) ||
+    filteredConversations[0] ||
     null;
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
@@ -661,7 +1049,7 @@ function MessagesContent() {
                 unread: false,
                 lastSnippet: body,
                 snippet: body,
-                timestamp: "now",
+                timestamp: "Now",
                 sortRank: Date.now(),
                 messages: [
                   ...conversation.messages,
@@ -670,10 +1058,16 @@ function MessagesContent() {
                     sender: "buyer",
                     body,
                     time: "Now",
+                    createdAt: insertedMessage.created_at,
                     listingId: activeConversation.listingId,
                     listingTitle: activeConversation.cardTitle,
                     listingImageUrl: activeConversation.listingImageUrl,
                     listingHref: activeConversation.cardHref,
+                    listingStatus: activeConversation.listingStatus,
+                    saleFormat: activeConversation.saleFormat,
+                    isCollectionCard: activeConversation.isCollectionCard,
+                    isPublicCollection: activeConversation.isPublicCollection,
+                    price: activeConversation.price,
                   },
                 ],
               }
@@ -692,7 +1086,7 @@ function MessagesContent() {
               ...conversation,
               unread: false,
               lastSnippet: body,
-              timestamp: "now",
+              timestamp: "Now",
               sortRank: Date.now(),
               messages: [
                 ...conversation.messages,
@@ -735,6 +1129,234 @@ function MessagesContent() {
     setCounterAmount("");
   }
 
+  function selectConversation(conversationId: string) {
+    setActiveId(conversationId);
+    setConversations((items) =>
+      items.map((item) =>
+        item.id === conversationId ? { ...item, unread: false } : item,
+      ),
+    );
+  }
+
+  function togglePin(conversationId: string) {
+    setPinnedIds((items) =>
+      items.includes(conversationId)
+        ? items.filter((id) => id !== conversationId)
+        : [...items, conversationId],
+    );
+  }
+
+  function toggleArchive(conversationId: string) {
+    setArchivedIds((items) =>
+      items.includes(conversationId)
+        ? items.filter((id) => id !== conversationId)
+        : [...items, conversationId],
+    );
+  }
+
+  function insertQuickReply(value: string) {
+    setDraft((current) => (current ? `${current} ${value}` : value));
+  }
+
+  function renderConversationBadges(conversation: Conversation) {
+    return (
+      <div className="conversation-badges">
+        {isOfferConversation(conversation) ? <span>Offer</span> : null}
+        {isOrderConversation(conversation) ? <span>Order</span> : null}
+      </div>
+    );
+  }
+
+  function renderTimelineCardPreview({
+    conversation,
+    message,
+  }: {
+    conversation: Conversation;
+    message?: ConversationMessage;
+  }) {
+    const title = message?.listingTitle || conversation.cardTitle;
+    const href = message?.listingHref || conversation.cardHref;
+    const imageUrl = message?.listingImageUrl || conversation.listingImageUrl;
+    const status = message ? getMessageCardStatus(message, conversation) : getCardStatus(conversation);
+
+    return (
+      <section className="timeline-card-preview">
+        <div className="timeline-card-image">
+          {imageUrl ? (
+            <Image
+              src={imageUrl}
+              alt={title}
+              width={68}
+              height={90}
+              unoptimized
+            />
+          ) : (
+            <CardArtwork accent={conversation.accent} />
+          )}
+        </div>
+        <div>
+          <span>Card Preview</span>
+          <h3>{title}</h3>
+          <div className="context-pill-row">
+            <span>{status}</span>
+            <Link href={href}>View Card</Link>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  function renderEmptyConversationList() {
+    if (isLoadingMessages) {
+      return <div className="empty-state small"><h2>Loading messages</h2><p>Preparing conversations.</p></div>;
+    }
+
+    if (!currentUserId && usesRealMessages) {
+      return <div className="empty-state small"><h2>Sign in required</h2><p>Sign in to view your messages.</p></div>;
+    }
+
+    const label = conversationTabs.find((tab) => tab.id === activeTab)?.label || "Messages";
+
+    return (
+      <div className="empty-state small">
+        <h2>No {label.toLowerCase()} messages</h2>
+        <p>Matching conversations will appear here.</p>
+      </div>
+    );
+  }
+
+  function renderActionCard(conversation: Conversation) {
+    if (conversation.offer || conversation.currentOffer || isOfferConversation(conversation)) {
+      const amount = conversation.offer?.amount || conversation.currentOffer || 0;
+      const status = conversation.offer?.status || "Pending";
+
+      return (
+        <section className="context-action-card offer-context-card">
+          <div>
+            <span>Offer {status}</span>
+            <strong>{amount > 0 ? formatCurrency(amount) : "Offer conversation"}</strong>
+            <p>Keep the negotiation tied to this card.</p>
+          </div>
+          <div className="context-action-buttons">
+            {conversation.offer ? (
+              <>
+                <button type="button" onClick={() => updateOffer("Accepted")}>Accept</button>
+                <button type="button" onClick={() => setCounterFor(conversation.id)}>Counter</button>
+                <button type="button" onClick={() => updateOffer("Declined")}>Decline</button>
+              </>
+            ) : null}
+            <Link href="/offers">View Offer</Link>
+          </div>
+          {counterFor === conversation.id ? (
+            <div className="counter-row">
+              <input
+                type="number"
+                value={counterAmount}
+                onChange={(event) => setCounterAmount(event.target.value)}
+                placeholder="Counter amount"
+              />
+              <button type="button" onClick={() => updateOffer("Countered")}>Send</button>
+            </div>
+          ) : null}
+        </section>
+      );
+    }
+
+    if (isOrderConversation(conversation)) {
+      return (
+        <section className="context-action-card">
+          <div>
+            <span>Order Active</span>
+            <strong>{conversation.cardTitle}</strong>
+            <p>Use Orders for fulfillment, tracking, inspection, and payout status.</p>
+          </div>
+          <div className="context-action-buttons">
+            <Link href="/orders">View Order</Link>
+          </div>
+        </section>
+      );
+    }
+
+    if (isCollectionConversation(conversation)) {
+      return (
+        <section className="context-action-card">
+          <div>
+            <span>Collection Card</span>
+            <strong>{conversation.cardTitle}</strong>
+            <p>This card may not be listed for instant purchase, but negotiation can continue.</p>
+          </div>
+          <div className="context-action-buttons">
+            {conversation.listingId ? (
+              <Link href={`/make-offer?listingId=${encodeURIComponent(conversation.listingId)}`}>
+                Make Offer
+              </Link>
+            ) : null}
+          </div>
+        </section>
+      );
+    }
+
+    return null;
+  }
+
+  function renderMessageThread(conversation: Conversation) {
+    let previousGroup = "";
+    const renderedListingContexts = new Set<string>();
+    let renderedFallbackContext = false;
+
+    return (
+      <div className="message-thread">
+        {conversation.messages.length === 0 ? (
+          <>
+            {conversation.listingId ? renderTimelineCardPreview({ conversation }) : null}
+            <div className="empty-state small">
+              <h2>No messages yet</h2>
+              <p>Send the first message in this conversation.</p>
+            </div>
+          </>
+        ) : null}
+        {conversation.messages.map((message) => {
+          const nextGroup = getMessageGroupLabel(message);
+          const shouldShowGroup = nextGroup !== previousGroup;
+          const shouldRenderListingContext = Boolean(
+            message.listingId && !renderedListingContexts.has(message.listingId),
+          );
+          const shouldRenderFallbackContext = Boolean(
+            !message.listingId &&
+              conversation.listingId &&
+              !renderedFallbackContext &&
+              conversation.messages.every((item) => !item.listingId),
+          );
+
+          if (message.listingId) {
+            renderedListingContexts.add(message.listingId);
+          } else if (shouldRenderFallbackContext) {
+            renderedFallbackContext = true;
+          }
+
+          previousGroup = nextGroup;
+
+          return (
+            <div key={message.id} className="message-group-item">
+              {shouldShowGroup ? <div className="message-date-divider">{nextGroup}</div> : null}
+              {shouldRenderListingContext
+                ? renderTimelineCardPreview({ conversation, message })
+                : null}
+              {shouldRenderFallbackContext
+                ? renderTimelineCardPreview({ conversation })
+                : null}
+              <div className={`message-bubble ${message.sender}`}>
+                <p>{message.body}</p>
+                <span>{message.time}</span>
+              </div>
+            </div>
+          );
+        })}
+        {renderActionCard(conversation)}
+      </div>
+    );
+  }
+
   const showSignInPrompt =
     !isLoadingMessages && usesRealMessages && !currentUserId;
   const showEmptyThread =
@@ -746,83 +1368,126 @@ function MessagesContent() {
       <div className="messages-shell">
         <Header />
 
-        <section className="page-heading">
-          <span>Messages</span>
-          <h1>Messages</h1>
-          <p>Buyer and seller conversations for cards, offers, and shipping.</p>
+        <section className="messages-hero panel">
+          <div>
+            <span>Messages</span>
+            <h1>Messages</h1>
+            <p>Stay connected with buyers, sellers, offers, and collection inquiries.</p>
+          </div>
+          <Link href="/browse">Browse Cards</Link>
+        </section>
+
+        <section className="message-summary-row" aria-label="Quick message summary">
+          {summaryStats.map((stat) => (
+            <article key={stat.label} className="message-summary-stat">
+              <span>{stat.label}</span>
+              <strong>{stat.value}</strong>
+            </article>
+          ))}
+        </section>
+
+        <section className="conversation-nav panel" aria-label="Conversation filters">
+          {conversationTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={activeTab === tab.id ? "is-active" : ""}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+              <span>{tabCounts[tab.id]}</span>
+            </button>
+          ))}
         </section>
 
         {statusMessage ? <p className="status-message">{statusMessage}</p> : null}
 
-        <section className="messages-layout">
-          <aside className="conversation-list panel">
-            <label className="message-search">
-              <span aria-hidden="true" />
-              <input
-                type="search"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search messages"
-                aria-label="Search messages"
-              />
-            </label>
+        <section className={`messages-workspace panel messages-${viewMode}`}>
+          <aside className="conversation-sidebar">
+            <div className="messages-toolbar">
+              <label className="message-search">
+                <span>Search Conversations</span>
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search buyer, seller, card, message, offer..."
+                  aria-label="Search messages"
+                />
+              </label>
+              <div className="view-toggle" aria-label="Message density">
+                <button
+                  type="button"
+                  className={viewMode === "comfortable" ? "is-active" : ""}
+                  onClick={() => setViewMode("comfortable")}
+                >
+                  Comfortable
+                </button>
+                <button
+                  type="button"
+                  className={viewMode === "compact" ? "is-active" : ""}
+                  onClick={() => setViewMode("compact")}
+                >
+                  Compact
+                </button>
+              </div>
+            </div>
 
             <div className="conversation-rows">
-              {isLoadingMessages ? (
-                <p className="empty-copy">Loading messages...</p>
-              ) : null}
-              {!isLoadingMessages && filteredConversations.length === 0 ? (
-                <p className="empty-copy">
-                  {showSignInPrompt
-                    ? "Sign in to view your messages."
-                    : "No messages yet."}
-                </p>
-              ) : null}
-              {filteredConversations.map((conversation) => (
-                <button
-                  key={conversation.id}
-                  type="button"
-                  className={conversation.id === activeConversation?.id ? "active" : ""}
-                  onClick={() => {
-                    setActiveId(conversation.id);
-                    setConversations((items) =>
-                      items.map((item) =>
-                        item.id === conversation.id ? { ...item, unread: false } : item,
-                      ),
-                    );
-                  }}
-                >
-                  <span className="unread-slot" aria-hidden="true">
-                    {conversation.unread ? <span className="unread-dot" /> : null}
-                  </span>
-                  <div>
-                    <strong>
-                      {conversation.isActive ? <span className="online-dot" aria-hidden="true" /> : null}
-                      {conversation.person}
-                    </strong>
-                    <span>{conversation.cardTitle}</span>
-                    <p>{conversation.lastSnippet}</p>
-                  </div>
-                  <div className="conversation-meta">
-                    <span>{conversation.timestamp}</span>
-                  </div>
-                </button>
-              ))}
+              {filteredConversations.length === 0 ? renderEmptyConversationList() : null}
+              {filteredConversations.map((conversation) => {
+                const isPinned = pinnedIds.includes(conversation.id);
+                const isActive = conversation.id === activeConversation?.id;
+                const status = getConversationStatus(conversation, archivedIds);
+
+                return (
+                  <button
+                    key={conversation.id}
+                    type="button"
+                    className={`${isActive ? "active" : ""} ${conversation.unread ? "unread" : ""}`}
+                    onClick={() => selectConversation(conversation.id)}
+                  >
+                    <div className="collector-avatar" aria-hidden="true">
+                      {getInitials(conversation.person)}
+                    </div>
+                    <div className="conversation-row-copy">
+                      <div className="conversation-row-title">
+                        <strong>
+                          {conversation.isActive ? (
+                            <span className="online-dot" aria-hidden="true" />
+                          ) : null}
+                          {conversation.person}
+                        </strong>
+                        <span>{conversation.timestamp}</span>
+                      </div>
+                      <p>{conversation.lastSnippet}</p>
+                      <div className="conversation-row-footer">
+                        <span className={`message-status-pill status-${status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
+                          {status}
+                        </span>
+                        {isPinned ? <span className="pinned-indicator">Pinned</span> : null}
+                        {renderConversationBadges(conversation)}
+                      </div>
+                    </div>
+                    {conversation.unread ? <span className="unread-dot" aria-label="Unread" /> : null}
+                  </button>
+                );
+              })}
             </div>
           </aside>
 
-          <section className="thread-panel panel">
+          <section className="thread-panel">
             {showSignInPrompt ? (
-              <div className="empty-thread">
-                <h2>Sign in to view your messages.</h2>
+              <div className="empty-state">
+                <h2>Sign in to view your messages</h2>
                 <p>Message a seller from a listing to start a conversation.</p>
                 <Link href="/login">Sign In</Link>
               </div>
             ) : null}
 
             {showEmptyThread ? (
-              <div className="empty-thread">
-                <h2>No messages yet.</h2>
+              <div className="empty-state">
+                <h2>No messages yet</h2>
                 <p>Message a seller from a listing to start a conversation.</p>
                 <Link href="/browse">Browse Cards</Link>
               </div>
@@ -831,114 +1496,50 @@ function MessagesContent() {
             {activeConversation ? (
               <>
                 <header className="thread-header">
-                  <div>
-                    <h2>{activeConversation.person}</h2>
-                    <p>
-                      {activeConversation.isActive ? (
-                        <span className="online-dot" aria-hidden="true" />
-                      ) : null}
-                      {activeConversation.badge} · {activeConversation.cardTitle}
-                    </p>
-                  </div>
-                  <Link href={activeConversation.cardHref}>View Card</Link>
-                </header>
-
-                <Link className="card-preview" href={activeConversation.cardHref}>
-                  {activeConversation.listingImageUrl ? (
-                    <Image
-                      src={activeConversation.listingImageUrl}
-                      alt={activeConversation.cardTitle}
-                      width={72}
-                      height={96}
-                      unoptimized
-                    />
-                  ) : activeConversation.source === "mock" ? (
-                    <CardArtwork accent={activeConversation.accent} />
-                  ) : null}
-                  <div>
-                    <h3>{activeConversation.cardTitle}</h3>
-                    <p>{formatCurrency(activeConversation.price)}</p>
-                    {activeConversation.currentOffer ? (
-                      <span>
-                        Current offer{" "}
-                        {formatCurrency(activeConversation.currentOffer)}
-                      </span>
-                    ) : null}
-                  </div>
-                  <strong>View Card</strong>
-                </Link>
-
-                {activeConversation.offer ? (
-                  <div className="offer-card">
+                  <Link
+                    className="thread-collector thread-collector-link"
+                    href={getCollectorRoute(activeConversation)}
+                  >
+                    <div className="collector-avatar large" aria-hidden="true">
+                      {getInitials(activeConversation.person)}
+                    </div>
                     <div>
-                      <span>Offer</span>
-                      <strong>{formatCurrency(activeConversation.offer.amount)}</strong>
-                      <p>Status: {activeConversation.offer.status}</p>
+                      <span>Collector</span>
+                      <h2>{activeConversation.person}</h2>
+                      <p>
+                        {activeConversation.isActive ? (
+                          <span className="online-dot" aria-hidden="true" />
+                        ) : null}
+                        {hasCollectorLevelBadge(activeConversation.badge) ? (
+                          <span className="thread-rank-badge">
+                            <CollectorLevelBadge rank={activeConversation.badge} size="xs" />
+                            {activeConversation.badge}
+                          </span>
+                        ) : (
+                          activeConversation.badge
+                        )}
+                      </p>
                     </div>
-                    <div className="offer-actions">
-                      <button type="button" onClick={() => updateOffer("Accepted")}>
-                        Accept
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCounterFor(activeConversation.id)}
-                      >
-                        Counter
-                      </button>
-                      <button type="button" onClick={() => updateOffer("Declined")}>
-                        Decline
-                      </button>
-                    </div>
-                    {counterFor === activeConversation.id ? (
-                      <div className="counter-row">
-                        <input
-                          type="number"
-                          value={counterAmount}
-                          onChange={(event) => setCounterAmount(event.target.value)}
-                          placeholder="Counter amount"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => updateOffer("Countered")}
-                        >
-                          Send
-                        </button>
-                      </div>
-                    ) : null}
+                  </Link>
+                  <div className="thread-actions">
+                    <Link href={getCollectorRoute(activeConversation)}>View Collector</Link>
+                    <Link href="/contact-support">Report</Link>
+                    <button type="button">More</button>
+                    <button type="button" onClick={() => togglePin(activeConversation.id)}>
+                      {pinnedIds.includes(activeConversation.id) ? "Unpin" : "Pin"}
+                    </button>
+                    <button type="button" onClick={() => toggleArchive(activeConversation.id)}>
+                      {archivedIds.includes(activeConversation.id) ? "Unarchive" : "Archive"}
+                    </button>
                   </div>
-                ) : null}
+                </header>
+                {renderMessageThread(activeConversation)}
 
-                <div className="message-thread">
-                  {activeConversation.messages.length === 0 ? (
-                    <p className="empty-copy">
-                      No messages in this conversation yet.
-                    </p>
-                  ) : null}
-                  {activeConversation.messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`message-bubble ${message.sender}`}
-                    >
-                      {message.listingTitle ? (
-                        <Link
-                          className="message-listing-context"
-                          href={message.listingHref || activeConversation.cardHref}
-                        >
-                          <strong>{message.listingTitle}</strong>
-                          {message.listingImageUrl ? (
-                            <Image
-                              src={message.listingImageUrl}
-                              alt={message.listingTitle}
-                              width={52}
-                              height={68}
-                              unoptimized
-                            />
-                          ) : null}
-                        </Link>
-                      ) : null}
-                      <p>{message.body}</p>
-                      <span>{message.time}</span>
-                    </div>
+                <div className="quick-reply-row" aria-label="Quick replies">
+                  {quickReplies.map((reply) => (
+                    <button key={reply} type="button" onClick={() => insertQuickReply(reply)}>
+                      {reply}
+                    </button>
                   ))}
                 </div>
 
@@ -985,11 +1586,21 @@ const pageStyles = `
     box-shadow: 0 18px 44px rgba(0,0,0,0.28);
   }
 
-  .page-heading {
-    margin-top: 18px;
+  .messages-hero {
+    margin-top: 10px;
+    padding: 18px;
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    align-items: end;
   }
 
-  .page-heading span {
+  .messages-hero span,
+  .message-summary-stat span,
+  .message-search span,
+  .thread-collector > div:last-child > span,
+  .timeline-card-preview span,
+  .context-action-card span {
     color: #C9CDD3;
     font-size: 11px;
     line-height: 14px;
@@ -998,26 +1609,135 @@ const pageStyles = `
     text-transform: uppercase;
   }
 
-  .page-heading h1 {
-    margin: 8px 0 0;
+  .messages-hero h1 {
+    margin: 8px 0 4px;
     color: #fff;
     font-size: 42px;
     line-height: 46px;
     font-weight: 900;
+    letter-spacing: -0.04em;
   }
 
-  .page-heading p,
+  .messages-hero p,
   .thread-header p,
-  .card-preview p,
-  .card-preview span,
-  .offer-card p,
-  .empty-copy,
-  .empty-thread p,
-  .status-message {
+  .timeline-card-preview p,
+  .context-action-card p,
+  .empty-state p,
+  .status-message,
+  .conversation-row-copy p {
+    margin: 0;
     color: #a1a1aa;
     font-size: 13px;
     line-height: 18px;
     font-weight: 800;
+  }
+
+  .messages-hero a,
+  .thread-actions a,
+  .thread-actions button,
+  .context-action-buttons a,
+  .context-action-buttons button,
+  .context-pill-row a,
+  .counter-row button,
+  .quick-reply-row button,
+  .composer button,
+  .view-toggle button,
+  .empty-state a {
+    border: 1px solid rgba(231,222,208,0.28);
+    border-radius: 10px;
+    background: rgba(231,222,208,0.055);
+    color: #fff;
+    min-height: 36px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .messages-hero a:hover,
+  .thread-actions a:hover,
+  .thread-actions button:hover,
+  .context-action-buttons a:hover,
+  .context-action-buttons button:hover,
+  .context-pill-row a:hover,
+  .counter-row button:hover,
+  .quick-reply-row button:hover,
+  .composer button:hover,
+  .view-toggle button:hover,
+  .empty-state a:hover {
+    border-color: rgba(231,222,208,0.62);
+    background: rgba(231,222,208,0.11);
+    box-shadow: 0 0 18px rgba(201,205,211,0.13);
+  }
+
+  .message-summary-row {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .message-summary-stat {
+    border: 1px solid rgba(201,205,211,0.12);
+    border-radius: 12px;
+    background: rgba(8,8,10,0.58);
+    min-height: 72px;
+    padding: 11px;
+    display: grid;
+    gap: 6px;
+  }
+
+  .message-summary-stat strong {
+    color: #fff;
+    font-size: 24px;
+    line-height: 28px;
+    font-weight: 900;
+  }
+
+  .conversation-nav {
+    margin-top: 14px;
+    padding: 10px;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+  }
+
+  .conversation-nav button {
+    flex: 0 0 auto;
+    border: 1px solid rgba(201,205,211,0.14);
+    border-radius: 10px;
+    background: rgba(8,8,10,0.72);
+    color: #C9CDD3;
+    min-height: 36px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .conversation-nav button.is-active,
+  .view-toggle button.is-active {
+    border-color: rgba(231,222,208,0.48);
+    background: rgba(231,222,208,0.12);
+    color: #fff;
+  }
+
+  .conversation-nav button span {
+    margin-left: 8px;
+    border-radius: 999px;
+    background: rgba(201,205,211,0.1);
+    color: #fff;
+    min-width: 22px;
+    padding: 3px 7px;
+    font-size: 10px;
+    line-height: 12px;
   }
 
   .status-message {
@@ -1028,36 +1748,30 @@ const pageStyles = `
     padding: 10px 12px;
   }
 
-  .messages-layout {
-    margin-top: 18px;
+  .messages-workspace {
+    margin-top: 14px;
+    padding: 14px;
     display: grid;
-    grid-template-columns: 340px 1fr;
-    gap: 16px;
+    grid-template-columns: 410px minmax(0, 1fr);
+    gap: 14px;
     min-height: 680px;
   }
 
-  .conversation-list,
-  .thread-panel {
-    padding: 14px;
+  .conversation-sidebar {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .messages-toolbar {
+    display: grid;
+    gap: 9px;
   }
 
   .message-search {
-    height: 38px;
-    border: 1px solid #24242a;
-    border-radius: 9px;
-    background: #08080a;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 12px;
-  }
-
-  .message-search span {
-    width: 12px;
-    height: 12px;
-    border: 2px solid #777985;
-    border-radius: 999px;
-    box-sizing: border-box;
+    display: grid;
+    gap: 7px;
   }
 
   .message-search input,
@@ -1065,50 +1779,56 @@ const pageStyles = `
   .counter-row input {
     width: 100%;
     min-width: 0;
-    border: 0;
-    outline: 0;
-    background: transparent;
-    color: #f4f4f5;
-    font: inherit;
+    border: 1px solid #202026;
+    border-radius: 10px;
+    background: rgba(8,8,10,0.84);
+    color: #fff;
+    min-height: 40px;
+    padding: 0 11px;
     font-size: 13px;
     font-weight: 800;
+    outline: none;
+  }
+
+  .view-toggle,
+  .conversation-row-footer,
+  .conversation-badges,
+  .thread-actions,
+  .context-pill-row,
+  .context-action-buttons,
+  .quick-reply-row {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
   }
 
   .conversation-rows {
-    margin-top: 12px;
     display: grid;
     gap: 8px;
+    align-content: start;
+    max-height: 630px;
+    overflow: auto;
+    padding-right: 3px;
   }
 
   .conversation-rows button {
     position: relative;
     border: 1px solid #202026;
-    border-radius: 10px;
+    border-radius: 12px;
     background: rgba(8,8,10,0.72);
     color: inherit;
-    padding: 12px;
+    padding: 11px;
     display: grid;
-    grid-template-columns: 14px 1fr auto;
+    grid-template-columns: 42px minmax(0, 1fr);
     gap: 10px;
     align-items: center;
     text-align: left;
     cursor: pointer;
   }
 
-  .unread-slot {
-    width: 14px;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .unread-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background: #fff;
-    box-shadow: 0 0 10px rgba(255,255,255,0.28);
+  .messages-compact .conversation-rows button {
+    grid-template-columns: 34px minmax(0, 1fr);
+    padding: 9px;
   }
 
   .conversation-rows button.active,
@@ -1117,12 +1837,114 @@ const pageStyles = `
     background: rgba(231,222,208,0.07);
   }
 
-  .conversation-rows strong {
-    display: block;
-    color: #fff;
-    font-size: 13px;
-    line-height: 17px;
+  .conversation-rows button.unread {
+    border-color: rgba(231,222,208,0.34);
+    background: rgba(231,222,208,0.08);
+  }
+
+  .collector-avatar {
+    width: 40px;
+    height: 40px;
+    border: 1px solid rgba(201,205,211,0.2);
+    border-radius: 999px;
+    background: linear-gradient(135deg, #1f2937, #050506);
+    color: #E7DED0;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
     font-weight: 900;
+  }
+
+  .collector-avatar.large {
+    width: 52px;
+    height: 52px;
+    font-size: 14px;
+  }
+
+  .messages-compact .collector-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 10px;
+  }
+
+  .conversation-row-copy {
+    min-width: 0;
+    display: grid;
+    gap: 5px;
+  }
+
+  .conversation-row-title {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .conversation-row-title strong,
+  .thread-header h2,
+  .timeline-card-preview h3,
+  .context-action-card strong,
+  .empty-state h2 {
+    margin: 0;
+    color: #fff;
+    font-size: 18px;
+    line-height: 22px;
+    font-weight: 900;
+  }
+
+  .conversation-row-title span {
+    margin: 0;
+    color: #C9CDD3;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 900;
+  }
+
+  .conversation-row-copy p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .message-status-pill,
+  .conversation-badges span,
+  .pinned-indicator,
+  .context-pill-row span {
+    border: 1px solid rgba(201,205,211,0.18);
+    border-radius: 999px;
+    background: rgba(201,205,211,0.055);
+    color: #C9CDD3;
+    padding: 4px 8px;
+    font-size: 10px;
+    line-height: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .status-unread,
+  .status-offer-pending,
+  .status-offer-accepted,
+  .status-order-active {
+    border-color: rgba(231,222,208,0.28);
+    background: rgba(231,222,208,0.08);
+    color: #E7DED0;
+  }
+
+  .status-completed {
+    border-color: rgba(52,211,153,0.24);
+    background: rgba(52,211,153,0.08);
+    color: #86efac;
+  }
+
+  .unread-dot {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 0 10px rgba(255,255,255,0.28);
   }
 
   .online-dot {
@@ -1136,127 +1958,74 @@ const pageStyles = `
     vertical-align: 1px;
   }
 
-  .conversation-rows span,
-  .conversation-rows p,
-  .conversation-meta {
-    color: #a1a1aa;
-    font-size: 11px;
-    line-height: 15px;
-    font-weight: 800;
-  }
-
-  .conversation-meta {
-    text-align: right;
-  }
-
   .thread-panel {
+    min-width: 0;
     display: grid;
-    grid-template-rows: auto auto auto 1fr auto;
+    grid-template-rows: auto auto auto minmax(280px, 1fr) auto auto;
     gap: 12px;
-  }
-
-  .empty-copy {
-    margin: 0;
-    padding: 12px;
-  }
-
-  .empty-thread {
-    min-height: 320px;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: center;
-    gap: 10px;
-  }
-
-  .empty-thread h2 {
-    margin: 0;
-    color: #fff;
-    font-size: 24px;
-    line-height: 30px;
-    font-weight: 900;
-  }
-
-  .empty-thread a {
-    border: 1px solid rgba(231,222,208,0.28);
-    border-radius: 10px;
-    background: rgba(231,222,208,0.055);
-    color: #fff;
-    min-height: 38px;
-    padding: 0 14px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    text-decoration: none;
-    font-size: 12px;
-    font-weight: 900;
   }
 
   .thread-header {
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    gap: 14px;
+    gap: 12px;
+    align-items: flex-start;
   }
 
-  .thread-header h2,
-  .card-preview h3 {
-    margin: 0;
-    color: #fff;
-    font-size: 22px;
-    line-height: 26px;
-    font-weight: 900;
+  .thread-collector {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 11px;
+    align-items: center;
   }
 
-  .thread-header a,
-  .card-preview strong,
-  .offer-actions button,
-  .counter-row button,
-  .composer button {
-    border: 1px solid rgba(231,222,208,0.28);
-    border-radius: 10px;
-    background: rgba(231,222,208,0.055);
-    color: #fff;
-    min-height: 36px;
-    padding: 0 12px;
+  .thread-collector-link {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .thread-collector-link:hover h2 {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .thread-rank-badge {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    text-decoration: none;
-    font-size: 12px;
-    font-weight: 900;
-    cursor: pointer;
+    gap: 6px;
   }
 
-  .thread-header a:hover,
-  .card-preview:hover strong,
-  .offer-actions button:hover,
-  .counter-row button:hover,
-  .composer button:hover {
-    border-color: rgba(231,222,208,0.62);
-    background: rgba(231,222,208,0.11);
-    box-shadow: 0 0 18px rgba(201,205,211,0.13);
-  }
-
-  .card-preview {
+  .timeline-card-preview {
     border: 1px solid #202026;
     border-radius: 12px;
     background: rgba(8,8,10,0.76);
     padding: 12px;
     display: grid;
-    grid-template-columns: 86px 1fr auto;
+    grid-template-columns: 78px minmax(0, 1fr);
     gap: 12px;
     align-items: center;
-    color: inherit;
-    text-decoration: none;
   }
 
-  .card-preview > img {
-    width: 74px;
-    height: 96px;
-    object-fit: contain;
-    border-radius: 9px;
+  .timeline-card-image {
+    width: 68px;
+    height: 90px;
+    border: 1px solid rgba(201,205,211,0.12);
+    border-radius: 10px;
     background: #030304;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+
+  .timeline-card-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .timeline-card-image .card-art,
+  .timeline-card-image .card-face {
+    transform: scale(0.86);
   }
 
   .card-art {
@@ -1300,55 +2069,30 @@ const pageStyles = `
     background: rgba(255,255,255,0.75);
   }
 
-  .offer-card {
-    border: 1px solid rgba(52,211,153,0.18);
+  .context-action-card {
+    border: 1px solid rgba(231,222,208,0.18);
     border-radius: 12px;
-    background: rgba(52,211,153,0.055);
+    background: rgba(231,222,208,0.055);
     padding: 12px;
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
-  }
-
-  .offer-card span {
-    color: #86efac;
-    font-size: 11px;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .offer-card strong {
-    display: block;
-    margin-top: 5px;
-    color: #fff;
-    font-size: 24px;
-    line-height: 28px;
-    font-weight: 900;
-  }
-
-  .offer-actions {
-    display: flex;
-    gap: 8px;
     align-items: center;
+  }
+
+  .offer-context-card {
+    border-color: rgba(52,211,153,0.18);
+    background: rgba(52,211,153,0.055);
   }
 
   .counter-row {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px;
   }
 
-  .counter-row input {
-    border: 1px solid #24242a;
-    border-radius: 10px;
-    background: #08080a;
-    padding: 0 12px;
-    min-height: 38px;
-  }
-
   .message-thread {
-    min-height: 280px;
     overflow-y: auto;
     border: 1px solid #202026;
     border-radius: 12px;
@@ -1359,47 +2103,40 @@ const pageStyles = `
     gap: 10px;
   }
 
+  .message-group-item {
+    display: grid;
+    gap: 8px;
+  }
+
+  .message-date-divider {
+    justify-self: center;
+    border: 1px solid rgba(201,205,211,0.12);
+    border-radius: 999px;
+    background: rgba(8,8,10,0.78);
+    color: #85858f;
+    padding: 5px 9px;
+    font-size: 10px;
+    line-height: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
   .message-bubble {
-    max-width: 70%;
+    max-width: 72%;
     border: 1px solid #202026;
-    border-radius: 12px;
+    border-radius: 14px;
     background: rgba(5,5,6,0.9);
-    padding: 10px;
+    padding: 11px;
   }
 
   .message-bubble.buyer {
-    align-self: flex-end;
+    justify-self: end;
     border-color: rgba(231,222,208,0.26);
     background: rgba(231,222,208,0.07);
   }
 
-  .message-listing-context {
-    border: 1px solid rgba(201,205,211,0.14);
-    border-radius: 10px;
-    background: rgba(0,0,0,0.24);
-    margin-bottom: 8px;
-    padding: 8px;
-    display: grid;
-    gap: 8px;
-    color: #fff;
-    text-decoration: none;
-  }
-
-  .message-listing-context strong {
-    color: #fff;
-    font-size: 12px;
-    line-height: 16px;
-    font-weight: 900;
-  }
-
-  .message-listing-context img {
-    max-width: 92px;
-    max-height: 126px;
-    width: auto;
-    height: auto;
-    border-radius: 8px;
-    object-fit: contain;
-    background: #030304;
+  .message-bubble.seller {
+    justify-self: start;
   }
 
   .message-bubble p {
@@ -1419,6 +2156,18 @@ const pageStyles = `
     font-weight: 800;
   }
 
+  .quick-reply-row {
+    border: 1px solid rgba(201,205,211,0.1);
+    border-radius: 12px;
+    background: rgba(8,8,10,0.5);
+    padding: 10px;
+  }
+
+  .quick-reply-row button {
+    min-height: 30px;
+    color: #C9CDD3;
+  }
+
   .composer {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -1429,22 +2178,28 @@ const pageStyles = `
 
   .composer input {
     height: 42px;
-    border: 1px solid #24242a;
-    border-radius: 10px;
-    background: #08080a;
-    padding: 0 12px;
   }
 
   .composer button {
     height: 42px;
   }
 
-  .composer input {
-    border: 1px solid #24242a;
-    border-radius: 10px;
-    background: #08080a;
-    padding: 0 12px;
-    min-height: 42px;
+  .empty-state {
+    border: 1px dashed rgba(201,205,211,0.2);
+    border-radius: 12px;
+    background: rgba(8,8,10,0.45);
+    min-height: 260px;
+    padding: 26px;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    align-content: center;
+    gap: 10px;
+  }
+
+  .empty-state.small {
+    min-height: 140px;
+    padding: 18px;
   }
 
   @media (max-width: 1100px) {
@@ -1452,14 +2207,46 @@ const pageStyles = `
       width: calc(100vw - 32px);
     }
 
-    .messages-layout,
-    .card-preview,
-    .offer-card {
+    .message-summary-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .messages-workspace,
+    .timeline-card-preview,
+    .context-action-card {
       grid-template-columns: 1fr;
     }
 
-    .thread-panel {
-      grid-template-rows: auto;
+    .conversation-rows {
+      max-height: 380px;
+    }
+
+    .thread-header {
+      flex-direction: column;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .messages-hero {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .message-summary-row {
+      grid-template-columns: 1fr;
+    }
+
+    .conversation-rows button {
+      grid-template-columns: 38px minmax(0, 1fr);
+    }
+
+    .message-bubble {
+      max-width: 92%;
+    }
+
+    .composer,
+    .counter-row {
+      grid-template-columns: 1fr;
     }
   }
 `;

@@ -3,8 +3,10 @@ import {
   createServiceSupabaseClient,
   getCurrentUser,
 } from "../../auctions/_shared";
+import { getWatchCountByListingId } from "../../../lib/watchCounts";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -48,6 +50,9 @@ export async function GET(request: Request, context: RouteContext) {
         cert_number,
         condition,
         price,
+        minimum_offer_amount,
+        offers_enabled,
+        offer_acceptance,
         status,
         collection_note,
         is_collection_card,
@@ -124,7 +129,8 @@ export async function GET(request: Request, context: RouteContext) {
   const isPublicListing =
     listingStatus === "active" ||
     listingStatus === "sold" ||
-    (listingStatus === "collection" && Boolean(listing.is_public_collection));
+    listingStatus === "collection" ||
+    Boolean(listing.is_public_collection);
   const isDirectParticipant =
     Boolean(currentUserId) &&
     (listing.seller_id === currentUserId || listing.auction_winner_id === currentUserId);
@@ -199,9 +205,27 @@ export async function GET(request: Request, context: RouteContext) {
     }
   }
 
+  let watchCount = 0;
+
+  try {
+    watchCount = await getWatchCountByListingId(supabase, listing.id);
+  } catch (watchCountError) {
+    console.warn("Card detail API watch count unavailable:", {
+      error: watchCountError,
+      errorMessage:
+        watchCountError instanceof Error
+          ? watchCountError.message
+          : String(watchCountError),
+      listingId,
+    });
+  }
+
   return NextResponse.json({
     listing: data,
     profile,
     order,
+    publicSignals: {
+      watchCount,
+    },
   });
 }

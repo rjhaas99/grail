@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import CollectorLevelBadge from "./CollectorLevelBadge";
 import GrailPassBadge from "./GrailPassBadge";
 import GrailPassPresenceCard from "./GrailPassPresenceCard";
 import {
@@ -50,6 +51,12 @@ function getInitials(name: string) {
   return initials || "G";
 }
 
+function getLevelFromLabel(value?: string | null) {
+  const match = value?.match(/\bLevel\s+(\d{1,2})\b/i);
+
+  return match ? Number(match[1]) : null;
+}
+
 export default function CollectorIdentityCard({
   name,
   handle,
@@ -71,6 +78,7 @@ export default function CollectorIdentityCard({
   const safeBadges = badges.filter((badge) => badge.label.trim());
   const safeMetrics = metrics.filter((metric) => metric.label.trim() && metric.value.trim());
   const grailPassPerks = resolveGrailPassPerks(grailPass);
+  const parsedLevel = getLevelFromLabel(levelLabel);
   const hasPremiumCollectorCard = hasGrailPassPerk(
     grailPassPerks,
     "premium_collector_card",
@@ -94,7 +102,17 @@ export default function CollectorIdentityCard({
         </div>
 
         <div className="collector-identity-story">
-          {rankTitle ? <strong>{rankTitle}</strong> : null}
+          {rankTitle || parsedLevel ? (
+            <strong className="collector-identity-rank">
+              <CollectorLevelBadge
+                level={parsedLevel}
+                rank={rankTitle}
+                size="sm"
+                hideWhenUnavailable
+              />
+              {rankTitle || "Collector Rank"}
+            </strong>
+          ) : null}
           {levelLabel ? <span>{levelLabel}</span> : null}
           {collectorSince ? <span>Collector since {collectorSince}</span> : null}
           {marketplaceEvent && marketplaceEvent !== "None" ? (
@@ -273,6 +291,10 @@ const identityStyles = `
   }
   .collector-identity-story span {
     color: #C9CDD3;
+  }
+  .collector-identity-story strong.collector-identity-rank {
+    gap: 7px;
+    padding-left: 4px;
   }
   .collector-identity-narrative {
     max-width: 720px;

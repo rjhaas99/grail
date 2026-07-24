@@ -29,6 +29,7 @@ import { supabase } from "../../lib/supabase";
 
 type CardType = "Raw" | "Graded";
 type ListingMode = "sale" | "collection";
+type OfferAcceptance = "manual" | "auto_accept_at_minimum";
 type SaleFormat = "fixed" | "auction";
 type StatusType = "success" | "error" | "info";
 type ImageType =
@@ -69,7 +70,12 @@ type ExistingListingRow = {
   cert_number: string | null;
   condition: string | null;
   price: number | null;
+  minimum_offer_amount?: number | null;
+  offers_enabled?: boolean | null;
+  offer_acceptance?: string | null;
   status: string | null;
+  is_collection_card?: boolean | null;
+  is_public_collection?: boolean | null;
   collection_note?: string | null;
   sale_format?: string | null;
   auction_status?: string | null;
@@ -136,8 +142,11 @@ type ListingDraft = {
   sportsCardsProSourceUrl?: string;
   sportsCardsProFetchedAt?: string;
   condition: string;
+  listingMode?: ListingMode;
+  saleFormat?: SaleFormat;
   askingPrice: string;
   minimumOffer: string;
+  offerAcceptance?: OfferAcceptance;
   marketValue: string;
   shippingProfileId?: ShippingProfileId;
   imagePreview: string;
@@ -645,6 +654,8 @@ export default function ListCardPage() {
   const [condition, setCondition] = useState("Near Mint");
   const [askingPrice, setAskingPrice] = useState("1240");
   const [minimumOffer, setMinimumOffer] = useState("1120");
+  const [offerAcceptance, setOfferAcceptance] =
+    useState<OfferAcceptance>("manual");
   const [marketValue, setMarketValue] = useState("1320");
   const [shippingProfileId, setShippingProfileId] =
     useState<ShippingProfileId>(defaultShippingProfileId);
@@ -854,8 +865,15 @@ export default function ListCardPage() {
           : null,
       );
       setCondition(draft.condition);
+      setListingMode(draft.listingMode || (isCollectionModeParam ? "collection" : "sale"));
+      setSaleFormat(draft.saleFormat === "auction" ? "auction" : "fixed");
       setAskingPrice(draft.askingPrice);
       setMinimumOffer(draft.minimumOffer);
+      setOfferAcceptance(
+        draft.offerAcceptance === "auto_accept_at_minimum"
+          ? "auto_accept_at_minimum"
+          : "manual",
+      );
       setMarketValue(draft.marketValue);
       setShippingProfileId(getShippingProfile(draft.shippingProfileId).id);
       setSportsCardsProValue(
@@ -942,7 +960,12 @@ export default function ListCardPage() {
               cert_number,
               condition,
               price,
+              minimum_offer_amount,
+              offers_enabled,
+              offer_acceptance,
               status,
+              is_collection_card,
+              is_public_collection,
               collection_note,
               sale_format,
               auction_status,
@@ -1000,6 +1023,11 @@ export default function ListCardPage() {
 
         setCategory(listing.sport || "Sports");
         setCardType(nextCardType);
+        setListingMode(
+          listing.status?.toLowerCase() === "collection" || listing.is_collection_card
+            ? "collection"
+            : "sale",
+        );
         setSaleFormat(listing.sale_format === "auction" ? "auction" : "fixed");
         setAuctionStartingBid(
           listing.auction_starting_bid ? String(listing.auction_starting_bid) : "0.99",
@@ -1041,7 +1069,14 @@ export default function ListCardPage() {
         );
         setCondition(listing.condition || "Near Mint");
         setAskingPrice(listing.price ? String(listing.price) : "");
-        setMinimumOffer("");
+        setMinimumOffer(
+          listing.minimum_offer_amount ? String(listing.minimum_offer_amount) : "",
+        );
+        setOfferAcceptance(
+          listing.offer_acceptance === "auto_accept_at_minimum"
+            ? "auto_accept_at_minimum"
+            : "manual",
+        );
         setMarketValue(
           listing.sportscardspro_estimated_value
             ? String(listing.sportscardspro_estimated_value)
@@ -1745,8 +1780,11 @@ export default function ListCardPage() {
       sportsCardsProSourceUrl: sportsCardsProValue?.sourceUrl || "",
       sportsCardsProFetchedAt: sportsCardsProValue?.fetchedAt || "",
       condition,
+      listingMode,
+      saleFormat,
       askingPrice,
       minimumOffer,
+      offerAcceptance,
       marketValue,
       shippingProfileId,
       imagePreview,
@@ -1807,6 +1845,15 @@ export default function ListCardPage() {
       (!askingPrice || Number.isNaN(priceNumber) || priceNumber <= 0)
     ) {
       return "Asking price must be a positive number.";
+    }
+
+    if (
+      isCollectionMode &&
+      (!minimumOffer.trim() ||
+        !Number.isFinite(minimumOfferNumber) ||
+        minimumOfferNumber <= 0)
+    ) {
+      return "Minimum offer is required for collection-only cards.";
     }
 
     if (minimumOffer.trim() && (!Number.isFinite(minimumOfferNumber) || minimumOfferNumber <= 0)) {
@@ -2210,6 +2257,9 @@ export default function ListCardPage() {
       cert_number: cardType === "Graded" ? clean(cleanCert) : null,
       condition: cardType === "Raw" ? clean(condition) : null,
       price: isCollectionMode || isAuctionMode ? null : Number(askingPrice),
+      minimum_offer_amount: minimumOffer.trim() ? Number(minimumOffer) : null,
+      offers_enabled: true,
+      offer_acceptance: offerAcceptance,
       sale_format: isAuctionMode ? "auction" : "fixed",
       auction_status: isAuctionMode
         ? auctionReserveEnabled
@@ -2678,6 +2728,7 @@ export default function ListCardPage() {
     setCondition("Near Mint");
     setAskingPrice("");
     setMinimumOffer("");
+    setOfferAcceptance("manual");
     setMarketValue("");
     setShippingProfileId(defaultShippingProfileId);
     setSportsCardsProCandidates([]);
@@ -2705,7 +2756,13 @@ export default function ListCardPage() {
 
         <section className="page-heading">
           <span>Seller Tools</span>
-          <h1>{isEditMode ? "Edit Listing" : "List a Card"}</h1>
+          <h1>
+            {isEditMode
+              ? "Edit Listing"
+              : isCollectionMode
+                ? "Add Card To Collection"
+                : "List a Card"}
+          </h1>
           <p>
             {isEditMode
               ? "Update your GRAIL listing details, price, and listing photos."
@@ -3104,6 +3161,26 @@ export default function ListCardPage() {
 
             <section className="panel form-section">
               <h2>Pricing</h2>
+              <div className="sale-format-toggle" aria-label="Card availability">
+                <button
+                  type="button"
+                  className={listingMode === "sale" ? "active" : ""}
+                  onClick={() => setListingMode("sale")}
+                >
+                  List For Sale
+                </button>
+                <button
+                  type="button"
+                  className={listingMode === "collection" ? "active" : ""}
+                  onClick={() => {
+                    setListingMode("collection");
+                    setSaleFormat("fixed");
+                    setAskingPrice("");
+                  }}
+                >
+                  Collection Only
+                </button>
+              </div>
               {!isCollectionMode ? (
                 <div className="sale-format-toggle" aria-label="Sale format">
                   <button
@@ -3124,14 +3201,20 @@ export default function ListCardPage() {
               ) : null}
               <div className="field-grid three">
                 <label>
-                  <span>{isAuctionMode ? "Starting bid" : "Asking price"}</span>
+                  <span>
+                    {isCollectionMode
+                      ? "Sale price"
+                      : isAuctionMode
+                        ? "Starting bid"
+                        : "Asking price"}
+                  </span>
                   <input
                     value={isAuctionMode ? auctionStartingBid : askingPrice}
                     inputMode="decimal"
                     disabled={isCollectionMode}
                     placeholder={
                       isCollectionMode
-                        ? "In Collection"
+                        ? "Not required"
                         : isAuctionMode
                           ? "0.99"
                           : undefined
@@ -3153,7 +3236,7 @@ export default function ListCardPage() {
                   <input
                     value={minimumOffer}
                     inputMode="decimal"
-                    placeholder={isCollectionMode ? "Optional minimum offer" : undefined}
+                    placeholder={isCollectionMode ? "Required minimum offer" : undefined}
                     onChange={(event) => {
                       markUserControlledField("minimumOffer");
                       setMinimumOffer(event.target.value);
@@ -3174,6 +3257,33 @@ export default function ListCardPage() {
                   {renderAssistantFieldNote("marketValue")}
                 </label>
               </div>
+              {isCollectionMode ? (
+                <div className="offer-settings-panel">
+                  <span>Offer acceptance settings</span>
+                  <div className="sale-format-toggle" aria-label="Offer acceptance settings">
+                    <button
+                      type="button"
+                      className={offerAcceptance === "manual" ? "active" : ""}
+                      onClick={() => setOfferAcceptance("manual")}
+                    >
+                      Review manually
+                    </button>
+                    <button
+                      type="button"
+                      className={
+                        offerAcceptance === "auto_accept_at_minimum" ? "active" : ""
+                      }
+                      onClick={() => setOfferAcceptance("auto_accept_at_minimum")}
+                    >
+                      Auto-accept at minimum
+                    </button>
+                  </div>
+                  <p>
+                    Collection-only cards remain discoverable and can receive
+                    offers, but cannot be purchased instantly.
+                  </p>
+                </div>
+              ) : null}
               {isAuctionMode ? (
                 <div className="auction-box">
                   <div className="field-grid three">
@@ -3742,6 +3852,30 @@ const pageStyles = `
   .field-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .field-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .shipping-profile-list { display: grid; gap: 10px; }
+  .offer-settings-panel {
+    margin-top: 12px;
+    border: 1px solid rgba(201,205,211,0.16);
+    border-radius: 12px;
+    background: rgba(201,205,211,0.045);
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+  }
+  .offer-settings-panel > span {
+    color: #C9CDD3;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .offer-settings-panel p {
+    margin: 0;
+    color: #a1a1aa;
+    font-size: 12px;
+    line-height: 17px;
+    font-weight: 800;
+  }
   .shipping-profile-option { border: 1px solid rgba(201,205,211,0.16); border-radius: 12px; background: rgba(201,205,211,0.045); padding: 12px; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
   .shipping-profile-option.active { border-color: rgba(231,222,208,0.36); background: rgba(231,222,208,0.07); }
   .shipping-profile-option.disabled { opacity: 0.76; cursor: not-allowed; }

@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import AdminLayout from "../AdminLayout";
+import CollectorLevelBadge from "../../components/CollectorLevelBadge";
 import Header from "../../components/Header";
 import {
   getAdminWalletVerb,
@@ -362,7 +363,12 @@ export default function AdminWalletPage() {
                     <>
                       <strong>{selectedWallet.userName}</strong>
                       <em>{getDisplayHandle(selectedWallet)}</em>
-                      <small>
+                      <small className="wallet-rank-line">
+                        <CollectorLevelBadge
+                          level={selectedWallet.level}
+                          rank={selectedWallet.rankTitle}
+                          size="xs"
+                        />
                         Level {selectedWallet.level} {selectedWallet.rankTitle} -{" "}
                         {formatCurrency(selectedWallet.availableCredit)} available
                       </small>
@@ -486,10 +492,17 @@ export default function AdminWalletPage() {
                           setHistoryUserFilter(wallet.userId);
                         }}
                       >
-                        <div>
-                          <strong>{wallet.userName}</strong>
-                          <span>{getDisplayHandle(wallet)}</span>
-                          <small>Level {wallet.level} {wallet.rankTitle}</small>
+                          <div>
+                            <strong>{wallet.userName}</strong>
+                            <span>{getDisplayHandle(wallet)}</span>
+                          <small className="wallet-rank-line">
+                            <CollectorLevelBadge
+                              level={wallet.level}
+                              rank={wallet.rankTitle}
+                              size="xs"
+                            />
+                            Level {wallet.level} {wallet.rankTitle}
+                          </small>
                         </div>
                         <div>
                           <strong>{formatCurrency(wallet.availableCredit)}</strong>
@@ -707,6 +720,12 @@ const pageStyles = `
     line-height: 15px;
     font-style: normal;
     font-weight: 800;
+  }
+  .selected-user small.wallet-rank-line,
+  .wallet-row small.wallet-rank-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
   form,
   .wallet-list,

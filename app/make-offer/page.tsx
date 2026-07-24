@@ -41,7 +41,7 @@ export default function MakeOfferPage() {
         .from("listings")
         .select("id, seller_id, title, price, status")
         .eq("id", listingId)
-        .eq("status", "active")
+        .in("status", ["active", "collection"])
         .maybeSingle();
 
       if (!active) return;

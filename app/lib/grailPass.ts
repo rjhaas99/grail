@@ -16,11 +16,11 @@ export type GrailPassMembershipStatus =
   | "expired";
 
 export type GrailPassBenefitCategory =
-  | "wallet"
+  | "rewards"
   | "xp"
-  | "marketplace"
+  | "events"
   | "identity"
-  | "analytics"
+  | "convenience"
   | "support"
   | "access";
 
@@ -33,17 +33,19 @@ export type GrailPassBenefit = {
 };
 
 export type GrailPassPerkKey =
+  | "reward_boost"
+  | "enhanced_events"
   | "premium_collector_card"
   | "premium_profile_theme"
   | "animated_profile_frame"
   | "seasonal_cosmetics"
-  | "featured_listing_credit"
-  | "advanced_collection_analytics"
+  | "collection_themes"
+  | "member_layouts"
   | "priority_support"
-  | "monthly_credit"
-  | "wallet_multiplier"
   | "xp_multiplier"
-  | "early_access";
+  | "early_access"
+  | "saved_listing_templates"
+  | "watchlist_organization";
 
 export type GrailPassPerkAvailability = "preview" | "coming_soon" | "available";
 
@@ -83,36 +85,28 @@ export type GrailPassMembership = {
 export type GrailPassCollectorMomentKind =
   | "pass_activated"
   | "membership_anniversary"
-  | "monthly_credit_granted"
   | "season_rewards";
 
 export const grailPassFutureBenefits: GrailPassBenefit[] = [
   {
-    key: "wallet_multipliers",
-    label: "Wallet Multipliers",
-    description: "Future configurable GRAIL Credit multiplier support.",
-    category: "wallet",
-    configured: false,
+    key: "reward_boost",
+    label: "Reward Boost",
+    description: "Additional buyer and seller reward percentages when configured.",
+    category: "rewards",
+    configured: true,
   },
   {
     key: "xp_multipliers",
-    label: "XP Multipliers",
-    description: "Future configurable progression multiplier support.",
+    label: "Event XP Multipliers",
+    description: "Enhanced XP during selected marketplace events when enabled.",
     category: "xp",
     configured: false,
   },
   {
-    key: "monthly_credit",
-    label: "Monthly GRAIL Credit",
-    description: "Monthly GRAIL Credit deposits recorded through the existing wallet ledger when configured.",
-    category: "wallet",
-    configured: true,
-  },
-  {
-    key: "featured_listing_credits",
-    label: "Featured Listing Credits",
-    description: "Future marketplace promotion credits.",
-    category: "marketplace",
+    key: "enhanced_events",
+    label: "Enhanced Events",
+    description: "Member event access through the existing Rewards and Collector Moments systems.",
+    category: "events",
     configured: false,
   },
   {
@@ -137,10 +131,10 @@ export const grailPassFutureBenefits: GrailPassBenefit[] = [
     configured: false,
   },
   {
-    key: "advanced_analytics",
-    label: "Advanced Analytics",
-    description: "Future collector and seller analytics.",
-    category: "analytics",
+    key: "member_layouts",
+    label: "Member Collection Layouts",
+    description: "Future collection presentation options for member identity.",
+    category: "identity",
     configured: false,
   },
   {
@@ -160,6 +154,22 @@ export const grailPassFutureBenefits: GrailPassBenefit[] = [
 ];
 
 export const grailPassPerkCatalog: Record<GrailPassPerkKey, GrailPassPerk> = {
+  reward_boost: {
+    key: "reward_boost",
+    label: "Reward Boost",
+    description: "Additional buyer and seller reward percentages when configured.",
+    category: "rewards",
+    availability: "available",
+    configured: true,
+  },
+  enhanced_events: {
+    key: "enhanced_events",
+    label: "Enhanced Events",
+    description: "Pass-aware event benefits through the existing Rewards and Collector Moments systems.",
+    category: "events",
+    availability: "coming_soon",
+    configured: false,
+  },
   premium_collector_card: {
     key: "premium_collector_card",
     label: "Premium Collector Card",
@@ -192,19 +202,19 @@ export const grailPassPerkCatalog: Record<GrailPassPerkKey, GrailPassPerk> = {
     availability: "coming_soon",
     configured: false,
   },
-  featured_listing_credit: {
-    key: "featured_listing_credit",
-    label: "Featured Listing Credit",
-    description: "Future marketplace promotion credit support.",
-    category: "marketplace",
+  collection_themes: {
+    key: "collection_themes",
+    label: "Premium Collection Themes",
+    description: "Future collection theme options for member identity.",
+    category: "identity",
     availability: "coming_soon",
     configured: false,
   },
-  advanced_collection_analytics: {
-    key: "advanced_collection_analytics",
-    label: "Advanced Collection Analytics",
-    description: "Future collector and seller analytics.",
-    category: "analytics",
+  member_layouts: {
+    key: "member_layouts",
+    label: "Member Collection Layouts",
+    description: "Future collection layout options for members.",
+    category: "identity",
     availability: "coming_soon",
     configured: false,
   },
@@ -213,22 +223,6 @@ export const grailPassPerkCatalog: Record<GrailPassPerkKey, GrailPassPerk> = {
     label: "Priority Support",
     description: "Future support queue presentation.",
     category: "support",
-    availability: "coming_soon",
-    configured: false,
-  },
-  monthly_credit: {
-    key: "monthly_credit",
-    label: "Monthly GRAIL Credit",
-    description: "Monthly GRAIL Credit deposits recorded through the existing wallet ledger when configured.",
-    category: "wallet",
-    availability: "available",
-    configured: true,
-  },
-  wallet_multiplier: {
-    key: "wallet_multiplier",
-    label: "Wallet Multiplier",
-    description: "Future configurable GRAIL Credit multiplier support.",
-    category: "wallet",
     availability: "coming_soon",
     configured: false,
   },
@@ -248,6 +242,22 @@ export const grailPassPerkCatalog: Record<GrailPassPerkKey, GrailPassPerk> = {
     availability: "coming_soon",
     configured: false,
   },
+  saved_listing_templates: {
+    key: "saved_listing_templates",
+    label: "Saved Listing Templates",
+    description: "Future listing convenience tools that do not change marketplace placement.",
+    category: "convenience",
+    availability: "coming_soon",
+    configured: false,
+  },
+  watchlist_organization: {
+    key: "watchlist_organization",
+    label: "Expanded Watchlist Organization",
+    description: "Future watchlist organization tools for collectors.",
+    category: "convenience",
+    availability: "coming_soon",
+    configured: false,
+  },
 };
 
 export const grailPassMembershipPerkMap: Record<
@@ -256,53 +266,55 @@ export const grailPassMembershipPerkMap: Record<
 > = {
   none: [],
   monthly: [
+    "reward_boost",
     "premium_collector_card",
     "premium_profile_theme",
-    "featured_listing_credit",
     "priority_support",
-    "monthly_credit",
-    "wallet_multiplier",
     "xp_multiplier",
     "early_access",
   ],
   annual: [
+    "reward_boost",
     "premium_collector_card",
     "premium_profile_theme",
     "animated_profile_frame",
     "seasonal_cosmetics",
-    "featured_listing_credit",
-    "advanced_collection_analytics",
+    "collection_themes",
+    "member_layouts",
     "priority_support",
-    "monthly_credit",
-    "wallet_multiplier",
     "xp_multiplier",
     "early_access",
+    "saved_listing_templates",
+    "watchlist_organization",
   ],
   founder: [
+    "reward_boost",
     "premium_collector_card",
     "premium_profile_theme",
     "animated_profile_frame",
     "seasonal_cosmetics",
-    "featured_listing_credit",
-    "advanced_collection_analytics",
+    "collection_themes",
+    "member_layouts",
     "priority_support",
-    "monthly_credit",
-    "wallet_multiplier",
     "xp_multiplier",
     "early_access",
+    "saved_listing_templates",
+    "watchlist_organization",
   ],
   future: [
+    "reward_boost",
+    "enhanced_events",
     "premium_collector_card",
     "premium_profile_theme",
     "animated_profile_frame",
     "seasonal_cosmetics",
-    "featured_listing_credit",
-    "advanced_collection_analytics",
+    "collection_themes",
+    "member_layouts",
     "priority_support",
-    "monthly_credit",
-    "wallet_multiplier",
     "xp_multiplier",
     "early_access",
+    "saved_listing_templates",
+    "watchlist_organization",
   ],
 };
 
@@ -327,7 +339,7 @@ export const grailPassMembershipCatalog: Record<
     status: "active",
     displayName: "Monthly GRAIL Pass",
     badgeLabel: "GRAIL Pass",
-    description: "Monthly membership framework for future premium collector benefits.",
+    description: "Monthly membership for reward boosts, events, and premium collector identity.",
     benefits: grailPassFutureBenefits,
   },
   annual: {
@@ -335,7 +347,7 @@ export const grailPassMembershipCatalog: Record<
     status: "active",
     displayName: "Annual GRAIL Pass",
     badgeLabel: "GRAIL Pass Annual",
-    description: "Annual membership framework for future premium collector benefits.",
+    description: "Annual membership for reward boosts, events, and premium collector identity.",
     benefits: grailPassFutureBenefits,
   },
   founder: {
@@ -343,7 +355,7 @@ export const grailPassMembershipCatalog: Record<
     status: "active",
     displayName: "Founder GRAIL Pass",
     badgeLabel: "Founder Pass",
-    description: "Founder membership framework for future premium collector benefits.",
+    description: "Founder membership for premium collector identity and future event recognition.",
     benefits: grailPassFutureBenefits,
   },
   future: {
@@ -359,7 +371,6 @@ export const grailPassMembershipCatalog: Record<
 export const grailPassCollectorMomentCompatibility: GrailPassCollectorMomentKind[] = [
   "pass_activated",
   "membership_anniversary",
-  "monthly_credit_granted",
   "season_rewards",
 ];
 
